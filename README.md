@@ -2,8 +2,10 @@
 
 Work in progress. Do not use :-)
 
-<div style="text-align: right"><a href="https://github.com/hippke/tls/blob/master/LICENSE" rel="license">![Foo](https://img.shields.io/badge/license-MIT-blue.svg)</a>
 Badges: PIP, Python3, arxiv</div>
+
+[![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
+
 
 
 ### An optimized algorithm to search for transits of small exoplanets in stellar light curves
