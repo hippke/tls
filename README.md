@@ -1,10 +1,10 @@
-# TLS: Transit Least Squares
+# TLS: Transit Least Squares [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
+
 
 Work in progress. Do not use :-)
 
 Badges: PIP, Python3, arxiv</div>
 
-[![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
 
 
 
