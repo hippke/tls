@@ -1,18 +1,13 @@
 # TLS: Transit Least Squares 
+### An optimized algorithm to search for transits of small exoplanets in stellar light curves
 
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
 [![Image](https://img.shields.io/badge/Python-3.5%20%7C%203.6%20%7C%203.7-blue.svg)](https://pypi.org/project/tls-package/ "PyPI")
-
-
+Add badge: ADS, arxiv
 
 Work in progress. Do not use :-)
 
-Badges: PIP, Python3, arxiv</div>
 
-
-
-
-### An optimized algorithm to search for transits of small exoplanets in stellar light curves
 
 
 ## Motivation
@@ -40,8 +35,4 @@ Please cite [Hippke & Heller (2018)](http://www.) if you find this code useful i
 }
 ```
 
-## License
-
 Copyright 2018 Michael Hippke & René Heller.
-
-gott is free software made available under the [MIT License](https://github.com/hippke/tls/blob/master/LICENSE).
