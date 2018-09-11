@@ -13,13 +13,13 @@ Badges: PIP, Python3, arxiv</div>
 Here: text what this can do.
 
 ## Tutorial
-Open the [iPython tutorial](http://github.com) for a quick introduction.
+Open the [iPython tutorial](https://github.com/hippke/tls/blob/master/tls_tutorial.ipynb) for a quick introduction.
 
 ## Installation
 `pip install tls-package`
 
 ## Attribution
-Please cite [Hippke & Heller (2018)](http://github.com) if you find this code useful in your research. The BibTeX entry for the paper is:
+Please cite [Hippke & Heller (2018)](http://www.) if you find this code useful in your research. The BibTeX entry for the paper is:
 
 ```
 @article{abc,
@@ -38,4 +38,4 @@ Please cite [Hippke & Heller (2018)](http://github.com) if you find this code us
 
 Copyright 2018 Michael Hippke & René Heller.
 
-gott is free software made available under the [MIT License](https://github.com/hippke/gott/blob/master/LICENSE).
+gott is free software made available under the [MIT License](https://github.com/hippke/tls/blob/master/LICENSE).
