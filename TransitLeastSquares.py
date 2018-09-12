@@ -21,6 +21,7 @@ import math
 # batman-package for transit light curves
 # https://www.cfa.harvard.edu/~lkreidberg/batman/
 import batman
+import scipy.interpolate
 from tqdm import tqdm
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees
@@ -351,7 +352,7 @@ class TransitLeastSquares(object):
         return lc_cache, lc_cache_overview
 
 
-    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview, objective=None):
+    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview, objective='snr'):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
 
@@ -425,7 +426,7 @@ class TransitLeastSquares(object):
 
 
     def _perform_search(self, periods, t, y, dy, depths, durations, 
-            limb_darkening=0.5, impact=0, objective=None):
+            limb_darkening=0.5, impact=0, objective='snr'):
         """Multicore distributor of search to search through all 'periods' """
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(y))
@@ -488,7 +489,7 @@ class TransitLeastSquares(object):
         test_statistic_rolls, test_statistic_rows, lc_cache_overview
 
 
-    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0, objective=None):
+    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0, objective='snr'):
         """Compute the periodogram for a set user-defined parameters
         Parameters:
         periods : array of periods where the power should be computed
@@ -545,7 +546,7 @@ class TransitLeastSquares(object):
             stop=numpy.min(self.t) + best_period,
             num=samples_per_period)
 
-        
+
         # Fold to all T0s so that the transit is expected at phase = 0
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
         if maxwidth_in_samples % 2 != 0:
@@ -640,6 +641,7 @@ class TransitLeastSquares(object):
             test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
             # Squash to range 0..1 with peak at 1
             test_statistic_residuals = 1/test_statistic_residuals - 1
+            chi2red = test_statistic_residuals
             signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
         else:
             signal_residue = test_statistic_residuals
@@ -704,7 +706,8 @@ class TransitLeastSquares(object):
             power, test_statistic_rolls, test_statistic_rows, \
             lc_cache_overview, best_period, best_T0, best_row, best_power, \
             SDE, test_statistic_rolls, best_depth, best_duration,\
-            transit_times, transit_duration_in_days, maxwidth_in_samples, folded_model, model_flux)
+            transit_times, transit_duration_in_days, maxwidth_in_samples, \
+            folded_model, model_flux, chi2red)
 
 
     def autopower(self):
@@ -734,7 +737,7 @@ class TransitLeastSquaresResults(dict):
                 "best_period", "best_T0", "best_row", "best_power", \
                 "SDE", "rolls", "best_depth", \
                 "best_duration", "transit_times", "transit_duration_in_days", \
-                "maxwidth_in_samples", "folded_model", "model_flux"), args))
+                "maxwidth_in_samples", "folded_model", "model_flux", "chi2red"), args))
 
     def __getattr__(self, name):
         try:
