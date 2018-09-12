@@ -8,7 +8,7 @@ if __name__ == '__main__':
     file = 'hlsp_everest_k2_llc_201367065-c01_kepler_v2.0_lc.fits'
     url = "https://archive.stsci.edu/hlsps/everest/v2/c01/201300000/67065/"\
         "hlsp_everest_k2_llc_201367065-c01_kepler_v2.0_lc.fits"
-    with fits.open(url) as hdus:
+    with fits.open(file) as hdus:
         data = hdus[1].data
         t = data["TIME"]
         y = data["FLUX"]
@@ -35,7 +35,6 @@ if __name__ == '__main__':
     trend = medfilt(y, 45)
     y_filt = y - trend + 1
     dy = numpy.full(numpy.size(y_filt), numpy.std(y_filt))  #numpy.std(y_filt))  # 
-    print(numpy.std(y_filt), dy[4])
 
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(6, 6))
     ax = axes[0]
@@ -55,16 +54,18 @@ if __name__ == '__main__':
         R_star=1,
         M_star=1,
         time_span=(max(t) - min(t)),
-        period_min=0,
-        period_max=99,
-        oversampling_factor=5)
+        period_min=9.9,
+        period_max=10.3,
+        oversampling_factor=2)
 
     # Define grids of transit depths and widths
     depths = numpy.geomspace(50*10**-6, 0.01, 50)
     durations = numpy.geomspace(1.01/numpy.size(t), 0.02, 50)
 
     model = TransitLeastSquares(t, y_filt, dy)
-    results = model.power(periods, durations, depths, limb_darkening=0.5)
+    results = model.power(periods, durations, depths, limb_darkening=0.5, 
+        objective='snr') # likelihood  # snr
+    #results = model.autopower()
 
     print('Period', format(results.best_period, '.5f'), 'd')
     print(len(results.transit_times), 'transit times in time series:', \
@@ -82,25 +83,10 @@ if __name__ == '__main__':
     for n in range(2, 10):
         ax.axvline(n*results.best_period, alpha=0.4, lw=1, linestyle="dashed")
         ax.axvline(results.best_period / n, alpha=0.4, lw=1, linestyle="dashed")
-    plt.plot(results.periods, 1/results.power - 1, color='black', lw=0.5)
+    plt.plot(results.periods, results.power, color='black', lw=0.5)
     plt.ylabel(r'$1 / (\chi^2_{\rm red}) - 1$')
     plt.xlabel('Period (days)')
     plt.savefig('fig_test_stat_raw.pdf', bbox_inches='tight')
-
-    # Folded model
-    phases = fold(t, results.best_period, T0=results.best_T0+ results.best_period/2)
-    sort_index = numpy.argsort(phases)
-    phases = phases[sort_index]
-    flux = y_filt[sort_index]
-    plt.figure(figsize=(4.5, 4.5 / 1.5))
-    plt.scatter(phases, flux, color='blue', s=10, alpha=0.5, zorder=2)
-    plt.plot(numpy.linspace(0, 1, numpy.size(results.folded_model)), 
-        results.folded_model, color='red', zorder=1)
-    plt.ylim(0.998, 1.00025)
-    plt.xlim(0.48, 0.52)
-    plt.xlabel('Phase')
-    plt.ylabel('Relative flux (ppm)')
-    plt.savefig('fig_test_fold.pdf', bbox_inches='tight')
 
     # Plot the in-transit points using 
     in_transit = model.transit_mask(
@@ -117,3 +103,18 @@ if __name__ == '__main__':
     plt.xlabel('Time (days)')
     plt.ylabel('Relative flux (ppm)')
     plt.savefig('fig_test_intransit.pdf', bbox_inches='tight')
+
+    # Folded model
+    phases = fold(t, results.best_period, T0=results.best_T0+ results.best_period/2)
+    sort_index = numpy.argsort(phases)
+    phases = phases[sort_index]
+    flux = y_filt[sort_index]
+    plt.figure(figsize=(4.5, 4.5 / 1.5))
+    plt.scatter(phases, flux, color='blue', s=10, alpha=0.5, zorder=2)
+    plt.plot(numpy.linspace(0, 1, numpy.size(results.folded_model)), 
+        results.folded_model, color='red', zorder=1)
+    plt.ylim(0.998, 1.00025)
+    #plt.xlim(0.48, 0.52)
+    plt.xlabel('Phase')
+    plt.ylabel('Relative flux (ppm)')
+    plt.savefig('fig_test_fold.pdf', bbox_inches='tight')
