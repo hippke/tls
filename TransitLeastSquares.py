@@ -45,7 +45,7 @@ def out_of_transit_residuals(data, width_signal, dy):
 # As periods are searched in parallel, the double parallel option for numba
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.njit(fastmath=True, parallel=False, cache=True)  
-def in_transit_residuals(data, signal, dy, out_of_transit_residuals):
+def all_transit_residuals(data, signal, dy, out_of_transit_residuals):
     width_signal = signal.shape[0]
     width_data = data.shape[0]
     chi2 = numpy.zeros(width_data - width_signal + 1)
@@ -58,13 +58,49 @@ def in_transit_residuals(data, signal, dy, out_of_transit_residuals):
     return chi2
 
 
+@numba.njit(fastmath=True, parallel=False, cache=True)  
+def ll_out_of_transit_residuals(data, width_signal, dy):
+    width_data = len(data)
+    residuals = numpy.zeros(width_data - width_signal + 1)
+    for i in numba.prange(width_data - width_signal + 1):
+        part1 = 0
+        part2 = 0
+        start_transit = i
+        end_transit = i + width_signal
+        for j in numba.prange(width_data - width_signal + 1):
+            if j < start_transit or j > end_transit:
+                # dy has already been inverted and squared (for speed)
+                part1 = part1 + data[j] * dy[j]
+                part2 = part2 + (1 * dy[j])
+        residuals[i] = part1 / part2
+    return residuals
 
+
+@numba.njit(fastmath=True, parallel=False, cache=True)  
+def ll_all_transit_residuals(data, signal, dy, out_of_transit_residuals):
+    width_signal = signal.shape[0]
+    width_data = data.shape[0]
+    ll = numpy.zeros(width_data - width_signal + 1)
+    for i in numba.prange(width_data - width_signal + 1):
+        part1 = 0
+        part2 = 0
+        for j in range(width_signal):
+            # dy has already been inverted and squared (for speed)
+            part1 = part1 + data[i+j] * dy[i+j]
+            part2 = part2 + (1 * dy[i+j])
+        total = part1 / part2
+        ll[i] = -0.5 * total - 0.5 * out_of_transit_residuals[i]
+    return ll
+
+
+
+"""
 # As periods are searched in parallel, the double parallel option for numba
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.njit(fastmath=True, parallel=False, cache=True)  
 def numba_chi2(data, signal, dy, transit_weight):
-    """Takes numpy arrays of data and signal, returns squared residuals for each possible shift
-    See https://stackoverflow.com/questions/52001974/fast-iteration-over-numpy-array-for-squared-residuals"""
+    Takes numpy arrays of data and signal, returns squared residuals for each possible shift
+    See https://stackoverflow.com/questions/52001974/fast-iteration-over-numpy-array-for-squared-residuals
     
     # dy, weight: inverted beforehand (1/dy) to use multiplication for speed!
     chi2 = numpy.empty(data.shape[0] + 1 - signal.shape[0], dtype=data.dtype)
@@ -75,7 +111,7 @@ def numba_chi2(data, signal, dy, transit_weight):
             value = value + ((data[i+j]-signal[j])**2) #/ dy[i+j]**2
         chi2[i] = value
     return chi2 * transit_weight
-
+"""
 
 
 
@@ -284,7 +320,7 @@ class TransitLeastSquares(object):
         rows = numpy.size(depths) * numpy.size(durations)
         lc_cache = numpy.ones([rows,maxwidth_in_samples])
         lc_cache_overview = numpy.zeros(
-            rows, dtype=[('depth', 'f8'), ('duration', 'f8'), ('weight', 'f8')])
+            rows, dtype=[('depth', 'f8'), ('duration', 'f8')])
         cached_reference_transit = self.reference_transit(
             samples=maxwidth_in_samples,
             limb_darkening=limb_darkening,
@@ -308,14 +344,14 @@ class TransitLeastSquares(object):
                 # Deeper transit shapes have stronger weight (Kovacz+2002 Section 2)
                 # Use pre-calculated weights for speed
                 # Use inverse to multiply the weight later (much faster than division)
-                lc_cache_overview['weight'][row] = 1 / numpy.sum(1 - scaled_transit)**2
+                #lc_cache_overview['weight'][row] = 1 / numpy.sum(1 - scaled_transit)**2
                 row = row + 1
                 pbar.update(1)
         pbar.close()
         return lc_cache, lc_cache_overview
 
 
-    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview):
+    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview, objective=None):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
 
@@ -338,7 +374,15 @@ class TransitLeastSquares(object):
         # and continue at the beginning. To avoid (slow) rolling, 
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
-        ootr = out_of_transit_residuals(patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
+
+        if objective == 'snr':
+            ootr = out_of_transit_residuals(
+                patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
+        elif objective == 'likelihood':
+            ootr = ll_out_of_transit_residuals(
+                patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
+        else:
+            ValueError("Unknown objective. Possible values: 'snr' and 'likelihood'")
 
         # Set "best of" counters to max, in order to find smaller residuals
         smallest_residuals_in_period = float('inf')
@@ -348,12 +392,22 @@ class TransitLeastSquares(object):
         for row in range(len(lc_cache)):
             # This is the current transit (of some width, depth) to test
             scaled_transit = lc_cache[row]
-            stats = in_transit_residuals(
-                data=patched_data,
-                signal=scaled_transit,
-                dy=inverse_squared_patched_dy,
-                out_of_transit_residuals=ootr)
-            best_roll = numpy.argmin(stats)
+
+            if objective == 'snr':
+                stats = all_transit_residuals(
+                    data=patched_data,
+                    signal=scaled_transit,
+                    dy=inverse_squared_patched_dy,
+                    out_of_transit_residuals=ootr)
+                best_roll = numpy.argmin(stats)
+            else:
+                stats = ll_all_transit_residuals(
+                    data=patched_data,
+                    signal=scaled_transit,
+                    dy=inverse_squared_patched_dy,
+                    out_of_transit_residuals=ootr)
+                best_roll = numpy.argmax(stats)
+
             current_smallest_residual = stats[best_roll]
 
             # Propagate results to outer loop (best duration, depth)
@@ -371,7 +425,7 @@ class TransitLeastSquares(object):
 
 
     def _perform_search(self, periods, t, y, dy, depths, durations, 
-            limb_darkening=0.5, impact=0):
+            limb_darkening=0.5, impact=0, objective=None):
         """Multicore distributor of search to search through all 'periods' """
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(y))
@@ -406,7 +460,8 @@ class TransitLeastSquares(object):
             y=y,
             dy=dy,
             lc_cache=lc_cache,
-            lc_cache_overview=lc_cache_overview)
+            lc_cache_overview=lc_cache_overview,
+            objective=objective)
         for data in p.imap_unordered(params, periods):
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
@@ -433,7 +488,7 @@ class TransitLeastSquares(object):
         test_statistic_rolls, test_statistic_rows, lc_cache_overview
 
 
-    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0):
+    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0, objective=None):
         """Compute the periodogram for a set user-defined parameters
         Parameters:
         periods : array of periods where the power should be computed
@@ -457,10 +512,15 @@ class TransitLeastSquares(object):
             depths,
             durations,
             limb_darkening=limb_darkening,
-            impact=impact)
+            impact=impact,
+            objective=objective)
         
         # Sort residuals for best
-        idx_best = numpy.argmin(test_statistic_residuals)
+
+        if objective == 'snr':
+            idx_best = numpy.argmin(test_statistic_residuals)
+        else:
+            idx_best = numpy.argmax(test_statistic_residuals)
         best_power = test_statistic_residuals[idx_best]
         best_period = test_statistic_periods[idx_best]
         best_roll = test_statistic_rolls[idx_best]
@@ -469,8 +529,6 @@ class TransitLeastSquares(object):
 
         best_depth = lc_cache_overview['depth'][best_row]
         best_duration = lc_cache_overview['duration'][best_row]
-
-
 
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
@@ -553,7 +611,7 @@ class TransitLeastSquares(object):
         #print(t2-t1)
         # SDE
         
-
+        print('best_T0 ##########', best_T0)
 
         # Calculate all mid-transit times
         if best_T0 < min(self.t):
@@ -577,13 +635,15 @@ class TransitLeastSquares(object):
         stretch = duration_timeseries / epochs
         transit_duration_in_days = best_duration * stretch * best_period
 
-        # reduced chi^2
-        test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
-        # Squash to range 0..1 with peak at 1
-        test_statistic_residuals = 1/test_statistic_residuals - 1
-        signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
+        if objective == 'snr':
+            # reduced chi^2
+            test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
+            # Squash to range 0..1 with peak at 1
+            test_statistic_residuals = 1/test_statistic_residuals - 1
+            signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
+        else:
+            signal_residue = test_statistic_residuals
 
-        # Here: Insert IF for log likelihood
         power = signal_residue
 
         # Make folded model
