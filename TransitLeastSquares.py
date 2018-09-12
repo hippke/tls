@@ -460,24 +460,8 @@ class TransitLeastSquares(object):
             impact=impact)
         
         # Sort residuals for best
-
-        # Normalized power
-        # Reduced chi2
-        ts_norm = 1/test_statistic_residuals
-        upper_limit = numpy.percentile(ts_norm, 99.9)  # validate 99.9 as OK
-        ts_norm[ts_norm > upper_limit] = numpy.median(ts_norm)
-        kernel_size = int(numpy.size(ts_norm) / 20)
-        if kernel_size % 2 == 0:
-            kernel_size = kernel_size + 1
-        median_filter = scipy.signal.medfilt(ts_norm, kernel_size=kernel_size)
-        power_normalized = 1/test_statistic_residuals/median_filter - 1
-
-        # Take the highest power from the normalized residuals, not from the raw
-        """
-        idx_best = numpy.argmax(power_normalized)
-        """
         idx_best = numpy.argmin(test_statistic_residuals)
-        best_power = power_normalized[idx_best]
+        best_power = test_statistic_residuals[idx_best]
         best_period = test_statistic_periods[idx_best]
         best_roll = test_statistic_rolls[idx_best]
         best_row = test_statistic_rows[idx_best]
@@ -568,8 +552,7 @@ class TransitLeastSquares(object):
         #t2 = time.perf_counter()
         #print(t2-t1)
         # SDE
-        SDE = (numpy.max(power_normalized) - numpy.mean(power_normalized)) / \
-            numpy.std(power_normalized)
+        
 
 
         # Calculate all mid-transit times
@@ -596,6 +579,12 @@ class TransitLeastSquares(object):
 
         # reduced chi^2
         test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
+        # Squash to range 0..1 with peak at 1
+        test_statistic_residuals = 1/test_statistic_residuals - 1
+        signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
+
+        # Here: Insert IF for log likelihood
+        power = signal_residue
 
         # Make folded model
         phases = fold(self.t, best_period, T0=best_T0+ best_period/2)
@@ -648,10 +637,13 @@ class TransitLeastSquares(object):
         xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
         model_flux = f(xnew)
 
+        SDE = (numpy.max(power) - numpy.mean(power)) / \
+            numpy.std(power)
+
         return TransitLeastSquaresResults(test_statistic_periods, \
-            test_statistic_residuals, test_statistic_rolls, test_statistic_rows, \
+            power, test_statistic_rolls, test_statistic_rows, \
             lc_cache_overview, best_period, best_T0, best_row, best_power, \
-            power_normalized, SDE, test_statistic_rolls, best_depth, best_duration,\
+            SDE, test_statistic_rolls, best_depth, best_duration,\
             transit_times, transit_duration_in_days, maxwidth_in_samples, folded_model, model_flux)
 
 
@@ -664,10 +656,7 @@ class TransitLeastSquares(object):
         depths = numpy.geomspace(50*10**-6, 0.02, 50)
         durations = numpy.geomspace(1.01/numpy.size(self.t), 0.05, 50)
         results = self.power(periods, durations, depths)
-        print('yes')
-
         return results
-
 
 
     def transit_mask(self, t, period, duration, transit_time):
@@ -683,7 +672,7 @@ class TransitLeastSquaresResults(dict):
         super(TransitLeastSquaresResults, self).__init__(zip(
             ("periods", "power", "phase", "rows", "lc_cache_overview", \
                 "best_period", "best_T0", "best_row", "best_power", \
-                "power_normalized", "SDE", "rolls", "best_depth", \
+                "SDE", "rolls", "best_depth", \
                 "best_duration", "transit_times", "transit_duration_in_days", \
                 "maxwidth_in_samples", "folded_model", "model_flux"), args))
 
