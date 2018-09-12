@@ -35,4 +35,7 @@ Please cite [Hippke & Heller (2018)](http://www.) if you find this code useful i
 }
 ```
 
+## Contributing Code, Bugfixes, Documentation, or Feedback
+We welcome and encourage contributions.
+
 Copyright 2018 Michael Hippke & René Heller.
