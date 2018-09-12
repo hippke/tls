@@ -134,6 +134,7 @@ class TransitLeastSquares(object):
     def __init__(self, t, y, dy=None):
         self.t, self.y, self.dy = self._validate_inputs(t, y, dy)
 
+
     def _validate_inputs(self, t, y, dy):
         """Private method used to check the consistency of the inputs"""
 
@@ -434,7 +435,6 @@ class TransitLeastSquares(object):
 
     def power(self, periods, durations, depths, limb_darkening=0.5, impact=0):
         """Compute the periodogram for a set user-defined parameters
-
         Parameters:
         periods : array of periods where the power should be computed
         durations : array of set of durations to test
@@ -443,7 +443,6 @@ class TransitLeastSquares(object):
             The computational method used to compute the periodogram. Both
             yield identical results but may differ in speed and availability,
             depending on the available hardware.
-
         Returns: BoxLeastSquaresResults"""
 
         periods, durations, depths = self._validate_period_and_duration(
@@ -476,7 +475,6 @@ class TransitLeastSquares(object):
         # Take the highest power from the normalized residuals, not from the raw
         """
         idx_best = numpy.argmax(power_normalized)
-
         """
         idx_best = numpy.argmin(test_statistic_residuals)
         best_power = power_normalized[idx_best]
@@ -657,9 +655,25 @@ class TransitLeastSquares(object):
             transit_times, transit_duration_in_days, maxwidth_in_samples, folded_model, model_flux)
 
 
+    def autopower(self):
+        periods = period_grid(
+            R_star=1,
+            M_star=1,
+            time_span=(max(self.t) - min(self.t)),
+            oversampling_factor=2)
+        depths = numpy.geomspace(50*10**-6, 0.02, 50)
+        durations = numpy.geomspace(1.01/numpy.size(self.t), 0.05, 50)
+        results = self.power(periods, durations, depths)
+        print('yes')
+
+        return results
+
+
+
     def transit_mask(self, t, period, duration, transit_time):
-        hp = 0.5*period
-        return numpy.abs((t-transit_time+hp) % period - hp) < 0.5*duration
+        half_period = 0.5 * period
+        return numpy.abs((t-transit_time+half_period) % period - half_period) \
+            < 0.5*duration
 
 
 class TransitLeastSquaresResults(dict):
@@ -681,14 +695,3 @@ class TransitLeastSquaresResults(dict):
 
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
-
-    def __repr__(self):
-        if self.keys():
-            m = max(map(len, list(self.keys()))) + 1
-            return '\n'.join([k.rjust(m) + ': ' + repr(v)
-                              for k, v in sorted(self.items())])
-        else:
-            return self.__class__.__name__ + "()"
-
-    def __dir__(self):
-        return list(self.keys())
