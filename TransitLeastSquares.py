@@ -46,7 +46,7 @@ def out_of_transit_residuals(data, width_signal, dy):
 # As periods are searched in parallel, the double parallel option for numba
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def all_transit_residuals(data, signal, dy, out_of_transit_residuals):
+def in_transit_residuals(data, signal, dy):
     width_signal = signal.shape[0]
     width_data = data.shape[0]
     chi2 = numpy.zeros(width_data - width_signal + 1)
@@ -55,92 +55,66 @@ def all_transit_residuals(data, signal, dy, out_of_transit_residuals):
         for j in range(width_signal):
             # dy has already been inverted and squared (for speed)
             value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
-        chi2[i] = value + out_of_transit_residuals[i]
+        chi2[i] = value
     return chi2
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def ll_out_of_transit_residuals(data, width_signal, dy):
-    # simplified with normalization of data to 1:
-    # b = sum( (signal_out - 1)**2 / dy_out**2)
-    # bb = -1./2 * b
+    # dy has already been inverted and squared (for speed)
     width_data = len(data)
-    bb = numpy.zeros(width_data - width_signal + 1)
+    b3s = numpy.zeros(width_data - width_signal + 1)
+    b4s = numpy.zeros(width_data - width_signal + 1)
     for i in numba.prange(width_data - width_signal + 1):
         b1 = 0
         b2 = 0
-        dys = 0
         start_transit = i
         end_transit = i + width_signal
         for j in numba.prange(width_data - width_signal + 1):
             if j < start_transit or j > end_transit:
-                # dy has already been inverted and squared (for speed)
                 b1 = b1 + data[j] * dy[j]
                 b2 = b2 + dy[j]
-            dys = dys + dy[j]
-        b = b1 / b2
-        signal_points = width_data - width_signal + 1
-        bb[i] = -0.5 * (signal_points - b)**2 * dys
-
-        #-1./2 * sum( (signal_out - b)**2 / dy_out**2)
-
-    return bb
+        b3s[i] = b1 / b2
+    for i in numba.prange(width_data - width_signal + 1):
+        b4 = 0
+        start_transit = i
+        end_transit = i + width_signal
+        for j in numba.prange(width_data - width_signal + 1):
+            if j < start_transit or j > end_transit:
+                b4 = b4 + (1 - b3s[i])**2 * dy[j]
+        b4s[i] = b4
+    return -0.5 * b4s
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def ll_all_transit_residuals(data, signal, dy, out_of_transit_residuals):
+def ll_in_transit_residuals(data, signal, dy):
     width_signal = signal.shape[0]
     width_data = data.shape[0]
     a3s = numpy.zeros(width_data - width_signal + 1)
     a4s = numpy.zeros(width_data - width_signal + 1)
-
     for i in numba.prange(width_data - width_signal + 1):
-        a3 = 0
+        a1 = 0
+        a2 = 0
         for j in range(width_signal):
-            # dy has already been inverted and squared (for speed)
-            a3 = a3 + data[i+j] * dy[i+j]
-            #a3 = a3 + data[i+j]# * dy[i+j]
-        a3s[i] = a3
-
-    for k in numba.prange(width_data - width_signal + 1):
+            a1 = a1 + data[i+j] * dy[i]
+            a2 = a2 + dy[i]
+        a3s[i] = a1 / a2
+    for i in numba.prange(width_data - width_signal + 1):
         a4 = 0
-        for l in range(width_signal):
-            a4 = a4 + ((signal[l] - a3s[k])**2 * dy[k+l])
-            #a4 = a4 + ((signal[l] - a3s[k])**2)# * dy[k+l])
-        a4s[k] = a4
-    a5s = -1./2 * a4s
-    ll = out_of_transit_residuals + a5s
-    return ll
+        for j in range(width_signal):
+            a4 = a4 + (signal[j] - a3s[i])**2 * dy[i+j]
+        a4s[i] = a4   
+    return -0.5 * a4s
 
 
-
-"""
-# As periods are searched in parallel, the double parallel option for numba
-# results in a speed penalty (factor two worse), so choose parallel=False here
-@numba.njit(fastmath=True, parallel=False, cache=True)  
-def numba_chi2(data, signal, dy, transit_weight):
-    Takes numpy arrays of data and signal, returns squared residuals for each possible shift
-    See https://stackoverflow.com/questions/52001974/fast-iteration-over-numpy-array-for-squared-residuals
-    
-    # dy, weight: inverted beforehand (1/dy) to use multiplication for speed!
-    chi2 = numpy.empty(data.shape[0] + 1 - signal.shape[0], dtype=data.dtype)
-    width_signal = signal.shape[0]
-    for i in numba.prange(data.shape[0] - signal.shape[0] + 1):
-        value = 0
-        for j in range(signal.shape[0]):
-            value = value + ((data[i+j]-signal[j])**2) #/ dy[i+j]**2
-        chi2[i] = value
-    return chi2 * transit_weight
-"""
-
-
-
-
-
-
-@numba.njit(fastmath=True, parallel=False, cache=True)  
-def fold(time, period, T0):#=0.0):
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+def fold(time, period, T0):
     return (time - T0) / period - numpy.floor((time - T0) / period)
+
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+def foldfast(time, period):
+    return time / period - numpy.floor(time / period)
 
 
 def period_grid(R_star, M_star, time_span, period_min=0, period_max=sys.maxsize, 
@@ -379,7 +353,7 @@ class TransitLeastSquares(object):
         maxwidth_in_samples = numpy.shape(lc_cache)[1]
 
         # Phase fold
-        phases = fold(t, period, T0=0)
+        phases = foldfast(t, period)
         sort_index = numpy.argsort(phases)
         phases = phases[sort_index]
         flux = y[sort_index]
@@ -402,13 +376,18 @@ class TransitLeastSquares(object):
             ootr = ll_out_of_transit_residuals(
                 patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
         else:
-            ValueError("Unknown objective. Possible values: 'snr' and 'likelihood'")
+            raise ValueError("Unknown objective. Possible values: 'snr' and 'likelihood'")
 
-        print('ootr', ootr)
+        #print('ootr', ootr)
 
         # Set "best of" counters to max, in order to find smaller residuals
-        smallest_residuals_in_period = float('inf')
-        summed_residual_in_rows = float('inf')
+        if objective == 'snr':
+            smallest_residuals_in_period = float('inf')
+            summed_residual_in_rows = float('inf')
+        else:
+            smallest_residuals_in_period = float('-inf')
+            summed_residual_in_rows = float('-inf')
+
 
         # Iterate over all transit shapes (depths and durations)
         for row in range(len(lc_cache)):
@@ -416,38 +395,42 @@ class TransitLeastSquares(object):
             scaled_transit = lc_cache[row]
 
             if objective == 'snr':
-                stats = all_transit_residuals(
+                itr = in_transit_residuals(
                     data=patched_data,
                     signal=scaled_transit,
-                    dy=inverse_squared_patched_dy,
-                    out_of_transit_residuals=ootr)
+                    dy=inverse_squared_patched_dy)
+                stats = itr + ootr
                 best_roll = numpy.argmin(stats)
             else:
-                stats = ll_all_transit_residuals(
+                itr = ll_in_transit_residuals(
                     data=patched_data,
                     signal=scaled_transit,
-                    dy=inverse_squared_patched_dy,
-                    out_of_transit_residuals=ootr)
-                #stats = abs(stats)
-                #print('stats nans', numpy.sum(numpy.isnan(stats)))
-                #print(numpy.min(ll), numpy.max(ll), numpy.mean(ll))
-                #stats = 1/stats
-                #print('stats', stats)
+                    dy=inverse_squared_patched_dy)
+                stats = itr + ootr
                 best_roll = numpy.argmax(stats)
 
-
             current_smallest_residual = stats[best_roll]
-            #print('current_smallest_residual', current_smallest_residual)
 
             # Propagate results to outer loop (best duration, depth)
-            if current_smallest_residual < summed_residual_in_rows:
-                summed_residual_in_rows = current_smallest_residual
-                best_row = row
+            if objective == 'snr':
+                if current_smallest_residual < summed_residual_in_rows:
+                    summed_residual_in_rows = current_smallest_residual
+                    best_row = row
+            else:
+                if current_smallest_residual > summed_residual_in_rows:
+                    summed_residual_in_rows = current_smallest_residual
+                    best_row = row
 
-        # Best values in this period
-        if summed_residual_in_rows < smallest_residuals_in_period:
-            smallest_residuals_in_period = summed_residual_in_rows
-            best_shift = best_roll
+        if objective == 'snr':
+            # Best values in this period
+            if summed_residual_in_rows < smallest_residuals_in_period:
+                smallest_residuals_in_period = summed_residual_in_rows
+                best_shift = best_roll
+
+        else:
+            if summed_residual_in_rows > smallest_residuals_in_period:
+                smallest_residuals_in_period = summed_residual_in_rows
+                best_shift = best_roll
 
         
         return [period, smallest_residuals_in_period, best_shift, best_row]
@@ -543,7 +526,7 @@ class TransitLeastSquares(object):
             limb_darkening=limb_darkening,
             impact=impact,
             objective=objective)
-        
+
         # Sort residuals for best
 
         if objective == 'snr':
@@ -730,6 +713,7 @@ class TransitLeastSquares(object):
 
         SDE = (numpy.max(power) - numpy.mean(power)) / \
             numpy.std(power)
+        #print(power)
 
         return TransitLeastSquaresResults(test_statistic_periods, \
             power, test_statistic_rolls, test_statistic_rows, \
