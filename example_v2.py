@@ -34,6 +34,8 @@ if __name__ == '__main__':
     from scipy.signal import medfilt
     trend = medfilt(y, 45)
     y_filt = y - trend + 1
+    #y_filt2 = numpy.array(y_filt, dtype='float16')
+    #y_filt = y_filt2
     dy = numpy.full(numpy.size(y_filt), numpy.std(y_filt))  #numpy.std(y_filt))  # 
 
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(6, 6))
@@ -59,12 +61,13 @@ if __name__ == '__main__':
         oversampling_factor=2)
 
     # Define grids of transit depths and widths
-    depths = numpy.geomspace(50*10**-6, 0.01, 50)
-    durations = numpy.geomspace(1.01/numpy.size(t), 0.02, 50)
+    depths = numpy.geomspace(50*10**-6, 0.01, 50)  # 50
+    durations = numpy.geomspace(1.01/numpy.size(t), 0.02, 50)  # 50
+    print(durations)
 
     model = TransitLeastSquares(t, y_filt, dy)
     results = model.power(periods, durations, depths, limb_darkening=0.5, 
-        objective='snr') # likelihood  # snr
+        objective='likelihood') # likelihood  # snr
     #results = model.autopower()
 
     print('Period', format(results.best_period, '.5f'), 'd')
