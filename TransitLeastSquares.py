@@ -27,7 +27,7 @@ from functools import partial
 from numpy import pi, sqrt, arccos, degrees
 
 
-@numba.njit(fastmath=True, parallel=False, cache=True)  
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def out_of_transit_residuals(data, width_signal, dy):
     width_data = len(data)
     residuals = numpy.zeros(width_data - width_signal + 1)
@@ -45,7 +45,7 @@ def out_of_transit_residuals(data, width_signal, dy):
 
 # As periods are searched in parallel, the double parallel option for numba
 # results in a speed penalty (factor two worse), so choose parallel=False here
-@numba.njit(fastmath=True, parallel=False, cache=True)  
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def all_transit_residuals(data, signal, dy, out_of_transit_residuals):
     width_signal = signal.shape[0]
     width_data = data.shape[0]
@@ -59,38 +59,57 @@ def all_transit_residuals(data, signal, dy, out_of_transit_residuals):
     return chi2
 
 
-@numba.njit(fastmath=True, parallel=False, cache=True)  
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def ll_out_of_transit_residuals(data, width_signal, dy):
+    # simplified with normalization of data to 1:
+    # b = sum( (signal_out - 1)**2 / dy_out**2)
+    # bb = -1./2 * b
     width_data = len(data)
-    residuals = numpy.zeros(width_data - width_signal + 1)
+    bb = numpy.zeros(width_data - width_signal + 1)
     for i in numba.prange(width_data - width_signal + 1):
-        part1 = 0
-        part2 = 0
+        b1 = 0
+        b2 = 0
+        dys = 0
         start_transit = i
         end_transit = i + width_signal
         for j in numba.prange(width_data - width_signal + 1):
             if j < start_transit or j > end_transit:
                 # dy has already been inverted and squared (for speed)
-                part1 = part1 + data[j] * dy[j]
-                part2 = part2 + (1 * dy[j])
-        residuals[i] = part1 / part2
-    return residuals
+                b1 = b1 + data[j] * dy[j]
+                b2 = b2 + dy[j]
+            dys = dys + dy[j]
+        b = b1 / b2
+        signal_points = width_data - width_signal + 1
+        bb[i] = -0.5 * (signal_points - b)**2 * dys
+
+        #-1./2 * sum( (signal_out - b)**2 / dy_out**2)
+
+    return bb
 
 
-@numba.njit(fastmath=True, parallel=False, cache=True)  
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def ll_all_transit_residuals(data, signal, dy, out_of_transit_residuals):
     width_signal = signal.shape[0]
     width_data = data.shape[0]
-    ll = numpy.zeros(width_data - width_signal + 1)
+    a3s = numpy.zeros(width_data - width_signal + 1)
+    a4s = numpy.zeros(width_data - width_signal + 1)
+
     for i in numba.prange(width_data - width_signal + 1):
-        part1 = 0
-        part2 = 0
+        a3 = 0
         for j in range(width_signal):
             # dy has already been inverted and squared (for speed)
-            part1 = part1 + data[i+j] * dy[i+j]
-            part2 = part2 + (1 * dy[i+j])
-        total = part1 / part2
-        ll[i] = -0.5 * total - 0.5 * out_of_transit_residuals[i]
+            a3 = a3 + data[i+j] * dy[i+j]
+            #a3 = a3 + data[i+j]# * dy[i+j]
+        a3s[i] = a3
+
+    for k in numba.prange(width_data - width_signal + 1):
+        a4 = 0
+        for l in range(width_signal):
+            a4 = a4 + ((signal[l] - a3s[k])**2 * dy[k+l])
+            #a4 = a4 + ((signal[l] - a3s[k])**2)# * dy[k+l])
+        a4s[k] = a4
+    a5s = -1./2 * a4s
+    ll = out_of_transit_residuals + a5s
     return ll
 
 
@@ -385,6 +404,8 @@ class TransitLeastSquares(object):
         else:
             ValueError("Unknown objective. Possible values: 'snr' and 'likelihood'")
 
+        print('ootr', ootr)
+
         # Set "best of" counters to max, in order to find smaller residuals
         smallest_residuals_in_period = float('inf')
         summed_residual_in_rows = float('inf')
@@ -407,9 +428,16 @@ class TransitLeastSquares(object):
                     signal=scaled_transit,
                     dy=inverse_squared_patched_dy,
                     out_of_transit_residuals=ootr)
+                #stats = abs(stats)
+                #print('stats nans', numpy.sum(numpy.isnan(stats)))
+                #print(numpy.min(ll), numpy.max(ll), numpy.mean(ll))
+                #stats = 1/stats
+                #print('stats', stats)
                 best_roll = numpy.argmax(stats)
 
+
             current_smallest_residual = stats[best_roll]
+            #print('current_smallest_residual', current_smallest_residual)
 
             # Propagate results to outer loop (best duration, depth)
             if current_smallest_residual < summed_residual_in_rows:
@@ -645,6 +673,7 @@ class TransitLeastSquares(object):
             signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
         else:
             signal_residue = test_statistic_residuals
+            chi2red = None
 
         power = signal_residue
 
