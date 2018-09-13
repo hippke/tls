@@ -2,13 +2,14 @@ import numpy
 import scipy
 import matplotlib.pyplot as plt
 from astropy.io import fits
+numpy.set_printoptions(threshold=numpy.nan)
 
 
 if __name__ == '__main__':
     file = 'hlsp_everest_k2_llc_201367065-c01_kepler_v2.0_lc.fits'
     url = "https://archive.stsci.edu/hlsps/everest/v2/c01/201300000/67065/"\
         "hlsp_everest_k2_llc_201367065-c01_kepler_v2.0_lc.fits"
-    with fits.open(file) as hdus:
+    with fits.open(url) as hdus:
         data = hdus[1].data
         t = data["TIME"]
         y = data["FLUX"]
@@ -34,8 +35,6 @@ if __name__ == '__main__':
     from scipy.signal import medfilt
     trend = medfilt(y, 45)
     y_filt = y - trend + 1
-    #y_filt2 = numpy.array(y_filt, dtype='float16')
-    #y_filt = y_filt2
     dy = numpy.full(numpy.size(y_filt), numpy.std(y_filt))  #numpy.std(y_filt))  # 
 
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(6, 6))
@@ -56,8 +55,8 @@ if __name__ == '__main__':
         R_star=1,
         M_star=1,
         time_span=(max(t) - min(t)),
-        period_min=9.9,
-        period_max=10.3,
+        period_min=9,
+        period_max=11,
         oversampling_factor=2)
 
     # Define grids of transit depths and widths
@@ -77,6 +76,8 @@ if __name__ == '__main__':
     print('Best duration (fractional period)', format(results.best_duration, '.5f'))
     print('Best duration (days)', format(results.transit_duration_in_days, '.5f'))
     print('Signal detection efficiency (SDE):', results.SDE)
+
+    print(results.power)
 
     # Test statistic
     plt.figure(figsize=(4.5, 4.5 / 1.5))
