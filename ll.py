@@ -5,44 +5,44 @@ y_in = y[3:5]
 y_out = numpy.concatenate((y[0:3], y[5:8]))
 
 dy = numpy.array( [0.01, 0.02, 0.01, 0.01, 0.02, 0.03, 0.01, 0.01] )
-dy_out = numpy.concatenate((dy[0:3], dy[5:8]))
-dy_in = dy[3:5]
+dz = 1/dy**2
+dy_out = numpy.concatenate((dz[0:3], dz[5:8]))
+dy_in = dz[3:5]
 
 signal = numpy.array( [1., 1., 1., 0.95, 0.95, 1., 1., 1.] )
 signal_in = signal[3:5]
 signal_out = numpy.concatenate((signal[0:3], signal[5:8]))
 
 
-# Out of transit
-b1 = sum( y_out/dy_out**2 )
-b2 = sum(1./dy_out**2)
-#print(b)
-b = b1 / b2
-#print('b', b)
-#print('signal_out', signal_out)
-#print('dy_out', dy_out)
-# correct: 
-print('signal_out', signal_out)
-bb = -1./2 * sum( (signal_out - b)**2 / dy_out**2)
+def outoftransit(y, dy, signal):    
+    b1 = 0
+    b2 = 0
+    b4 = 0
+    for i in range(len(y)):
+        b1 = b1 + y[i] * dy[i]
+        b2 = b2 + dy[i]
+    b3 = b1 / b2
+    for i in range(len(y)):
+        b4 = b4 + (signal[i] - b3)**2 * dy[i]
+    return -0.5 * b4
 
-#simplified:
-#b = sum( (signal_out - 1)**2 / dy_out**2)
-#bb = -1./2 * b
-print('bb', bb)
 
-# In transit
-a1 = sum( y_in/dy_in**2 )
-a2 = sum(1./dy_in**2)
+def intransit(y, dy, signal):
+    a1 = 0
+    a2 = 0
+    for i in range(len(signal)):
+        a1 = a1 + y[i] * dy[i]
+        a2 = a2 + dy[i]
+    a3 = a1 / a2
+    a4 = 0
+    print('a3', a3)
+    for i in range(len(signal)):
+        a4 = a4 + (signal_in[i] - a3)**2 * dy[i]
+    print('-0.5 * a4', -0.5 * a4)
+    return -0.5 * a4
 
-a3 = a1 / a2
-print('signal_in', signal_in)
-print('a3', a3)
-print('signal_in - a', signal_in - a3)
-a4 = sum( (signal_in - a3)**2 / dy_in**2 )
 
-a5 = -1./2 * a4
-print(a5)
-
-LL_1 = a5 + bb
-
-print(LL_1)
+a = intransit(y=y_in, dy=dy_in, signal=signal_in)
+b = outoftransit(y=y_out, dy=dy_out, signal=signal_out)
+ll = a + b
+print(ll)
