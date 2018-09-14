@@ -59,29 +59,77 @@ def in_transit_residuals(data, signal, dy):
     return chi2
 
 
+
+def ll_out_of_transit_residuals_numpy(data, width_signal, dy):
+    @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+    def outoftransit(y, dy):    
+        b1 = 0
+        b2 = 0
+        b4 = 0
+        for i in range(len(y)):
+            b1 = b1 + y[i] * dy[i]
+            b2 = b2 + dy[i]
+        b3 = b1 / b2
+        #print(b3)
+        for i in range(len(y)):
+            b4 = b4 + (1 - b3)**2 * dy[i]
+        return -0.5 * b4
+
+    width_data = data.shape[0]
+    b4s = numpy.zeros(width_data - width_signal + 1)
+    for i in range(width_data - width_signal + 1):
+        start_transit = i
+        end_transit = i + width_signal
+        this_data = numpy.concatenate([data[0:start_transit], data[end_transit:width_data]])
+        print(
+            numpy.size(data),
+            numpy.size(data[0:start_transit]),
+            numpy.size(data[end_transit:width_data]),
+            numpy.size(this_data),
+            start_transit,
+            end_transit)
+        this_dy = numpy.concatenate((dy[:start_transit], dy[end_transit:]))
+        b4 = outoftransit(y=this_data, dy=this_dy)
+        b4s[i] = b4
+        #print(i, b4)
+
+    return b4s
+
+
+    
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def ll_out_of_transit_residuals(data, width_signal, dy):
     # dy has already been inverted and squared (for speed)
     width_data = len(data)
     b3s = numpy.zeros(width_data - width_signal + 1)
     b4s = numpy.zeros(width_data - width_signal + 1)
+    #print(len(data), len(data)-width_signal)
+
     for i in numba.prange(width_data - width_signal + 1):
         b1 = 0
         b2 = 0
+        tot = 0
         start_transit = i
         end_transit = i + width_signal
-        for j in numba.prange(width_data - width_signal + 1):
+        for j in numba.prange(width_data):# - width_signal + 1):
             if j < start_transit or j > end_transit:
                 b1 = b1 + data[j] * dy[j]
                 b2 = b2 + dy[j]
+                tot = tot + 1
+        #print(tot)
         b3s[i] = b1 / b2
+
     for i in numba.prange(width_data - width_signal + 1):
         b4 = 0
         start_transit = i
         end_transit = i + width_signal
-        for j in numba.prange(width_data - width_signal + 1):
+        for j in numba.prange(width_data):# - width_signal + 1):
             if j < start_transit or j > end_transit:
                 b4 = b4 + (1 - b3s[i])**2 * dy[j]
+                #print((1 - b3s[i])**2 * dy[j])
+
+                # value = value + (1 - data[j])**2 * dy[j] at chi2
+        #print(b4)
         b4s[i] = b4
     return -0.5 * b4s
 
@@ -96,8 +144,8 @@ def ll_in_transit_residuals(data, signal, dy):
         a1 = 0
         a2 = 0
         for j in range(width_signal):
-            a1 = a1 + data[i+j] * dy[i]
-            a2 = a2 + dy[i]
+            a1 = a1 + data[i+j] * dy[i+j]
+            a2 = a2 + dy[i+j]
         a3s[i] = a1 / a2
     for i in numba.prange(width_data - width_signal + 1):
         a4 = 0
@@ -105,6 +153,26 @@ def ll_in_transit_residuals(data, signal, dy):
             a4 = a4 + (signal[j] - a3s[i])**2 * dy[i+j]
         a4s[i] = a4   
     return -0.5 * a4s
+
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def ll_in_transit_residuals_fine(data, signal, dy):
+    width_signal = signal.shape[0]
+    width_data = data.shape[0]
+    a4s = numpy.zeros(width_data - width_signal + 1)
+    for i in numba.prange(width_data - width_signal + 1):
+        a1 = 0
+        a2 = 0
+        a3 = 0
+        a4 = 0
+        for j in range(width_signal):
+            a1 = a1 + data[i+j] * dy[i+j]
+            a2 = a2 + dy[i+j]
+            a3 = a1 / a2
+            a4 = a4 + (signal[j] - a3)**2 * dy[i+j]
+        a4s[i] = a4   
+    return -0.5 * a4s
+
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
@@ -401,13 +469,18 @@ class TransitLeastSquares(object):
                     dy=inverse_squared_patched_dy)
                 stats = itr + ootr
                 best_roll = numpy.argmin(stats)
+
             else:
-                itr = ll_in_transit_residuals(
+                itr = ll_in_transit_residuals_fine(
                     data=patched_data,
                     signal=scaled_transit,
                     dy=inverse_squared_patched_dy)
                 stats = itr + ootr
                 best_roll = numpy.argmax(stats)
+
+            #for i in range(len(ootr)):
+            #    print(ootr[i], ';', itr[i])
+            #print('max stats', max(stats))
 
             current_smallest_residual = stats[best_roll]
 
