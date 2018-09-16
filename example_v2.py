@@ -36,7 +36,7 @@ if __name__ == '__main__':
     trend = medfilt(y, 45)
     y_filt = y - trend + 1
     dy = numpy.full(numpy.size(y_filt), numpy.std(y_filt))  #numpy.std(y_filt))  # 
-
+    print(y_filt)
     fig, axes = plt.subplots(2, 1, sharex=True, figsize=(6, 6))
     ax = axes[0]
     ax.plot(t, y, "k")
@@ -57,7 +57,7 @@ if __name__ == '__main__':
         time_span=(max(t) - min(t)),
         period_min=9,
         period_max=11,
-        oversampling_factor=2)
+        oversampling_factor=3)
 
     # Define grids of transit depths and widths
     depths = numpy.geomspace(50*10**-6, 0.01, 50)  # 50
@@ -66,7 +66,7 @@ if __name__ == '__main__':
 
     model = TransitLeastSquares(t, y_filt, dy)
     results = model.power(periods, durations, depths, limb_darkening=0.5, 
-        objective='likelihood') # likelihood  # snr
+        objective='snr') # likelihood  # snr
     #results = model.autopower()
 
     print('Period', format(results.best_period, '.5f'), 'd')
@@ -77,7 +77,7 @@ if __name__ == '__main__':
     print('Best duration (days)', format(results.transit_duration_in_days, '.5f'))
     print('Signal detection efficiency (SDE):', results.SDE)
 
-    print(results.power)
+    print(min(results.chi2red))
 
     # Test statistic
     plt.figure(figsize=(4.5, 4.5 / 1.5))
@@ -87,7 +87,7 @@ if __name__ == '__main__':
     for n in range(2, 10):
         ax.axvline(n*results.best_period, alpha=0.4, lw=1, linestyle="dashed")
         ax.axvline(results.best_period / n, alpha=0.4, lw=1, linestyle="dashed")
-    plt.plot(results.periods, results.power, color='black', lw=0.5)
+    plt.plot(results.periods, results.SDE_power, color='black', lw=0.5)
     plt.ylabel(r'$1 / (\chi^2_{\rm red}) - 1$')
     plt.xlabel('Period (days)')
     plt.savefig('fig_test_stat_raw.pdf', bbox_inches='tight')
