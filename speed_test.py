@@ -11,9 +11,9 @@ I have an algorithm in Python which I like to be coded to run on a GPU with CUDA
 @numba.njit(fastmath=True, parallel=False, cache=True)  
 def function(data, signal, dy):
     result = numpy.zeros(len(data) - len(signal) + 1)
-    for i in numba.prange(len(data) - len(signal) + 0):
+    for i in numba.prange(len(data) - len(signal) + 1):
         value = 0
-        for j in numba.prange(len(signal) + 1):
+        for j in numba.prange(len(signal) + 0):
             value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
         result[i] = value
     return result
