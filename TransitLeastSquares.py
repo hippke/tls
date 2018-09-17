@@ -29,33 +29,30 @@ from numpy import pi, sqrt, arccos, degrees
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def out_of_transit_residuals(data, width_signal, dy):
-    width_data = len(data)
-    residuals = numpy.zeros(width_data - width_signal + 1)
-    for i in numba.prange(width_data - width_signal + 1):
+    outer_loop_lenght = len(data) - width_signal + 1
+    inner_loop_length = len(data) - width_signal
+    chi2 = numpy.zeros(outer_loop_lenght)
+    for i in numba.prange(outer_loop_lenght):
         value = 0
         start_transit = i
-        end_transit = i + width_signal + 0
-        for j in numba.prange(width_data - width_signal + 0):
-        #for j in numba.prange(width_data - width_signal + 1):
+        end_transit = i + width_signal
+        for j in numba.prange(inner_loop_length):
             if j < start_transit or j > end_transit:
-                # dy has already been inverted and squared (for speed)
                 value = value + (1 - data[j])**2 * dy[j]
-        residuals[i] = value
-    return residuals
+        chi2[i] = value
+    return chi2
 
 
 # As periods are searched in parallel, the double parallel option for numba
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def in_transit_residuals(data, signal, dy):
-    width_signal = len(signal)
-    chi2 = numpy.zeros(len(data) - width_signal + 1)
-    #for i in numba.prange(len(data) - width_signal + 1):
-    for i in numba.prange(len(data) - width_signal + 0):
+    outer_loop_lenght = len(data) - len(signal)
+    inner_loop_length = len(signal) + 1
+    chi2 = numpy.zeros(outer_loop_lenght + 1)
+    for i in numba.prange(outer_loop_lenght):
         value = 0
-        #for j in numba.prange(width_signal + 0):
-        for j in numba.prange(width_signal + 1):
-            # dy has already been inverted and squared (for speed)
+        for j in numba.prange(inner_loop_length):
             value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
         chi2[i] = value
     return chi2
