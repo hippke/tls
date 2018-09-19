@@ -26,7 +26,7 @@ from tqdm import tqdm
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees
 
-def get_stellar_data(EPIC):
+def get_data(EPIC):
     """Takes EPIC ID, returns limb darkening parameters u (linear) and 
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
         absolute deviation between given/catalog Teff and logg. Data are from:
@@ -37,13 +37,13 @@ def get_stellar_data(EPIC):
     star = numpy.genfromtxt(
         'JApJS2242table5.csv',
         skip_header=1,
-        delimiter=';',
+        delimiter=',',
         dtype='int32, int32, f8, f8, f8',
         names = ['EPIC', 'Teff', 'logg', 'radius', 'mass'])
     ld = numpy.genfromtxt(
         'JAA546A14limb1-4.csv',
         skip_header=1,
-        delimiter=';',
+        delimiter=',',
         dtype='f8, int32, f8, f8, f8',
         names = ['logg', 'Teff', 'u', 'a', 'b'])
 
