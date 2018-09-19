@@ -26,6 +26,45 @@ from tqdm import tqdm
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees
 
+def get_stellar_data(EPIC):
+    """Takes EPIC ID, returns limb darkening parameters u (linear) and 
+        a,b (quadratic), and stellar parameters. Values are pulled for minimum
+        absolute deviation between given/catalog Teff and logg. Data are from:
+        - K2 Ecliptic Plane Input Catalog, Huber+ 2016, 2016ApJS..224....2H
+        - New limb-darkening coefficients, Claret+ 2012, 2013, 
+          2012A&A...546A..14C, 2013A&A...552A..16C"""
+
+    star = numpy.genfromtxt(
+        'JApJS2242table5.csv',
+        skip_header=1,
+        delimiter=';',
+        dtype='int32, int32, f8, f8, f8',
+        names = ['EPIC', 'Teff', 'logg', 'radius', 'mass'])
+    ld = numpy.genfromtxt(
+        'JAA546A14limb1-4.csv',
+        skip_header=1,
+        delimiter=';',
+        dtype='f8, int32, f8, f8, f8',
+        names = ['logg', 'Teff', 'u', 'a', 'b'])
+
+    idx = numpy.where(star['EPIC']==EPIC)
+    Teff = star['Teff'][idx]
+    logg = star['logg'][idx]
+    radius = star['radius'][idx]
+    mass = star['mass'][idx]
+
+    # Find nearest Teff and logg
+    nearest_Teff = ld['Teff'][(numpy.abs(ld['Teff'] - Teff)).argmin()]
+    idx_all_Teffs = numpy.where(ld['Teff']==nearest_Teff)
+    relevant_lds = numpy.copy(ld[idx_all_Teffs])
+    idx_nearest = numpy.abs(relevant_lds['logg'] - logg).argmin()
+    nearest_logg = relevant_lds['logg'][idx_nearest]
+    u = relevant_lds['u'][idx_nearest]
+    a = relevant_lds['a'][idx_nearest]
+    b = relevant_lds['b'][idx_nearest]
+
+    return u, a, b, mass[0], radius[0], logg[0], Teff[0]
+
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def out_of_transit_residuals(data, width_signal, dy):
