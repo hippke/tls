@@ -26,6 +26,7 @@ from tqdm import tqdm
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees
 
+
 def get_data(EPIC):
     """Takes EPIC ID, returns limb darkening parameters u (linear) and 
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
@@ -76,7 +77,8 @@ def out_of_transit_residuals(data, width_signal, dy):
         start_transit = i
         end_transit = i + width_signal
         for j in numba.prange(inner_loop_length):
-            if j < start_transit or j > end_transit:
+            #if j < start_transit or j > end_transit:
+            if (end_transit > j < start_transit):
                 value = value + (1 - data[j])**2 * dy[j]
         chi2[i] = value
     return chi2
@@ -95,122 +97,6 @@ def in_transit_residuals(data, signal, dy):
             value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
         chi2[i] = value
     return chi2
-
-
-
-def ll_out_of_transit_residuals_numpy(data, width_signal, dy):
-    @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
-    def outoftransit(y, dy):    
-        b1 = 0
-        b2 = 0
-        b4 = 0
-        for i in range(len(y)):
-            b1 = b1 + y[i] * dy[i]
-            b2 = b2 + dy[i]
-        b3 = b1 / b2
-        #print(b3)
-        for i in range(len(y)):
-            b4 = b4 + (1 - b3)**2 * dy[i]
-        return -0.5 * b4
-
-    width_data = data.shape[0]
-    b4s = numpy.zeros(width_data - width_signal + 1)
-    for i in range(width_data - width_signal + 1):
-        start_transit = i
-        end_transit = i + width_signal
-        this_data = numpy.concatenate([data[0:start_transit], data[end_transit:width_data]])
-        print(
-            numpy.size(data),
-            numpy.size(data[0:start_transit]),
-            numpy.size(data[end_transit:width_data]),
-            numpy.size(this_data),
-            start_transit,
-            end_transit)
-        this_dy = numpy.concatenate((dy[:start_transit], dy[end_transit:]))
-        b4 = outoftransit(y=this_data, dy=this_dy)
-        b4s[i] = b4
-        #print(i, b4)
-
-    return b4s
-
-
-    
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def ll_out_of_transit_residuals(data, width_signal, dy):
-    # dy has already been inverted and squared (for speed)
-    width_data = len(data)
-    b3s = numpy.zeros(width_data - width_signal + 1)
-    b4s = numpy.zeros(width_data - width_signal + 1)
-    #print(len(data), len(data)-width_signal)
-
-    for i in numba.prange(width_data - width_signal + 1):
-        b1 = 0
-        b2 = 0
-        tot = 0
-        start_transit = i
-        end_transit = i + width_signal
-        for j in numba.prange(width_data - width_signal + 1):
-            if j < start_transit or j > end_transit:
-                b1 = b1 + data[j] * dy[j]
-                b2 = b2 + dy[j]
-                tot = tot + 1
-        #print(tot)
-        b3s[i] = b1 / b2
-
-    for i in numba.prange(width_data - width_signal + 1):
-        b4 = 0
-        start_transit = i
-        end_transit = i + width_signal
-        for j in numba.prange(width_data - width_signal + 1):
-            if j < start_transit or j > end_transit:
-                b4 = b4 + (1 - b3s[i])**2 * dy[j]
-                #print((1 - b3s[i])**2 * dy[j])
-
-                # value = value + (1 - data[j])**2 * dy[j] at chi2
-        #print(b4)
-        b4s[i] = b4
-    return -0.5 * b4s
-
-
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def ll_in_transit_residuals(data, signal, dy):
-    width_signal = signal.shape[0]
-    width_data = data.shape[0]
-    a3s = numpy.zeros(width_data - width_signal + 1)
-    a4s = numpy.zeros(width_data - width_signal + 1)
-    for i in numba.prange(width_data - width_signal + 1):
-        a1 = 0
-        a2 = 0
-        for j in range(width_signal):
-            a1 = a1 + data[i+j] * dy[i+j]
-            a2 = a2 + dy[i+j]
-        a3s[i] = a1 / a2
-    for i in numba.prange(width_data - width_signal + 1):
-        a4 = 0
-        for j in range(width_signal):
-            a4 = a4 + (signal[j] - a3s[i])**2 * dy[i+j]
-        a4s[i] = a4   
-    return -0.5 * a4s
-
-
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def ll_in_transit_residuals_fine(data, signal, dy):
-    width_signal = signal.shape[0]
-    width_data = data.shape[0]
-    a4s = numpy.zeros(width_data - width_signal + 1)
-    for i in numba.prange(width_data - width_signal + 1):
-        a1 = 0
-        a2 = 0
-        a3 = 0
-        a4 = 0
-        for j in range(width_signal):
-            a1 = a1 + data[i+j] * dy[i+j]
-            a2 = a2 + dy[i+j]
-            a3 = a1 / a2
-            a4 = a4 + (signal[j] - a3)**2 * dy[i+j]
-        a4s[i] = a4   
-    return -0.5 * a4s
-
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
@@ -451,7 +337,7 @@ class TransitLeastSquares(object):
         return lc_cache, lc_cache_overview
 
 
-    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview, objective='snr'):
+    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
 
@@ -475,80 +361,39 @@ class TransitLeastSquares(object):
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
 
-        if objective == 'snr':
-            ootr = out_of_transit_residuals(
+        ootr = out_of_transit_residuals(
                 patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
-        elif objective == 'likelihood':
-            ootr = ll_out_of_transit_residuals(
-                patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
-        else:
-            raise ValueError("Unknown objective. Possible values: 'snr' and 'likelihood'")
-
-        #print('ootr', ootr)
-
+        
         # Set "best of" counters to max, in order to find smaller residuals
-        if objective == 'snr':
-            smallest_residuals_in_period = float('inf')
-            summed_residual_in_rows = float('inf')
-        else:
-            smallest_residuals_in_period = float('-inf')
-            summed_residual_in_rows = float('-inf')
-
+        smallest_residuals_in_period = float('inf')
+        summed_residual_in_rows = float('inf')
 
         # Iterate over all transit shapes (depths and durations)
         for row in range(len(lc_cache)):
             # This is the current transit (of some width, depth) to test
             scaled_transit = lc_cache[row]
-
-            if objective == 'snr':
-                itr = in_transit_residuals(
-                    data=patched_data,
-                    signal=scaled_transit,
-                    dy=inverse_squared_patched_dy)
-                stats = itr + ootr
-                best_roll = numpy.argmin(stats)
-
-            else:
-                itr = ll_in_transit_residuals(
-                    data=patched_data,
-                    signal=scaled_transit,
-                    dy=inverse_squared_patched_dy)
-                stats = itr + ootr
-                best_roll = numpy.argmax(stats)
-
-            #for i in range(len(ootr)):
-            #    print(ootr[i], ';', itr[i])
-            #print('max stats', max(stats))
-
+            itr = in_transit_residuals(
+                data=patched_data,
+                signal=scaled_transit,
+                dy=inverse_squared_patched_dy)
+            stats = itr + ootr
+            best_roll = numpy.argmin(stats)
             current_smallest_residual = stats[best_roll]
 
             # Propagate results to outer loop (best duration, depth)
-            if objective == 'snr':
-                if current_smallest_residual < summed_residual_in_rows:
-                    summed_residual_in_rows = current_smallest_residual
-                    best_row = row
-            else:
-                if current_smallest_residual > summed_residual_in_rows:
-                    summed_residual_in_rows = current_smallest_residual
-                    best_row = row
+            if current_smallest_residual < summed_residual_in_rows:
+                summed_residual_in_rows = current_smallest_residual
+                best_row = row
 
-        if objective == 'snr':
-            # Best values in this period
-            if summed_residual_in_rows < smallest_residuals_in_period:
-                smallest_residuals_in_period = summed_residual_in_rows
-                best_shift = best_roll
-
-        else:
-            if summed_residual_in_rows > smallest_residuals_in_period:
-                smallest_residuals_in_period = summed_residual_in_rows
-                best_shift = best_roll
-
+        if summed_residual_in_rows < smallest_residuals_in_period:
+            smallest_residuals_in_period = summed_residual_in_rows
+            best_shift = best_roll
         
         return [period, smallest_residuals_in_period, best_shift, best_row]
 
 
     def _perform_search(self, periods, t, y, dy, depths, durations, 
-            limb_darkening=0.5, impact=0, objective='snr'):
+            limb_darkening=0.5, impact=0):
         """Multicore distributor of search to search through all 'periods' """
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(y))
@@ -583,8 +428,7 @@ class TransitLeastSquares(object):
             y=y,
             dy=dy,
             lc_cache=lc_cache,
-            lc_cache_overview=lc_cache_overview,
-            objective=objective)
+            lc_cache_overview=lc_cache_overview)
         for data in p.imap_unordered(params, periods):
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
@@ -611,7 +455,7 @@ class TransitLeastSquares(object):
         test_statistic_rolls, test_statistic_rows, lc_cache_overview
 
 
-    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0, objective='snr'):
+    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0):
         """Compute the periodogram for a set user-defined parameters
         Parameters:
         periods : array of periods where the power should be computed
@@ -635,15 +479,11 @@ class TransitLeastSquares(object):
             depths,
             durations,
             limb_darkening=limb_darkening,
-            impact=impact,
-            objective=objective)
+            impact=impact)
 
         # Sort residuals for best
 
-        if objective == 'snr':
-            idx_best = numpy.argmin(test_statistic_residuals)
-        else:
-            idx_best = numpy.argmax(test_statistic_residuals)
+        idx_best = numpy.argmin(test_statistic_residuals)
         best_power = test_statistic_residuals[idx_best]
         best_period = test_statistic_periods[idx_best]
         best_roll = test_statistic_rolls[idx_best]
@@ -758,18 +598,14 @@ class TransitLeastSquares(object):
         stretch = duration_timeseries / epochs
         transit_duration_in_days = best_duration * stretch * best_period
 
-        if objective == 'snr':
-            # reduced chi^2
-            test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
-            chi2red = test_statistic_residuals
+        # reduced chi^2
+        test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
+        chi2red = test_statistic_residuals
 
-            # Squash to range 0..1 with peak at 1
-            test_statistic_residuals = 1/test_statistic_residuals - 1
-            
-            signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
-        else:
-            signal_residue = test_statistic_residuals
-            chi2red = None
+        # Squash to range 0..1 with peak at 1
+        test_statistic_residuals = 1/test_statistic_residuals - 1
+        
+        signal_residue = test_statistic_residuals / numpy.max(test_statistic_residuals)
 
         power = signal_residue
 
@@ -827,14 +663,50 @@ class TransitLeastSquares(object):
         SDE = (numpy.max(power) - numpy.mean(power)) / \
             numpy.std(power)
         SDE_power = (power - numpy.mean(power)) / numpy.std(power)
-        #print(power)
+
+        # Get transit depth, standard deviation and SNR per period
+        transit_depths = numpy.zeros([len(transit_times)])
+        transit_stds = numpy.zeros([len(transit_times)])
+        transit_snrs = numpy.zeros([len(transit_times)])
+        all_flux_intransit = numpy.array([])
+        all_idx_intransit = numpy.array([])
+        for i in range(len(transit_times)):
+            mid_transit = transit_times[i]
+            tmin = mid_transit - 0.5 * best_duration
+            tmax = mid_transit + 0.5 * best_duration
+            idx_intransit = numpy.where(numpy.logical_and(self.t > tmin, self.t < tmax))
+            all_idx_intransit = numpy.append(all_idx_intransit, idx_intransit)
+            flux_intransit = self.y[idx_intransit]
+            all_flux_intransit = numpy.append(all_flux_intransit, flux_intransit)
+            mean_flux = numpy.mean(self.y[idx_intransit])
+            std_flux = numpy.std(self.y[idx_intransit])
+            snr = (1 - mean_flux) / std_flux
+            transit_depths[i] = mean_flux
+            transit_stds[i] = std_flux
+            transit_snrs[i] = snr
+
+        flux_ootr = numpy.delete(self.y, all_idx_intransit)
+        total_depth = numpy.mean(all_flux_intransit)
+        total_std = numpy.std(all_flux_intransit)
+        total_snr = (numpy.sqrt(len(transit_depths)) * total_depth) / numpy.mean(flux_ootr)
+
+        #(1 - total_depth) / total_std
+
+        
+
+        #self.y[~]
+        #print('average ootr', numpy.mean(flux_ootr), numpy.std(flux_ootr))
+
+        #for i in range(len(all_flux_intransit)):
+        #    print(all_flux_intransit[i])
 
         return TransitLeastSquaresResults(test_statistic_periods, \
             power, test_statistic_rolls, test_statistic_rows, \
             lc_cache_overview, best_period, best_T0, best_row, best_power, \
             SDE, test_statistic_rolls, best_depth, best_duration,\
             transit_times, transit_duration_in_days, maxwidth_in_samples, \
-            folded_model, model_flux, chi2red, SDE_power)
+            folded_model, model_flux, chi2red, SDE_power, transit_depths,\
+            transit_stds, transit_snrs, total_depth, total_std, total_snr)
 
 
     def autopower(self):
@@ -864,7 +736,9 @@ class TransitLeastSquaresResults(dict):
                 "best_period", "best_T0", "best_row", "best_power", \
                 "SDE", "rolls", "best_depth", "best_duration", "transit_times", \
                 "transit_duration_in_days", "maxwidth_in_samples", \
-                "folded_model", "model_flux", "chi2red", "SDE_power"), args))
+                "folded_model", "model_flux", "chi2red", "SDE_power", \
+                "transit_depths", "transit_stds", "transit_snrs", \
+                "total_depth", "total_std", "total_snr"), args))
 
     def __getattr__(self, name):
         try:
