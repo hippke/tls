@@ -1,21 +1,15 @@
 import batman
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import matplotlib.cm as cmx
+from matplotlib.colors import LinearSegmentedColormap
 
-
-def box(width, depth):  # width in arbitrary units, depth in ppm
-    f = np.zeros(20000)
-    f[width:-width] = depth
-    #f[-width:20000] = depth
-    return f
-
-
-plt.rc('font',  family='serif', serif='Computer Modern Roman')
-plt.rc('text', usetex=True)
+#plt.rc('font',  family='serif', serif='Computer Modern Roman')
+#plt.rc('text', usetex=True)
 size = 4.5
 aspect_ratio = 1.5
-plt.figure(figsize=(size, size / aspect_ratio))
-ax = plt.gca()
+fig, ax = plt.subplots(figsize=(size, size / aspect_ratio))
 ax.get_yaxis().set_tick_params(which='both', direction='out')
 ax.get_xaxis().set_tick_params(which='both', direction='out')
 
@@ -29,42 +23,40 @@ ma.ecc = 0                      #eccentricity
 ma.w = 90                       #longitude of periastron (in degrees)
 ma.u = [0.5]                #limb darkening coefficients
 ma.limb_dark = "linear"       #limb darkening model
-
 t = np.linspace(-1, 1, 20000)
-#lds = np.linspace(0.33, 0.76, 100)  # all planet host stars
-
-lds = [0.939, 0.751, 0.570, 0.464, 0.386,  0.333, 0.284, 0.172, 0.132]
-
-# 300, 400, 500, 600, 700, 800, 900, 1500, 2000
-
-#lds = np.linspace(0.40, 0.63, 100)  # full range 2300K - 12000K
-
-
-#lds = np.linspace(0.01, 0.99, 100)  #
-
+lds = [0.939, 0.751, 0.570, 0.464, 0.386, 0.333, 0.284, 0.172, 0.132]
+Teffs = [300, 400, 500, 600, 700, 800, 900, 1500, 2000]
 
 ma.u = [0.50]
-m = batman.TransitModel(ma, t)    #initializes model
-flux = m.light_curve(ma)          #calculates light curve
+m = batman.TransitModel(ma, t)    # initializes model
+flux = m.light_curve(ma)          # calculates light curve
 reference_ld_curve = (flux-1)*10**6
-#plt.plot(t * 24, reference_ld_curve, color='black')
+jet = cm = plt.get_cmap('jet') 
+cNorm  = colors.Normalize(vmin=min(Teffs), vmax=max(Teffs))
+cmap = colors.LinearSegmentedColormap.from_list("", 
+    ["Violet","Blue","Green", "Yellow", "Orange", "Red", "Red", "Red", \
+    "Red", "Red", "Red",  "Red",  "Red",  "Red",  "Red", "Black"])
+scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=cmap)
 
 # Series of LD curves
+i = 0
 for ld in lds:
     ma.u = [ld]
     m = batman.TransitModel(ma, t)    #initializes model
     flux = m.light_curve(ma)          #calculates light curve
     scaled_flux = (flux-1)*10**6
-    plt.plot(t * 24, scaled_flux, color='black', linewidth=0.5)
-    diff = scaled_flux - reference_ld_curve
-    diff = diff**2
-    summed_residuals = np.sum(diff)
-    print(ld, summed_residuals)
-
+    colorVal = scalarMap.to_rgba(Teffs[i])
+    plts = plt.plot(t * 24, scaled_flux, color=colorVal, linewidth=2)
+    i = i + 1
 
 plt.xlabel("Time from central transit (hrs)")
 plt.ylabel("Relative flux (ppm)")
 plt.xlim(-7, 7)
 plt.ylim(-130, 10)
-ax.text(-1.5, -5, 'Earth/Sun')
+x = np.linspace(1000, 10, num=100)
+y = np.linspace(min(Teffs), max(Teffs), num=100)
+scatters = plt.scatter(x, y, c=y, cmap=cmap)
+cbar = fig.colorbar(scatters, ax=ax)
+cbar.set_label('Wavelength (nm)', rotation=270, labelpad=15)
+
 plt.savefig('fig_earth_lds_long_wavelengths.pdf', bbox_inches='tight')
