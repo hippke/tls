@@ -25,9 +25,10 @@ import scipy.interpolate
 from tqdm import tqdm
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees
+from numba import cuda, autojit, float32
 
 
-def get_data(EPIC):
+def get_catalog_info(EPIC):
     """Takes EPIC ID, returns limb darkening parameters u (linear) and 
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
         absolute deviation between given/catalog Teff and logg. Data are from:
@@ -67,20 +68,58 @@ def get_data(EPIC):
     return u, a, b, mass[0], radius[0], logg[0], Teff[0]
 
 
+@cuda.jit
+def itr_cuda(data, dys, signals, ootr, signal_row_sums):
+    startX, startY = cuda.grid(2)
+    gridX = cuda.gridDim.x * cuda.blockDim.x
+    gridY = cuda.gridDim.y * cuda.blockDim.y
+
+    # Iterate over all signal shapes
+    for signal_trial in range(startX, signals.shape[0], gridX):  # +1 ?
+        # Iterate over all phase shifts
+        smallest_residual = 10**10
+        for phase_position in range(startY, len(data)-signals.shape[1], gridY):
+            in_transit_sum = 0
+            for in_transit_point in range(signals.shape[1]+1):
+                # Calculate squared sum of residuals at this position
+                datapoint = data[phase_position+in_transit_point]
+                signal = signals[signal_trial, in_transit_point]
+                error = dys[phase_position+in_transit_point]
+                residual = (datapoint - signal)**2 #* error
+                in_transit_sum = in_transit_sum + residual
+            phase_sum = in_transit_sum + ootr[phase_position]
+            if phase_sum < smallest_residual:
+                smallest_residual = phase_sum
+        signal_row_sums[signal_trial] = smallest_residual
+
+"""
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def out_of_transit_residuals(data, width_signal, dy):
-    outer_loop_lenght = len(data) - width_signal + 1
+    outer_loop_length = len(data) - width_signal + 1
     inner_loop_length = len(data) - width_signal
-    chi2 = numpy.zeros(outer_loop_lenght)
-    for i in numba.prange(outer_loop_lenght):
+    chi2 = numpy.zeros(outer_loop_length)
+    for i in numba.prange(outer_loop_length):
         value = 0
         start_transit = i
         end_transit = i + width_signal
         for j in numba.prange(inner_loop_length):
             #if j < start_transit or j > end_transit:
             if (end_transit > j < start_transit):
-                value = value + (1 - data[j])**2 * dy[j]
+                value = value + (1 - data[j])**2 #* dy[j]
         chi2[i] = value
+    return chi2
+"""
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def ootr_efficient(data, width_signal, dy):
+    chi2 = numpy.zeros(len(data) - width_signal + 0)
+    fullsum = numpy.sum((1 - data)**2)# * dy)
+    window = numpy.sum((1 - data[:width_signal])**2) #* dy[:width_signal])
+    chi2[0] = fullsum-window
+    for i in range(1, len(data) - width_signal + 0):
+        drop_first = (1 - data[i-1])**2# * dy[i-1]
+        add_next = (1 - data[i + width_signal-1])**2 #* dy[i+width_signal-1]
+        chi2[i] = chi2[i-1] + drop_first - add_next
     return chi2
 
 
@@ -88,13 +127,13 @@ def out_of_transit_residuals(data, width_signal, dy):
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def in_transit_residuals(data, signal, dy):
-    outer_loop_lenght = len(data) - len(signal)
+    outer_loop_length = len(data) - len(signal)
     inner_loop_length = len(signal) + 1
-    chi2 = numpy.zeros(outer_loop_lenght + 1)
-    for i in numba.prange(outer_loop_lenght):
+    chi2 = numpy.zeros(outer_loop_length + 0)
+    for i in numba.prange(outer_loop_length):
         value = 0
         for j in numba.prange(inner_loop_length):
-            value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
+            value = value + ((data[i+j]-signal[j])**2) #* dy[i+j]
         chi2[i] = value
     return chi2
 
@@ -361,34 +400,103 @@ class TransitLeastSquares(object):
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
 
-        ootr = out_of_transit_residuals(
+        #ootr = out_of_transit_residuals(
+        #        patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
+        ootr2 = ootr_efficient(
                 patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
+
+        #print(len(ootr2), len(ootr))
+        #for i in range(len(ootr2)):
+        #    print(ootr[i])#, ootr[i])
+        #print(ootr2)
+        #print(ootr)
         
         # Set "best of" counters to max, in order to find smaller residuals
         smallest_residuals_in_period = float('inf')
         summed_residual_in_rows = float('inf')
 
-        # Iterate over all transit shapes (depths and durations)
-        for row in range(len(lc_cache)):
-            # This is the current transit (of some width, depth) to test
-            scaled_transit = lc_cache[row]
-            itr = in_transit_residuals(
-                data=patched_data,
-                signal=scaled_transit,
-                dy=inverse_squared_patched_dy)
-            stats = itr + ootr
-            best_roll = numpy.argmin(stats)
-            current_smallest_residual = stats[best_roll]
+
+        use_cuda = False;
+
+        if use_cuda:
+            phase_shift_loop = len(patched_data) - lc_cache.shape[1] + 1
+            #print(lc_cache.shape[1])
+            ootr = numpy.array(ootr2, dtype='float32')
+            chi2 = numpy.zeros((lc_cache.shape[0], phase_shift_loop), dtype='float32')
+            data = numpy.array(patched_data, dtype='float32')
+            dys = numpy.array(inverse_squared_patched_dy, dtype='float32')
+            signals = numpy.array(lc_cache, dtype='float32')
+            #print('BRAAAH')
+            #print(signals)
+            signal_row_sums = numpy.zeros(lc_cache.shape[0]-1, dtype='float32')
+            #blockdim = (8, 16)
+            #griddim = (128, 128)
+
+            blockdim = (32, 8)
+            griddim = (32,16)
+            #chi2_cuda = cuda.to_device(chi2)
+            #data_cuda = cuda.to_device(data)
+            #dys_cuda = cuda.to_device(dys)
+            #signals_cuda = cuda.to_device(signals)
+            itr_cuda[griddim, blockdim](data, dys, signals, ootr, signal_row_sums) 
+            #chi2_cuda.to_host()
+            signal_row_sums = numpy.array(signal_row_sums, dtype=numpy.float32)
+            #print(signal_row_sums)
+            #print(len(chi2[0,:]), len(ootr))
+            #print('chi2', chi2.shape[0], chi2.shape[1])
+            #print('lc_cache', lc_cache.shape[0], lc_cache.shape[1])
+            #print(signal_row_sums)
+            
+            #for row in range(len(lc_cache)):
+            #itr = chi2[row,:]
+            #stats = itr + ootr
+            #print('YEAHHH###', numpy.sum(itr))
+            best_roll = 1
+            current_smallest_residual = min(signal_row_sums)
+            #print(min(signal_row_sums), signal_row_sums)
+
 
             # Propagate results to outer loop (best duration, depth)
             if current_smallest_residual < summed_residual_in_rows:
                 summed_residual_in_rows = current_smallest_residual
-                best_row = row
+                best_row = 1
+
+        else:
+            # Iterate over all transit shapes (depths and durations)
+            for row in range(len(lc_cache)):
+                # This is the current transit (of some width, depth) to test
+                scaled_transit = lc_cache[row]
+                itr = in_transit_residuals(
+                    data=patched_data,
+                    signal=scaled_transit,
+                    dy=inverse_squared_patched_dy)
+                #print('out_old', ootr[5], ootr[50], ootr[500], ootr[5000])
+                #print('out_new', ootr2[5], ootr2[50], ootr2[500], ootr2[5000])
+                #print('in', itr[5], itr[50], itr[500], itr[5000])
+                #ootr2 = ootr2[:-1]
+                #itr = itr[:-1]
+                #print(numpy.size(ootr2), numpy.size(itr))
+                stats =  ootr2 + itr
+                #stats = stats[:-1]
+                best_roll = numpy.argmin(stats)
+                current_smallest_residual = stats[best_roll]
+
+                #if row==13:
+                #    for i in range(len(ootr2)):
+                #        print(ootr2[i], itr[i])
+
+                # Propagate results to outer loop (best duration, depth)
+                if current_smallest_residual < summed_residual_in_rows:
+                    summed_residual_in_rows = current_smallest_residual
+                    best_row = row
+
+
 
         if summed_residual_in_rows < smallest_residuals_in_period:
             smallest_residuals_in_period = summed_residual_in_rows
-            best_shift = best_roll
-        
+            best_shift = best_roll  
+        #best_row = 13      
+        #print(best_row)
         return [period, smallest_residuals_in_period, best_shift, best_row]
 
 
@@ -418,8 +526,7 @@ class TransitLeastSquares(object):
             str(round(max(periods), 3)) + ' days, using all ' + \
             str(multiprocessing.cpu_count()) + ' CPU threads'
         print(text)
-
-        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+        p = multiprocessing.Pool(processes=8)#multiprocessing.cpu_count())
         pbar = tqdm(total=numpy.size(periods), smoothing=0)
         
         params = partial(
