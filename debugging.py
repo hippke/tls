@@ -3,10 +3,11 @@ import numpy
 #import scipy
 import matplotlib.pyplot as plt
 import batman
-from TransitLeastSquares_cuda_multi_ootr2 import TransitLeastSquares, period_grid, fold
+from TransitLeastSquares import TransitLeastSquares, period_grid, fold, \
+    get_duration_grid, get_depth_grid
 #from TransitLeastSquares import TransitLeastSquares, period_grid, fold
-from astropy.stats import BoxLeastSquares
-
+#from astropy.stats import BoxLeastSquares
+from math import pi 
 #from numba import cuda, autojit, float32
 
 if __name__ == "__main__":
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     original_flux = m.light_curve(ma)  # calculates light curve
 
     # Create noise and merge with flux
-    ppm = 5
+    ppm = 20
     stdev = 10**-6 * ppm
     noise = numpy.random.normal(0, stdev, int(samples))
     y = original_flux + noise
@@ -44,7 +45,7 @@ if __name__ == "__main__":
     else:
         dy = numpy.full_like(y, numpy.std(noise))
 
-
+    """
     fig, ax = plt.subplots(1, 1, sharex=True, figsize=(6, 3))
     ax.plot(t, y, "k")
     ax.set_xlim(t.min(), t.max())
@@ -52,24 +53,32 @@ if __name__ == "__main__":
     ax.set_ylabel("relative flux [ppt]")
     plt.savefig('dfm_01_allflux.pdf', bbox_inches='tight')
     #plt.show()
+    """
 
     y_filt = y
     t = t #- min(t) # + 100
     print('Samples', numpy.size(y), 'duration', max(t)-min(t))
     #print()
-    
+
     periods = period_grid(
         R_star=1,  # R_sun
         M_star=1,  # M_sun
         time_span=(max(t) - min(t)),  # days
-        period_min=360,
-        period_max=380,
+        period_min=300,  # 365.25,   360: OK; 370: error dip
+        period_max=400,   # 365.3,
         oversampling_factor=3)
-    
+
+    durations = get_duration_grid(periods)
+    print(len(durations), 'durations from', format(min(durations), '.6f'), \
+            'to', format(max(durations), '.6f'))
+    depths = get_depth_grid(y)
+    print(len(depths), 'depths from', format(min(depths), '.6f'), \
+            'to', format(max(depths), '.6f'))
+
 
     # Define grids of transit depths and widths
-    depths = numpy.geomspace(80*10**-6, 120*10**-6, 5)  # 50
-    durations = numpy.geomspace(0.0015, 0.0020, 5)  # 50
+    #depths = numpy.geomspace(10*10**-6, 1000*10**-6, 20)  # 50
+    #durations = numpy.geomspace(0.001, 0.003, 20)  # 50
 
     model = TransitLeastSquares(t, y_filt, dy)
     results = model.power(periods, durations, depths, limb_darkening=0.5)
@@ -77,16 +86,16 @@ if __name__ == "__main__":
     #from astropy.io import fits
     #from astropy import units as u
     #periods = numpy.linspace(200, 500, 10000) #* u.day
-    import time
-    t1 = time.perf_counter()
-    bls_model = BoxLeastSquares(t, y_filt)
+    #import time
+    #t1 = time.perf_counter()
+    #bls_model = BoxLeastSquares(t, y_filt)
     #durations = numpy.linspace(0.05, 0.2, 10) #* u.day
-    results_bls = bls_model.power(periods, 0.2)
-    t2 = time.perf_counter()
-    print(t2-t1)
+    #results_bls = bls_model.power(periods, 0.2)
+    #t2 = time.perf_counter()
+    #print(t2-t1)
     #results_bls = bls_model.autopower(durations, frequency_factor=3.0)
 
-    """
+    
     print('Period', format(results.best_period, '.5f'), 'd')
     print(len(results.transit_times), 'transit times in time series:', \
             ['{0:0.5f}'.format(i) for i in results.transit_times])
@@ -115,10 +124,11 @@ if __name__ == "__main__":
     plt.xlabel('Period (days)')
     #plt.show()
     plt.savefig('test_stat_bls.pdf', bbox_inches='tight')
+    """
 
 
-    plt.rc('font',  family='serif', serif='Computer Modern Roman')
-    plt.rc('text', usetex=True)
+    #plt.rc('font',  family='serif', serif='Computer Modern Roman')
+    #plt.rc('text', usetex=True)
     plt.figure(figsize=(3.75, 3.75 / 1.5))
     ax = plt.gca()
     ax.get_yaxis().set_tick_params(which='both', direction='out')
@@ -157,7 +167,7 @@ if __name__ == "__main__":
     plt.ylabel('Relative flux (ppm)')
     #plt.show()
     plt.savefig('test_intransit.pdf', bbox_inches='tight')
-
+    """
     # Folded model
     phases = fold(t, results.best_period, T0=results.best_T0+ results.best_period/2)
     sort_index = numpy.argsort(phases)
@@ -165,8 +175,8 @@ if __name__ == "__main__":
     flux = y_filt[sort_index]
     #flux = (flux - 1) * 10**6
     model_flux = (results.folded_model)# - 1) * 10**6
-    plt.rc('font',  family='serif', serif='Computer Modern Roman')
-    plt.rc('text', usetex=True)
+    #plt.rc('font',  family='serif', serif='Computer Modern Roman')
+    #plt.rc('text', usetex=True)
     ax.get_yaxis().set_tick_params(which='both', direction='out')
     ax.get_xaxis().set_tick_params(which='both', direction='out')
     plt.figure(figsize=(3.75, 3.75 / 1.5))
@@ -179,4 +189,4 @@ if __name__ == "__main__":
     plt.ylabel('Relative flux')
     #plt.show()
     plt.savefig('test_fold.pdf', bbox_inches='tight')
-    """
+    
