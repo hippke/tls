@@ -112,14 +112,16 @@ def out_of_transit_residuals(data, width_signal, dy):
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def ootr_efficient(data, width_signal, dy):
-    chi2 = numpy.zeros(len(data) - width_signal + 0)
-    fullsum = numpy.sum((1 - data)**2)# * dy)
-    window = numpy.sum((1 - data[:width_signal])**2) #* dy[:width_signal])
+    chi2 = numpy.zeros(len(data) - width_signal + 1)
+    fullsum = numpy.sum(((1 - data)**2) * dy)
+    window = numpy.sum(((1 - data[:width_signal])**2) * dy[:width_signal])
     chi2[0] = fullsum-window
-    for i in range(1, len(data) - width_signal + 0):
-        drop_first = (1 - data[i-1])**2# * dy[i-1]
-        add_next = (1 - data[i + width_signal-1])**2 #* dy[i+width_signal-1]
-        chi2[i] = chi2[i-1] + drop_first - add_next
+    for i in range(1, len(data) - width_signal + 1):
+        becomes_visible = i-1
+        becomes_invisible = i-1 + width_signal
+        add_visible_left = (1 - data[becomes_visible])**2 * dy[i-1]
+        remove_invisible_right = (1 - data[becomes_invisible])**2 * dy[i+width_signal-1]
+        chi2[i] = chi2[i-1] + add_visible_left - remove_invisible_right
     return chi2
 
 
@@ -127,13 +129,13 @@ def ootr_efficient(data, width_signal, dy):
 # results in a speed penalty (factor two worse), so choose parallel=False here
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def in_transit_residuals(data, signal, dy):
-    outer_loop_length = len(data) - len(signal)
-    inner_loop_length = len(signal) + 1
+    outer_loop_length = len(data) - len(signal) + 1
+    inner_loop_length = len(signal)
     chi2 = numpy.zeros(outer_loop_length + 0)
-    for i in numba.prange(outer_loop_length):
+    for i in range(outer_loop_length):
         value = 0
-        for j in numba.prange(inner_loop_length):
-            value = value + ((data[i+j]-signal[j])**2) #* dy[i+j]
+        for j in range(inner_loop_length):
+            value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
         chi2[i] = value
     return chi2
 
@@ -476,12 +478,12 @@ class TransitLeastSquares(object):
                 #ootr2 = ootr2[:-1]
                 #itr = itr[:-1]
                 #print(numpy.size(ootr2), numpy.size(itr))
-                stats =  ootr2 + itr
+                stats = ootr2 + itr    # + ootr2 + itr
                 #stats = stats[:-1]
                 best_roll = numpy.argmin(stats)
                 current_smallest_residual = stats[best_roll]
 
-                #if row==13:
+                #if row==0:
                 #    for i in range(len(ootr2)):
                 #        print(ootr2[i], itr[i])
 
@@ -496,7 +498,7 @@ class TransitLeastSquares(object):
             smallest_residuals_in_period = summed_residual_in_rows
             best_shift = best_roll  
         #best_row = 13      
-        #print(best_row)
+        #print('best_row', best_row)
         return [period, smallest_residuals_in_period, best_shift, best_row]
 
 
@@ -706,8 +708,9 @@ class TransitLeastSquares(object):
         transit_duration_in_days = best_duration * stretch * best_period
 
         # reduced chi^2
-        test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
         chi2red = test_statistic_residuals
+        test_statistic_residuals = test_statistic_residuals / (len(self.t) - 4)
+        
 
         # Squash to range 0..1 with peak at 1
         test_statistic_residuals = 1/test_statistic_residuals - 1
