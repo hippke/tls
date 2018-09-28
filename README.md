@@ -3,7 +3,7 @@
 
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
 [![Image](https://img.shields.io/badge/Python-3.5%20%7C%203.6%20%7C%203.7-blue.svg)](https://pypi.org/project/tls-package/ "PyPI")
-Add badge: ADS, arxiv
+Add badge: ADS, arxiv, DOI, ASCL
 
 Work in progress. Do not use :-)
 
