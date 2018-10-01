@@ -13,7 +13,7 @@ def itr_cuda(data, dys, signals, chi2map):
     in_transit_point = tz + bz * hd
     if signal_trial < signals.shape[0] and \
     phase_position < len(data)-signals.shape[1]+1 and \
-    in_transit_point < signals.shape[1]
+    in_transit_point < signals.shape[1]:
         datapoint = data[phase_position+in_transit_point]
         signal = signals[signal_trial, in_transit_point]
         error = dys[phase_position+in_transit_point]
