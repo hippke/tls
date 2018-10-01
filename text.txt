@@ -1,10 +1,3 @@
- periods ranging from 0.7 d to 98 per cent of the total duration
-of the Campaign, using our own version of the algorithm \citep{2016MNRAS.461.3399P}
-
-transit length in the range 0.01--0.1 \citep{2012MNRAS.424.3101G}, 0.001--0.2 \citep{2016MNRAS.459.2408A}
-
-SDE threshold between 6-8 as a function of period \citep{2016MNRAS.461.3399P,2016MNRAS.459.2408A}, 10 \citep{2018MNRAS.473L.131W}
-
 range to smaller:
 https://stackoverflow.com/questions/35051998/very-slow-numba-cuda-in-python/35143018#35143018
 
