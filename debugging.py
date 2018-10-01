@@ -4,11 +4,11 @@ import numpy
 import matplotlib.pyplot as plt
 import batman
 #from TransitLeastSquares_cuda_multi_ootr2 import TransitLeastSquares, period_grid, fold
-from TransitLeastSquares_v22 import TransitLeastSquares, period_grid, fold,\
+from TransitLeastSquares import TransitLeastSquares, period_grid, fold,\
     get_duration_grid, get_depth_grid
 
 #from TransitLeastSquares import TransitLeastSquares, period_grid, fold
-from astropy.stats import BoxLeastSquares
+#from astropy.stats import BoxLeastSquares
 
 #from numba import cuda, autojit, float32
 
@@ -65,8 +65,8 @@ if __name__ == "__main__":
         R_star=1,  # R_sun
         M_star=1,  # M_sun
         time_span=(max(t) - min(t)),  # days
-        period_min=364,
-        period_max=366,
+        period_min=350,
+        period_max=400,
         oversampling_factor=3)
     #periods = numpy.linspace(365.2, 365.3, 100)
 
@@ -96,13 +96,13 @@ if __name__ == "__main__":
     #from astropy.io import fits
     #from astropy import units as u
     #periods = numpy.linspace(200, 500, 10000) #* u.day
-    import time
-    t1 = time.perf_counter()
-    bls_model = BoxLeastSquares(t, y_filt)
+    #import time
+    #t1 = time.perf_counter()
+    #bls_model = BoxLeastSquares(t, y_filt)
     #durations = numpy.linspace(0.05, 0.2, 10) #* u.day
-    results_bls = bls_model.power(periods, numpy.linspace(0.1, 0.7, 20))
-    t2 = time.perf_counter()
-    print('BLS time', t2-t1)
+    #results_bls = bls_model.power(periods, numpy.linspace(0.1, 0.7, 20))
+    #t2 = time.perf_counter()
+    #print('BLS time', t2-t1)
     #results_bls = bls_model.autopower(durations, frequency_factor=3.0)
 
     """
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     print('Best duration (fractional period)', format(results.best_duration, '.5f'))
     print('Best duration (days)', format(results.transit_duration_in_days, '.5f'))
     print('Signal detection efficiency (SDE):', results.SDE)
-    """
+    
     plt.rc('font',  family='serif', serif='Computer Modern Roman')
     plt.rc('text', usetex=True)
     plt.figure(figsize=(3.75, 3.75 / 1.5))
@@ -135,10 +135,11 @@ if __name__ == "__main__":
     #plt.show()
 
     plt.savefig('BLS_T0_180d.pdf', bbox_inches='tight')
+    """
 
-
-    plt.rc('font',  family='serif', serif='Computer Modern Roman')
-    plt.rc('text', usetex=True)
+    #plt.rc('font',  family='serif', serif='Computer Modern Roman')
+    #plt.rc('text', usetex=True)
+    """
     plt.figure(figsize=(3.75, 3.75 / 1.5))
     ax = plt.gca()
     ax.get_yaxis().set_tick_params(which='both', direction='out')
@@ -160,9 +161,11 @@ if __name__ == "__main__":
     plt.ylim(1, max(results.chi2red)*1.1)
     plt.savefig('test_stat_tls_chi2red_ld0.pdf', bbox_inches='tight')
     print(min(results.SDE_power), max(results.chi2red))
+    """
 
-    plt.rc('font',  family='serif', serif='Computer Modern Roman')
-    plt.rc('text', usetex=True)
+    #plt.rc('font',  family='serif', serif='Computer Modern Roman')
+    #plt.rc('text', usetex=True)
+    """
     plt.figure(figsize=(3.75, 3.75 / 1.5))
     ax = plt.gca()
     ax.get_yaxis().set_tick_params(which='both', direction='out')
@@ -183,7 +186,28 @@ if __name__ == "__main__":
     #plt.show()
     plt.savefig('test_stat_tls_SDE_power.pdf', bbox_inches='tight')
     print(min(results.SDE_power), max(results.chi2red))
+    """
 
+
+    plt.figure(figsize=(3.75, 3.75 / 1.5))
+    ax = plt.gca()
+    ax.get_yaxis().set_tick_params(which='both', direction='out')
+    ax.get_xaxis().set_tick_params(which='both', direction='out')
+    #ax.axvline(results.best_period, alpha=0.4, lw=3)
+    plt.xlim(numpy.min(periods), numpy.max(periods))
+    #plt.xlim(0, 40)
+    plt.ylim(0, max(results.SR)*1.1)
+    #for n in range(2, 10):
+    #    ax.axvline(n*results.best_period, alpha=0.4, lw=1, linestyle="dashed")
+    #    ax.axvline(results.best_period / n, alpha=0.4, lw=1, linestyle="dashed")
+    plt.plot(results.periods, results.SR, color='black', lw=0.5)
+    #plt.plot(results_bls.period, results_bls.power, "k", lw=0.5)
+    #ax.text(results.best_period, results.SR, round(max(results.SR),1))
+    #lt.ylabel(r'$\chi^2_{\rm red}$')
+    plt.ylabel(r'SR')
+    plt.xlabel('Period (days)')
+    #plt.show()
+    plt.savefig('test_stat_tls_SR.pdf', bbox_inches='tight')
 
     """
     # Plot the in-transit points using 
@@ -210,8 +234,8 @@ if __name__ == "__main__":
     flux = y_filt[sort_index]
     #flux = (flux - 1) * 10**6
     model_flux = (results.folded_model)# - 1) * 10**6
-    plt.rc('font',  family='serif', serif='Computer Modern Roman')
-    plt.rc('text', usetex=True)
+    #plt.rc('font',  family='serif', serif='Computer Modern Roman')
+    #plt.rc('text', usetex=True)
     ax.get_yaxis().set_tick_params(which='both', direction='out')
     ax.get_xaxis().set_tick_params(which='both', direction='out')
     plt.figure(figsize=(3.75, 3.75 / 1.5))
@@ -224,4 +248,3 @@ if __name__ == "__main__":
     plt.ylabel('Relative flux')
     #plt.show()
     plt.savefig('test_fold.pdf', bbox_inches='tight')
-    
