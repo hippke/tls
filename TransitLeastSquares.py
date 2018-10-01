@@ -792,18 +792,21 @@ class TransitLeastSquares(object):
         chi2 = test_statistic_residuals
         chi2red = test_statistic_residuals
         chi2red = chi2red / (len(self.t) - 4)
-        SR = (1/chi2red)
-        SR = SR/max(SR)
 
-        SDE_power = ((1/chi2red)/numpy.std(chi2red))
-        SDE_power = SDE_power-min(SDE_power)
+        SR = min(chi2) / chi2
+        SDE = (1 - numpy.mean(SR)) / numpy.std(SR)
+        print('SDE_max', SDE)
+        SDE_power = SR
+        #SDE_power = ((1/chi2red)/numpy.std(chi2red))
+        #SDE_power = SDE_power-min(SDE_power)
 
 
         #/max(chi2red)
         #SDE_power = SR-numpy.mean(SR)
         #SDE_power = SDE_power / numpy.std(SDE_power)
         power = SDE_power
-        SDE = max(SDE_power)
+        #SDE_max = max(SDE_power)
+
 
         # Make folded model
         #phases = fold(self.t, best_period, T0=best_T0+ best_period/2)
@@ -820,7 +823,7 @@ class TransitLeastSquares(object):
             limb_darkening=limb_darkening,
             impact=impact)
         # Model and data are off by one cadence
-        folded_model = numpy.roll(folded_model, -1)  
+        #folded_model = numpy.roll(folded_model, -1)  
 
         # Full model
         # We oversample the model internally
