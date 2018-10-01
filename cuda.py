@@ -1,11 +1,21 @@
-@cuda.jit
-def itr_cuda(data, a, s, result):
-    i = cuda.grid(1)
+def itr_cuda(data, dys, signals, chi2map):
     tx = cuda.threadIdx.x
+    ty = cuda.threadIdx.y
+    tz = cuda.threadIdx.z
     bx = cuda.blockIdx.x
+    by = cuda.blockIdx.y
+    bz = cuda.blockIdx.y
     bw = cuda.blockDim.x
-    i = tx + bx * bw
-    xstride = cuda.gridsize(1)
-    for j in range(i, s.shape[0], xstride):
-        while k < len(data)-s.shape[1] and l < s.shape[1]+1:
-            result[l,k] += (data[k+l] - s[j,l])**2 * a[k+l]
+    bh = cuda.blockDim.y
+    bd = cuda.blockDim.z
+    signal_trial = tx + bx * bw
+    phase_position = ty + by * bh
+    in_transit_point = tz + bz * hd
+    if signal_trial < signals.shape[0] and \
+    phase_position < len(data)-signals.shape[1]+1 and \
+    in_transit_point < signals.shape[1]
+        datapoint = data[phase_position+in_transit_point]
+        signal = signals[signal_trial, in_transit_point]
+        error = dys[phase_position+in_transit_point]
+        residual = ((datapoint - signal)**2 * error)
+        chi2map[signal_trial, phase_position] += residual
