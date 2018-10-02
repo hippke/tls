@@ -15,7 +15,7 @@ def itr_cuda(data, signal, dy, ootr, chi2map):
             value = 0
             for j in range(signals.shape[1]+1):
                 value = value + ((data[i+j]-signal[h,j])**2) * dy[i+j]
-            chi2map[h,i] = value + ootr
+            chi2map[h,i] = value + ootr[i]
             
             
 
