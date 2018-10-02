@@ -1,3 +1,13 @@
+Cuda:
+@cuda.jit
+def itr_cuda(data, signal, dy, chi2):
+    outer_loop_length = len(data) - len(signal) + 1
+    inner_loop_length = len(signal)
+    i = cuda.grid(1)
+    if i < outer_loop_length and j < inner_loop_length:
+        chi2[i] += ((data[i+j]-signal[j])**2) * dy[i+j]
+
+
 range to smaller:
 https://stackoverflow.com/questions/35051998/very-slow-numba-cuda-in-python/35143018#35143018
 
