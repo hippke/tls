@@ -1,3 +1,27 @@
+# Median filter
+from scipy.signal import medfilt
+kernel_size = 75
+if kernel_size % 2 == 0:
+    kernel_size = kernel_size + 1
+my_median = running_median(results.SDE_power, kernel_size)
+cleaned_SDE_power = results.SDE_power - my_median
+# Re-normalize to range between median = 0 and peak = SDE
+# shift down to the mean being zero
+cleaned_SDE_power = cleaned_SDE_power - numpy.mean(cleaned_SDE_power)     
+# scale factor to touch max=SDE 
+scale = results.SDE / numpy.max(cleaned_SDE_power)  
+cleaned_SDE_power = cleaned_SDE_power * scale
+# Recalculate SDE
+new_SDE = numpy.max(cleaned_SDE_power / numpy.std(cleaned_SDE_power))
+print('SDE raw', results.SDE)
+print('SDE new', new_SDE)
+
+plt.plot(results.periods, cleaned_SDE_power+5, color='blue', lw=0.5)
+plt.plot(results.periods, my_median, color='red', lw=0.5)
+
+
+
+
 @cuda.jit
 def itr_cuda(data, signal, dy, chi2):
     outer_loop_length = len(data) - len(signal) + 1
