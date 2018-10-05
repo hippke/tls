@@ -1,3 +1,15 @@
+def running_median(data, width_signal):
+    idx = numpy.arange(width_signal) + numpy.arange(len(data)-width_signal+1)[:,None]
+    a = numpy.median(data[idx], axis=1)
+    first_values = a[0]
+    last_values = a[-1]
+    missing_values = len(data) - len(a)
+    values_front = int(missing_values/2)
+    values_end = missing_values - values_front
+    a = numpy.append(numpy.full(values_front, first_values), a)
+    a = numpy.append(a, numpy.full(values_end, last_values))
+    return a
+
 copy median filter
 
 # Median filter
