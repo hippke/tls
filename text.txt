@@ -1,71 +1,17 @@
-def running_median(data, width_signal):
-    idx = numpy.arange(width_signal) + numpy.arange(len(data)-width_signal+1)[:,None]
-    a = numpy.median(data[idx], axis=1)
-    first_values = a[0]
-    last_values = a[-1]
-    missing_values = len(data) - len(a)
-    values_front = int(missing_values/2)
-    values_end = missing_values - values_front
-    a = numpy.append(numpy.full(values_front, first_values), a)
-    a = numpy.append(a, numpy.full(values_end, last_values))
-    return a
-
-copy median filter
-
-# Median filter
-from scipy.signal import medfilt
-kernel_size = 75
-if kernel_size % 2 == 0:
-    kernel_size = kernel_size + 1
-my_median = running_median(results.SDE_power, kernel_size)
-cleaned_SDE_power = results.SDE_power - my_median
-# Re-normalize to range between median = 0 and peak = SDE
-# shift down to the mean being zero
-cleaned_SDE_power = cleaned_SDE_power - numpy.mean(cleaned_SDE_power)     
-# scale factor to touch max=SDE 
-scale = results.SDE / numpy.max(cleaned_SDE_power)  
-cleaned_SDE_power = cleaned_SDE_power * scale
-# Recalculate SDE
-new_SDE = numpy.max(cleaned_SDE_power / numpy.std(cleaned_SDE_power))
-print('SDE raw', results.SDE)
-print('SDE new', new_SDE)
-
-plt.plot(results.periods, cleaned_SDE_power+5, color='blue', lw=0.5)
-plt.plot(results.periods, my_median, color='red', lw=0.5)
-
-
-
-
-@cuda.jit
-def itr_cuda(data, signal, dy, chi2):
-    outer_loop_length = len(data) - len(signal) + 1
-    inner_loop_length = len(signal)
-    i = cuda.grid(1)
-    if i < outer_loop_length and j < inner_loop_length:
-        chi2[i] += ((data[i+j]-signal[j])**2) * dy[i+j]
-
-@cuda.jit
-def itr_cuda(data, signal, dy, ootr, chi2map):
-    h, i = cuda.grid(2)
-    if h < signals.shape[0]:
-        if i < len(data)-signals.shape[1]:
-            value = 0
-            for j in range(signals.shape[1]+1):
-                value = value + ((data[i+j]-signal[h,j])**2) * dy[i+j]
-            chi2map[h,i] = value + ootr[i]
-            
-            
-https://devtalk.nvidia.com/default/board/57/cuda-programming-and-performance/
-range to smaller:
-https://stackoverflow.com/questions/35051998/very-slow-numba-cuda-in-python/35143018#35143018
-
-numba/cuda
-https://github.com/stefanseefeld
-https://github.com/sklam
-https://github.com/seibert
-
-
-https://stackoverflow.com/users/3293881/divakar
-https://stackoverflow.com/users/4657412/davidw
-http://gpgpu-computing.blogspot.com/2009/08/hitting-wall.html
-https://www.ibm.com/developerworks/community/blogs/jfp/entry/How_To_Compute_Mandelbrodt_Set_Quickly?lang=en
+if use_cores == 1:
+        print('Running on 1 core')
+        pbar = tqdm(total=numpy.size(periods))
+        for period in periods:
+            data = search_period(
+                period=period,
+                time_series=time_series,
+                injected=injected,
+                weights=weights,
+                lc_cache=lc_cache,
+                lc_cache_overview=lc_cache_overview,
+                algo=algo)
+            test_statistic_periods.append(data[0])
+            test_statistic_residuals.append(data[1])
+            test_statistic_rolls.append(data[2])
+            test_statistic_rows.append(data[3])
+            pbar.update(1)
