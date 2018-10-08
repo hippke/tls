@@ -1,3 +1,16 @@
+remove duplicate
+depths = numpy.unique(lc_cache_overview['depth'])
+in " for duration in durations:"
+
+
+durations = numpy.unique(lc_cache_overview['width_in_samples'])
+            depths = numpy.unique(lc_cache_overview['depth'])
+			
+with a pre-computed list of unique values
+
+
+
+
 if use_cores == 1:
         print('Running on 1 core')
         pbar = tqdm(total=numpy.size(periods))
