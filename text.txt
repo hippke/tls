@@ -1,3 +1,14 @@
+oben:
+lc_cache_overview_list_first = lc_cache_overview['first_sample'][:].tolist()
+lc_cache_overview_list_last = lc_cache_overview['last_sample'][:].tolist()
+
+in k Schleife
+start = lc_cache_overview_list_first[chosen_transit_row]
+end = lc_cache_overview_list_last[chosen_transit_row]
+
+best version:
+=============
+
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def get_row(target_depth, array_depths, array_row):
     for j in range(len(array_depths)):
