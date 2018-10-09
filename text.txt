@@ -1,3 +1,5 @@
+Note idea: Use Cython
+
 move
 array_to_check = numpy.where(mean > cutoff)[0]
 upwards, then make proceedings conditional:
