@@ -1,3 +1,9 @@
+move
+array_to_check = numpy.where(mean > cutoff)[0]
+upwards, then make proceedings conditional:
+if len(array_to_check) > 0:
+
+
 oben:
 lc_cache_overview_list_first = lc_cache_overview['first_sample'][:].tolist()
 lc_cache_overview_list_last = lc_cache_overview['last_sample'][:].tolist()
