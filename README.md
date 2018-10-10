@@ -1,8 +1,5 @@
-# TLS: Transit Least Squares 
-### An optimized algorithm to search for transits of small exoplanets in stellar light curves
-
 [![Image](https://github.com/hippke/tls/blob/master/logo.png)
-
+### An optimized algorithm to search for transits of small exoplanets in stellar light curves
 
 
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
