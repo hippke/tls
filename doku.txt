@@ -100,7 +100,7 @@ log_step: Spacing between trial depths, where depth_n+1=depth_n * log_step. The 
 
 
 
-
+=====================
 def get_catalog_info(EPIC):
     """Takes EPIC ID, returns limb darkening parameters u (linear) and 
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
@@ -109,3 +109,22 @@ def get_catalog_info(EPIC):
         - New limb-darkening coefficients, Claret+ 2012, 2013, 
           2012A&A...546A..14C, 2013A&A...552A..16C"""
  return u, a, b, mass[0], radius[0], logg[0], Teff[0]
+
+
+=====================
+model = TransitLeastSquares(t, y, dy)
+dy: optional
+
+
+
+=====================
+model.power(periods, durations, depths, limb_darkening=u, impact=0.0)
+Parameter:
+
+Returns:
+results.
+
+
+=====================
+model.autopower()
+parameter: Optional
