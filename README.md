@@ -1,4 +1,5 @@
-[![Image](https://github.com/hippke/tls/blob/master/logo.png)
+![Image of Yaktocat](https://github.com/hippke/tls/blob/master/logo.png)
+
 ### An optimized algorithm to search for transits of small exoplanets in stellar light curves
 
 
