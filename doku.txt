@@ -1,3 +1,5 @@
+https://rodluger.github.io/starry/api.html#the-kepler-module
+
 Period grid
 =====================
 When searching for sine-like signals, e.g. using Fourier
@@ -76,7 +78,7 @@ def get_duration_grid(periods, log_step=1.1, upper_limit=0.12):
 
 Parameters:
 periods: A grid of trial periods, e.g., produced with "Period grid" (siehe oben)
-log_step: Spacing between trial durations, where dur_n+1=dur_n * log_step
+log_step: Spacing between trial durations, where dur_n+1=dur_n * log_step. The default makes each trial duration 10% longer than the previous.
 upper_limit=0.12  # Maximum fractional transit duration ever observed is 0.117
         # for Kepler-1368 b (as of Oct 2018), so we set upper_limit=0.15
         # Long fractional transit durations are computationally expensive 
@@ -93,7 +95,7 @@ Parameters:
 y : Data
 deepest: The deepest transit to be tested. If none is given, the deepest data point is taken as the maximum transit depth. It is recommended to clean the data from outliers, or to specify a max depth. Otherwise, a lot of unnecessary deep transits will be fitted, resulting in high computational demand
 shallowest: The shallowest transit to be tested. If none is given, 10 ppm is assumed (the shallowest known transit is 50ppm; an Earth-sized planet transiting a G2V star corresponds to 100ppm). Smaller values result in higher computational demand. Transits down to 0.5*shallowest can be found at reduced sensitivity. Transits < 0.5*shallowest will not be found
-log_step: Spacing between trial depths, where depth_n+1=depth_n * log_step
+log_step: Spacing between trial depths, where depth_n+1=depth_n * log_step. The default makes each trial depth 10% deeper than the previous.
 
 
 
