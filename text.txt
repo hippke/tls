@@ -1,0 +1,22 @@
+TLS logo
+
+write test cases
+
+doks mit sphinx
+
+\textsf{TLS}
+
+The original BLS implementation did not account for transit events occurring to be divided between the first and the last bin of the folded light curve. This was noted by Peter R. McCullough in 2002, and an updated version of BLS was made ("ee-bls.f") to account for this edge effect. The patch is commonly realized by extending the phase array through appending the first bin once again at the end, so that a split transit is stitched together, and present once in full length. The disadvantage of this approach has apparently been ignored: The test statistic is affected by a small amount of additional noise. Depending on the trial period, a transit signal (if present) is sometimes partly located in the first and the second bin. The lower (in-transit) flux values from the first bin are appended at the end of the data, resulting in a change of the ratio between out-of-transit and in-transit flux (there are now three bins with partial transits). In TLS, we subtract this effect before calculating the test statistic. A visualization of this effect on the statistic is shown in Figure~X, using synthetic data. In real data, the effect is usually overpowered by noise, and was thus ignored, but is nonetheless present.
+
+
+post BLS detection fitting using a chi2 minimzation with a transit-shaped signal \citep{2006AJ....132..210B}
+
+false positives from blended eclipsing binaries produce V-shaped transits
+TLS can be run twice; once using a planet-shaped signal, and once using a V-shaped signal. If the V-shaped signal results in a better fit (higher signal), the transit can be classified as V-shaped and likely EB
+
+transit with similar shape, but lower depth, at the opposite phase due to a secondary eclipse
+
+e trapezoidal
+shape is only fitted after the standard parameters provided by
+the box-fitting algorithm have been found (such as period, transit
+duration and epoch) \citep{2013A&A...560A..92Z}
