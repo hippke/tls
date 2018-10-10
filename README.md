@@ -1,8 +1,5 @@
 ![Image of Yaktocat](https://github.com/hippke/tls/blob/master/logo.png)
-
 ### An optimized algorithm to search for transits of small exoplanets in stellar light curves
-
-
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE "MIT license")
 [![Image](https://img.shields.io/badge/Python-3.5%20%7C%203.6%20%7C%203.7-blue.svg)](https://pypi.org/project/tls-package/ "PyPI")
 Add badge: ADS, arxiv, DOI, ASCL
