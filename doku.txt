@@ -127,4 +127,7 @@ results.
 
 =====================
 model.autopower()
-parameter: Optional
+parameter: 
+fine/normal/coarse (Optional)
+
+Returns result.X as model.power
