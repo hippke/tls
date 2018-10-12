@@ -66,7 +66,7 @@ class TransitLeastSquares(object):
         if not hasattr(parameters, 'M_star_max'):
             parameters.M_star_max = 1.0
         if parameters.M_star_max < parameters.M_star:
-            raise ValueError('M_star_max >= R_star required')
+            raise ValueError('M_star_max >= M_star required')
         if parameters.M_star_max <= 0 or parameters.M_star_max >= float('inf'):
             raise ValueError('M_star_max must be positive')
 
