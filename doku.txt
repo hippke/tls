@@ -24,6 +24,7 @@ where :math:`M` and :math:`R` are the stellar mass and radius, :math:`G` is the 
 :time_span: Duration of time series (in units of days)
 :period_min:  Minimum trial period (in units of days). Optional.
 :period_max: Maximum trial period (in units of days). Optional.
+:n_transits_min: Minimum number of transits, sets ``period_max=time_span/n_transits_min``. Default: 2. Optional.
 :oversampling_factor: Default: 2. Optional.
 
     Returns: a 1D array of float values representing a grid of trial periods in units of days.
@@ -41,10 +42,19 @@ returns a period grid with 32172 values:
 
     [200, 199.889, 199.779, ..., 0.601, 0.601, 0.601]
 
-	
-	
-Duration grid
-=====================
+
+
+autoperiod(
+log_step=1.1
+upper_limit=0.12
+minimum_n_transits 
+
+)
+
+    
+Durations
+---------
+
 Traditionally, transit searches use a fixed grid of trial durations. This routine helps to generate a grid of optimized trial durations, limited to the physically plausible range in a given search. 
 
 In the limit of the planet being much smaller than the
@@ -86,9 +96,9 @@ upper_limit=0.12  # Maximum fractional transit duration ever observed is 0.117
         # Long fractional transit durations are computationally expensive 
         # following a quadratic relation. If applicable, use a different value.
         # Longer transits can still be found, but at decreasing sensitivity
-		
+        
 
-		
+        
 Depth grid
 ==========================
 get_depth_grid(y, deepest=None, shallowest=None, log_step=None)
@@ -119,17 +129,75 @@ dy: optional
 
 
 
-=====================
-model.power(periods, durations, depths, limb_darkening=u, impact=0.0)
-Parameter:
-
-Returns:
-results.
 
 
-=====================
-model.autopower()
-parameter: 
-fine/normal/coarse (Optional)
+.. class:: TransitLeastSquares.parameters(parameters)
+Object to store the parameters of the search.
 
-Returns result.X as model.power
+Parameters used for the period grid and the duration grid:
+:R_star: *(float)* Stellar radius (in units of solar radii). Default: 1. Optional.
+:R_star_min: *(float)* Minimum stellar radius to be considered (in units of solar radii). Default: 0.13. Optional.
+:R_star_max: *(float)* Maximum stellar radius to be considered (in units of solar radii) Default: 3.5. Optional.
+:M_star: *(float)* Stellar mass (in units of solar masses). Default: 1. Optional.
+:M_star_min: *(float)* Minimum stellar mass to be considered (in units of solar masses). Default: 0.1. Optional.
+:M_star_max:  *(float)* Minimum stellar mass to be considered (in units of solar masses). Default: 1. Optional.
+
+:period_min:  *(float)* Minimum trial period (in units of days). If none is given, the limit is derived from the Roche limit. Optional.
+:period_max: *(float)* Maximum trial period (in units of days). Default: Half the duration of the time series. Optional.
+:n_transits_min: *(int)* Minimum number of transits required, sets ``period_max=time_span/n_transits_min``. Default: 2. Optional.
+
+
+Physical parameters of the fitted transit:
+:per: *(float)* Orbital period (in units of days). Default: X. Optional.
+:rp: *(float)* Planet radius (in units of stellar radii). Default: X. Optional.
+:a: *(float)* Semi-major axis (in units of stellar radii). Default: X. Optional.
+:inc: *(float)* Orbital inclination (in degrees). Default: 90. Optional.
+:b: *(float)* Orbital impact parameter as the sky-projected distance between the centre of the stellar disc and the centre of the planetary disc at conjunction. If set, overrules ``inc=degrees(arccos(b/a)``. Default: 0. Optional.
+:ecc: *(float)* Orbital eccentricity. Default: 0. Optional.
+:w: *(float)* Argument of periapse (in degrees). Default: 90. Optional.
+:u: *(array)* List of limb darkening coefficients. Default: [X, Y]. Optional.
+:limb_dark: *(str)* Limb darkening model (choice of ``nonlinear``, ``quadratic``, ``exponential``, ``logarithmic``, ``squareroot``, ``linear``, ``uniform``, ``power2``, or ``custom``). Default: ``quadratic``. Optional.
+
+
+Parameters used to balance detection efficiency and computational requirements:
+:duration_grid_step: *(float)* Grid step width between subsequent trial durations, so that :math:`{\rm dur}_{n+1}={\rm dur}_n \times {\rm duration_grid_step}`. Default: 1.1 (i.e., each subsequent trial duration is longer by 10%). Optional.
+:transit_depth_min: *(float)* Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest transit from Kepler is 11.9 ppm (Kepler-37b, `Barclay et al. 2013 <http://adsabs.harvard.edu/abs/2013Natur.494..452B>`_). Default: 10 ppm. Optional.
+:oversampling_factor: *(int)* Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed. Default: 2. Optional.
+
+.. note::
+
+   Higher ``oversampling_factor`` increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift.
+
+
+:time_span: ==> Is calculated from the data given
+:depths: ==> Is calculated from the data given
+
+
+
+Example usage:
+
+::
+
+    params = TransitLeastSquares.parameters()
+    parameters.R_star = 0.7
+
+
+
+
+.. class:: TransitLeastSquares.power(parameters, t, y, dy)
+:params: (a ``parameters`` object) containing the defined parameters of the search
+:t: *(array)* Time series of the data (in units of days).
+:y: *(array)* Flux series of the data, so that ``1`` is nominal flux (out of transit) and ``0`` is darkness. A transit may be represented by a flux of e.g., ``0.99``.
+:dy: *(array)* Measurement errors of the data. Optional.
+
+Example usage:
+
+::
+
+    params = TransitLeastSquares.parameters()
+    parameters.R_star = 0.7
+
+
+    Returns:
+
+:params: 
