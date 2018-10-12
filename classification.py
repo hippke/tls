@@ -8,7 +8,8 @@ class TransitLeastSquares(object):
 
         # Data
         duration = max(t) - min(t)
-        assert (duration >= 0), 'Time duration must positive'
+        if duration <= 0:
+            raise ValueError('Time duration must positive')
         if min(y) < 0:
             raise ValueError('Flux values must be positive')
         if max(y) >= float('inf'):
