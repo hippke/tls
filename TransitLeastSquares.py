@@ -14,9 +14,9 @@
 import numpy
 import numba
 import scipy
-import sys
 import multiprocessing
 import math
+import time
 
 # batman-package for transit light curves
 # https://www.cfa.harvard.edu/~lkreidberg/batman/
@@ -24,65 +24,109 @@ import batman
 import scipy.interpolate
 from tqdm import tqdm
 from functools import partial
-from numpy import pi, sqrt, arccos, degrees
-from numba import cuda, autojit, float32
-from numba import njit, jit, vectorize
+from numpy import pi, sqrt, arccos, degrees, floor, ceil
+from array import array
 
 
-def T14(R_s, M_s, P):
+"""Magic constants"""
+
+# astrophysical constants
+G = 6.673e-11  # [m^3 / kg / s^2]
+R_sun = 695508000  # [m]
+R_earth = 6371000
+M_sun = 1.989*10**30  # [kg]
+SECONDS_PER_DAY = 86400
+
+# Default values as described in the paper
+TRANSIT_DEPTH_MIN = 10 * 10**-6  # 10 ppm
+LIMB_DARKENING = 0.5  # linear limb darkening
+B = 0.0  # impact parameter
+
+# For the period grid
+R_STAR = 1.0
+M_STAR = 1.0
+OVERSAMPLING_FACTOR = 3
+N_TRANSITS_MIN = 2
+
+# For the duration grid
+M_STAR_MIN = 0.1
+M_STAR_MAX = 1.0
+R_STAR_MIN = 0.13
+R_STAR_MAX = 3.5
+DURATION_GRID_STEP = 1.1
+
+# For the transit template
+PER = 365.25  # orbital period (in days)
+RP = R_earth / R_sun  # planet radius (in units of stellar radii)
+A = 217  # semi-major axis (in units of stellar radii)
+INC = 90  # orbital inclination (in degrees)
+B = 0  # impact parameter
+ECC = 0  # eccentricity
+W = 90  # longitude of periastron (in degrees)
+# quadratic limb darkening for a G2V star in the Kepler bandpass
+# http://vizier.u-strasbg.fr/viz-bin/VizieR?-source=J/A%2BA/552/A16
+U = [0.4804, 0.1867]  
+LIMB_DARK = 'quadratic'
+
+# Unique depth of trial signals (at various durations). These are rescaled in
+# depth so that their integral matches the mean flux in the window in question.
+# In principle, "signal_depth" is an arbitrary value. By using a standard close
+# to the expected signal level, floating point inaccuracies are minimized 
+SIGNAL_DEPTH = 1-0.999
+
+# Maximum fractional transit duration ever observed is 0.117
+# for Kepler-1368 b (as of Oct 2018), so we set upper_limit=0.15
+# Long fractional transit durations are computationally expensive 
+# following a quadratic relation. If applicable, use a different value.
+# Longer transits can still be found, but at decreasing sensitivity
+FRACTIONAL_TRANSIT_DURATION_MAX = 0.12
+
+# Oversampling of the reference transit:
+# "Don’t fit an unbinned model to binned data." 
+# Reference: Kipping, D., "Binning is sinning: morphological light-curve 
+#            distortions due to finite integration time"
+#            MNRAS, Volume 408, Issue 3, pp. 1758-1769
+#            http://adsabs.harvard.edu/cgi-bin/bib_query?arXiv:1004.3741
+# This is not time-critical as it has to be done only once
+SUPERSAMPLE_SIZE = 10000
+
+
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+def T14(R_s, M_s, P, upper_limit=FRACTIONAL_TRANSIT_DURATION_MAX):
         """Input:  Stellar radius and mass; planetary period
                    Units: Solar radius and mass; days
            Output: Maximum planetary transit duration T_14max
                    Unit: Fraction of period P"""
 
-        # astrophysical constants
-        G = 6.673e-11  # [m^3 / kg / s^2]
-        R_sun = 695508000  # [m]
-        M_sun = 1.989*10**30  # [kg]
-
-        P = P * 24 * 3600
+        P = P * SECONDS_PER_DAY
         R_s = R_sun * R_s
         M_s = M_sun * M_s
-
         T14max = R_s * ((4*P) / (pi * G * M_s))**(1/3)
         result = T14max / P
-        if result > 0.15:
-            result = 0.15
-
+        if result > upper_limit:
+            result = upper_limit
         return result
 
 
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def get_edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_dy):
+    regular_squared_residuals = numpy.sum(((1-flux)**2)*1/dy**2)
+    patched_squared_residuals = numpy.sum(((1 - patched_data)**2) * inverse_squared_patched_dy)
+    edge_effect_correction = patched_squared_residuals - regular_squared_residuals
+    return edge_effect_correction
+
+
 def get_duration_grid(periods, log_step=1.1):
-    duration_max = T14(R_s=3.5, M_s=1.0, P=min(periods))
+    duration_max = T14(R_s=3.50, M_s=1.0, P=min(periods))
     duration_min = T14(R_s=0.13, M_s=0.1, P=max(periods))
-    # Make grid
     durations = [duration_min]
     current_depth = duration_min
     while current_depth* log_step < duration_max:
         current_depth = current_depth * log_step
         durations.append(current_depth)
-    durations.append(duration_max)  # Append endpoint
-
+    durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
     return durations
-
-
-def get_depth_grid(y, deepest=None, shallowest=None, log_step=None):
-    if deepest is None:
-        deepest = 1 - numpy.min(y)
-    if shallowest is None:
-        shallowest = 10*10**-6  # 10 ppm
-    if log_step is None:
-        log_step = 1.1
-    
-    # Make grid
-    depths = [shallowest]
-    current_depth = shallowest
-    while current_depth* log_step < deepest:
-        current_depth = current_depth * log_step
-        depths.append(current_depth)
-    depths.append(deepest)  # Append endpoint
-
-    return depths
 
 
 def get_catalog_info(EPIC):
@@ -125,16 +169,112 @@ def get_catalog_info(EPIC):
     return u, a, b, mass[0], radius[0], logg[0], Teff[0]
 
 
-@cuda.jit
-def itr_cuda(data, signal, dy, chi2):
-    outer_loop_length = len(data) - len(signal) + 1
-    inner_loop_length = len(signal)
-    i = cuda.grid(1)
-    if i < outer_loop_length:
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def get_residuals(data, signal, dy):
+    value = 0
+    for i in range(len(data)):
+        value = value + ((data[i]-signal[i])**2) * dy[i]
+    return value
+
+
+"""
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def get_residuals_scale_transit(data, signal, dy, ratio):
+    value = 0
+    for i in range(len(data)):
+        signal[i] = 1 - signal[i] * ratio
+        value = value + ((data[i]-signal[i])**2) * dy[i]
+    return value
+"""
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
+
+    #print(signal)
+
+    def f(k):
         value = 0
-        for j in range(inner_loop_length):
-            value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
-        chi2[i] = value
+        for i in range(len(data)):
+            test = signal[i] * k
+            #print(signal[i])
+            #print(signal[i], data[i])
+            value = value + ((data[i]-test)**2) * dy[i]
+        return value
+
+    #print(signal[2])
+
+    #smallest_result = 10**10
+    left = 0.998
+    right = 1.002
+    for i in range(10):
+        leftThird = left + (right - left)/3
+        rightThird = right - (right - left)/3
+
+        if f(leftThird) > f(rightThird):
+            left = leftThird
+        else:
+            right = rightThird
+        #print(i, leftThird, f(leftThird))
+
+    result = f((left + right)/2)
+    k = (left + right)/2
+    #result = (left + right)/2
+    #print(left, right, k)
+    #print(k)
+    #print(k)
+    return result, k
+
+"""
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
+def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
+    invphi = (math.sqrt(5) - 1) / 2 # 1/phi                                                                                                                     
+    invphi2 = (3 - math.sqrt(5)) / 2 # 1/phi^2   
+    #print(ratio)
+
+    def f(k):
+        value = 0
+        for i in range(len(data)):
+            #ratio = ratio * k
+            test = 1 - signal[i] * ratio #* k
+            value = value + ((data[i]-test)**2) * dy[i]
+        return value
+
+    #print('ratio', ratio)
+    a = 0.5
+    b = 1.5
+    tol = 0.05
+    (a,b)=(min(a,b),max(a,b))
+    h = b - a
+    if h <= tol: return (a,b)
+
+    # required steps to achieve tolerance                                                                                                                   
+    n = int(math.ceil(math.log(tol/h)/math.log(invphi)))
+
+    c = a + invphi2 * h
+    d = a + invphi * h
+    yc = f(c)
+    yd = f(d)
+
+    for z in range(n-1):
+        if yc < yd:
+            b = d
+            d = c
+            yd = yc
+            h = invphi*h
+            c = a + invphi2 * h
+            yc = f(c)
+        else:
+            a = c
+            c = d
+            yc = yd
+            h = invphi*h
+            d = a + invphi * h
+            yd = f(d)
+
+    result = f(d)
+
+    return result, (a-b)/2
+"""
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
@@ -152,7 +292,6 @@ def ootr_efficient(data, width_signal, dy):
     return chi2
 
 
-#@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def running_mean_max(data, width_signal):
     """Returns the maximum value in the running mean window"""
     cumsum = numpy.cumsum(numpy.insert(data, 0, 0)) 
@@ -160,11 +299,24 @@ def running_mean_max(data, width_signal):
     return numpy.max(a)
 
 
-#@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def running_mean(data, width_signal):
     """Returns the running mean in a given window"""
     cumsum = numpy.cumsum(numpy.insert(data, 0, 0)) 
     return (cumsum[width_signal:] - cumsum[:-width_signal]) / float(width_signal)
+
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+def running_median(data, width_signal):
+    idx = numpy.arange(width_signal) + numpy.arange(len(data)-width_signal+1)[:,None]
+    a = numpy.median(data[idx], axis=1)
+    first_values = a[0]
+    last_values = a[-1]
+    missing_values = len(data) - len(a)
+    values_front = int(missing_values/2)
+    values_end = missing_values - values_front
+    a = numpy.append(numpy.full(values_front, first_values), a)
+    a = numpy.append(a, numpy.full(values_end, last_values))
+    return a
 
 
 def running_median(data, width_signal):
@@ -180,21 +332,6 @@ def running_median(data, width_signal):
     return a
 
 
-# As periods are searched in parallel, the double parallel option for numba
-# results in a speed penalty (factor two worse), so choose parallel=False here
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def in_transit_residuals(data, signal, dy):
-    outer_loop_length = len(data) - len(signal) + 1
-    inner_loop_length = len(signal)
-    chi2 = numpy.zeros(outer_loop_length + 0)
-    for i in range(outer_loop_length):
-        value = 0
-        for j in range(inner_loop_length):
-            value = value + ((data[i+j]-signal[j])**2) * dy[i+j]
-        chi2[i] = value
-    return chi2
-
-
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
 def fold(time, period, T0):
     return (time - T0) / period - numpy.floor((time - T0) / period)
@@ -205,25 +342,18 @@ def foldfast(time, period):
     return time / period - numpy.floor(time / period)
 
 
-def period_grid(R_star, M_star, time_span, period_min=0, period_max=sys.maxsize, 
-        oversampling_factor=2):
+def period_grid(R_star, M_star, time_span, period_min=0, period_max=float('inf'), 
+        oversampling_factor=2, n_transits_min=N_TRANSITS_MIN):
     """Returns array of optimal sampling periods for transit search in light curves
        Following Ofir (2014, A&A, 561, A138)"""
 
-    # astrophysical constants
-    G = 6.673e-11  # [m^3 / kg / s^2]
-    day   = 86400.0  # [s]
-
-    # Values
-    R_sun = 695508000  # [m]
-    M_sun = 1.989*10**30  # [kg]
     R_star = R_star * R_sun
     M_star = M_sun * M_star
-    time_span = time_span * day  # seconds
+    time_span = time_span * SECONDS_PER_DAY  # seconds
 
     # boundary conditions
-    f_min = 2./time_span
-    f_max = 1./(2*pi) * sqrt( G*M_star /(3*R_star)**3 )
+    f_min = n_transits_min / time_span
+    f_max = 1. / (2*pi) * sqrt(G*M_star / (3 * R_star)**3)
 
     # optimal frequency sampling, Equations (5), (6), (7)
     A = ( 2*pi )**(2./3) / pi * R_star / (G*M_star)**(1./3) / \
@@ -236,7 +366,7 @@ def period_grid(R_star, M_star, time_span, period_min=0, period_max=sys.maxsize,
     P_x = 1/f_x
 
     # Cut to given (optional) selection of periods
-    periods = P_x / day
+    periods = P_x / SECONDS_PER_DAY
     selected_index = numpy.where(
         numpy.logical_and(periods>period_min, periods<=period_max))
 
@@ -269,42 +399,23 @@ class TransitLeastSquares(object):
         return t, y, dy
 
 
-    def _validate_period_and_duration(self, periods, durations, depths):
-        """Private method used to check a set of periods, durations and depths"""
-
-        duration = numpy.max(periods) - numpy.min(periods)
-
-        if periods.ndim != 1 or periods.size == 0:
-            raise ValueError('period must be 1-dimensional')
-
-        # TBD
-        #if numpy.min(periods) > numpy.max(durations):
-        #    raise ValueError('Periods must be shorter than the duration')
-
-        return periods, durations, depths
-
-    """
-    def _scipy_chi2(self, data, signal, dy, transit_weight):
-        sigma = 1  # dy[0]
-        width_signal = numpy.size(signal)
-        hW = width_signal//2
-        l = len(data)-len(signal)+1
-        part1 = uniform_filter(data**2,width_signal)[hW:hW+l]*width_signal
-        part3 = numpy.convolve(data, signal[::-1],'valid')   
-        stat = (part1 + (signal**2).sum(0) - 2*part3) / (width_signal * sigma**2)
-        return stat * transit_weight
-    """
-
-
     def fractional_transit(self, duration, maxwidth, depth, samples, 
-            limb_darkening=0.5, impact=0, cached_reference_transit=None):
+            per, rp, a, inc, ecc, w, u, limb_dark, cached_reference_transit=None):
         """Returns a scaled reference transit with fractional width and depth"""
 
         reference_time = numpy.linspace(-0.5, 0.5, samples)
 
         if cached_reference_transit is None:
             reference_flux = self.reference_transit(
-                samples=samples, limb_darkening=limb_darkening, impact=impact)
+                samples=samples,
+                per=per,
+                rp=rp,
+                a=a,
+                inc=inc,
+                ecc=ecc,
+                w=w,
+                u=u,
+                limb_dark=limb_dark)
         else:
             reference_flux = cached_reference_transit
 
@@ -328,44 +439,34 @@ class TransitLeastSquares(object):
         return result
 
 
-    def _impact_to_inclination(self, impact, semimajor_axis):
+    def _impact_to_inclination(self, b, semimajor_axis):
             """Converts planet impact parameter b = [0..1.x] to inclination [deg]"""
-            return degrees(arccos(impact / semimajor_axis))
+            return degrees(arccos(b / semimajor_axis))
 
 
-    def reference_transit(self, samples, limb_darkening=0.5, impact=0):
+    def reference_transit(self, samples, per, rp, a, inc, ecc, w, u, limb_dark):
         """Returns an Earth-like transit of width 1 and depth 1"""
 
         # Box-shaped transit
-        if limb_darkening == 0:
+        if limb_dark == 0:
             rescaled = numpy.zeros(samples)
 
         # Limb-darkened transit
         else:
-            # We use a large oversampling and down-sample (bin) from there
-            # Reason: "Don’t fit an unbinned model to binned data." 
-            # Reference: Kipping, D., "Binning is sinning: morphological light-curve 
-            #           distortions due to finite integration time"
-            #           MNRAS, Volume 408, Issue 3, pp. 1758-1769
-            #           http://adsabs.harvard.edu/cgi-bin/bib_query?arXiv:1004.3741
-            # This is not time-critical as it has to be done only once
-
-            supersample_size = 10000
-
-            f = numpy.ones(supersample_size)
+            f = numpy.ones(SUPERSAMPLE_SIZE)
             duration = 1  # transit duration in days. Increase for exotic cases
-            t = numpy.linspace(-duration/2, duration/2, supersample_size)
+            t = numpy.linspace(-duration/2, duration/2, SUPERSAMPLE_SIZE)
             ma = batman.TransitParams()
             ma.t0 = 0  # time of inferior conjunction
-            ma.per = 365.25  # orbital period, use Earth as a reference
-            ma.rp = 6371 / 696342  # planet radius (in units of stellar radii)
-            ma.a = 217  # semi-major axis (in units of stellar radii)
+            ma.per = per  # orbital period, use Earth as a reference
+            ma.rp = rp  # planet radius (in units of stellar radii)
+            ma.a = a  # semi-major axis (in units of stellar radii)
             # orbital inclination (in degrees)
-            ma.inc = self._impact_to_inclination(impact=impact, semimajor_axis=ma.a)  
-            ma.ecc = 0  # eccentricity
-            ma.w = 90  # longitude of periastron (in degrees)
-            ma.u = [limb_darkening]  # limb darkening coefficients
-            ma.limb_dark = "linear"  # limb darkening model
+            ma.inc = inc
+            ma.ecc = ecc  # eccentricity
+            ma.w = w  # longitude of periastron (in degrees)
+            ma.u = u  # limb darkening coefficients
+            ma.limb_dark = limb_dark  # limb darkening model
             m = batman.TransitModel(ma, t)  # initializes model
             flux = m.light_curve(ma)  # calculates light curve
 
@@ -387,80 +488,85 @@ class TransitLeastSquares(object):
         return rescaled
 
 
-    def _get_cache(self, durations, depths, maxwidth_in_samples, 
-            limb_darkening=0.5, impact=0):
+    def _get_cache(self, durations, maxwidth_in_samples, \
+        per, rp, a, inc, ecc, w, u, limb_dark):
         """Fetches (size(durations)*size(depths)) light curves of length 
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
 
-        text = 'Creating model cache: ' + \
-            str(len(durations)) + ' durations x ' + \
-            str(len(depths)) + ' depths = ' + \
-            str(len(durations) * len(depths)) + ' curves'
-
-        print(text)
-        rows = numpy.size(depths) * numpy.size(durations)
+        print('Creating model cache for', str(len(durations)), ' durations')
+        rows = numpy.size(durations)
         lc_cache = numpy.ones([rows,maxwidth_in_samples])
         lc_cache_overview = numpy.zeros(
             rows, dtype=[
-                ('depth', 'f8'),
                 ('duration', 'f8'),
                 ('width_in_samples', 'i8'),
                 ('first_sample', 'i8'),
-                ('last_sample', 'i8')])
+                ('last_sample', 'i8'),
+                ('flux_ratio', 'f8')])  # between transit shape and box
         cached_reference_transit = self.reference_transit(
             samples=maxwidth_in_samples,
-            limb_darkening=limb_darkening,
-            impact=impact)
+            per=per,
+            rp=rp,
+            a=a,
+            inc=inc,
+            ecc=ecc,
+            w=w,
+            u=u,
+            limb_dark=limb_dark)
         row = 0
-        pbar = tqdm(total=len(depths)*len(durations))
-        for depth in depths:  # from shallow to deep
-            for duration in durations:  
-                scaled_transit = self.fractional_transit(
-                    duration=duration,
-                    maxwidth=numpy.max(durations),
-                    depth=depth,
-                    samples=maxwidth_in_samples,
-                    limb_darkening=limb_darkening,
-                    impact=impact,
-                    cached_reference_transit=cached_reference_transit)
-                lc_cache[row] = scaled_transit
-                lc_cache_overview['depth'][row] = depth
-                lc_cache_overview['duration'][row] = duration
-                used_samples = int((duration / numpy.max(durations)) * maxwidth_in_samples)
-                lc_cache_overview['width_in_samples'][row] = used_samples
-                empty_samples = maxwidth_in_samples - used_samples
-                first_sample = int(empty_samples/2)
-                last_sample = first_sample + used_samples
-                lc_cache_overview['first_sample'][row] = first_sample
-                lc_cache_overview['last_sample'][row] = last_sample
+        for duration in durations:  
+            scaled_transit = self.fractional_transit(
+                duration=duration,
+                maxwidth=numpy.max(durations),
+                depth=SIGNAL_DEPTH,
+                samples=maxwidth_in_samples,
+                per=per,
+                rp=rp,
+                a=a,
+                inc=inc,
+                ecc=ecc,
+                w=w,
+                u=u,
+                limb_dark=limb_dark,
+                cached_reference_transit=cached_reference_transit)
+            lc_cache[row] = scaled_transit
+            lc_cache_overview['duration'][row] = duration
+            used_samples = int((duration / numpy.max(durations)) * maxwidth_in_samples)
+            lc_cache_overview['width_in_samples'][row] = used_samples
+            empty_samples = maxwidth_in_samples - used_samples
+            first_sample = int(empty_samples/2)
+            last_sample = first_sample + used_samples
+            lc_cache_overview['first_sample'][row] = first_sample
+            lc_cache_overview['last_sample'][row] = last_sample
 
-                row = row + 1
-                pbar.update(1)
-        pbar.close()
+            # Scale factor
+            #magic_number = 1.05#1.18
+            signal = lc_cache[row][first_sample:last_sample]
+            #signal = numpy.append(1, signal)
+            #signal = numpy.append(signal, 1)
+            integral_transit = numpy.sum(1-signal)
+            integral_box = len(signal) * (1-min(signal))
+            ratio = integral_transit / integral_box
+            #ratio = ratio * magic_number
+            lc_cache_overview['flux_ratio'][row] = ratio
+            #print(ratio)
 
-        print(lc_cache_overview)
-        #print(lc_cache)
-        start = lc_cache_overview['first_sample'][0]
-        end = lc_cache_overview['last_sample'][0]
-        #print(lc_cache[0,start:end])
-        start = lc_cache_overview['first_sample'][1]
-        end = lc_cache_overview['last_sample'][1]
-        #print(lc_cache[1,start:end])
-        
+            row += + 1
+      
         return lc_cache, lc_cache_overview
 
 
-    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview):
+    def _search_period(self, period, t, y, dy, lc_cache, lc_cache_overview, \
+            transit_depth_min, R_star_min, R_star_max, M_star_min, M_star_max):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
-
-
+        
         # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
         maxwidth_in_samples = numpy.shape(lc_cache)[1]
 
         # Phase fold
         phases = foldfast(t, period)
-        sort_index = numpy.argsort(phases)
+        sort_index = numpy.argsort(phases, kind='mergesort')  # 8% faster than Quicksort
         phases = phases[sort_index]
         flux = y[sort_index]
         dy = dy[sort_index]
@@ -475,184 +581,215 @@ class TransitLeastSquares(object):
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
 
-        # Edge effect correction
-        regular_squared_residuals = numpy.sum(((1-flux)**2)*1/dy**2)
-        patched_squared_residuals = numpy.sum(((1-patched_data)**2)*inverse_squared_patched_dy)
-        edge_effect_correction = patched_squared_residuals - regular_squared_residuals
-        ootr2 = ootr_efficient(
-                patched_data, maxwidth_in_samples, inverse_squared_patched_dy)
-
+        # Edge effect correction (numba speedup 40x) 
+        edge_effect_correction = get_edge_effect_correction(
+            flux, patched_data, dy, inverse_squared_patched_dy)
+        # Strangely, this second part doesn't work with numba
+        summed_edge_effect_correction = numpy.sum(edge_effect_correction)
         
         # Set "best of" counters to max, in order to find smaller residuals
         smallest_residuals_in_period = float('inf')
         summed_residual_in_rows = float('inf')
 
+        # Make unique to avoid duplicates in dense grids
+        durations = numpy.unique(lc_cache_overview['width_in_samples'])
 
-        method = 'partial'
+        duration_max = T14(R_s=3.50, M_s=1.0, P=period)
+        duration_min = T14(R_s=0.13, M_s=0.1, P=period)
+        samples = len(y)
+        duration_min_in_samples = int(floor(duration_min * samples))
+        duration_max_in_samples = int(ceil(duration_max * samples))
+        durations = durations[durations>=duration_min_in_samples]
+        durations = durations[durations<=duration_max_in_samples]
 
-        if method=='cuda':
-            patched_data = numpy.array(patched_data, dtype='float32')
-            lc_cache = numpy.array(lc_cache, dtype='float32')
-            inverse_squared_patched_dy = numpy.array(inverse_squared_patched_dy, dtype='float32')
-            outer_loop_length = len(patched_data) - len(lc_cache[0]) + 1
-            C_global_mem = cuda.device_array(outer_loop_length + 0, dtype='float32')
-            patched_data_cuda = cuda.to_device(patched_data)
-            inverse_squared_patched_dy_cuda = cuda.to_device(inverse_squared_patched_dy)
+        # Iterating over the full lc_cache_overview is slow
+        # Thus, make a temporary reduced version
+        # Faster to fetch from a list than numpy array, and Python array
+        # All variants have been tested
+        lc_cache_overview_list_first = lc_cache_overview['first_sample'][:].tolist()
+        lc_cache_overview_list_last = lc_cache_overview['last_sample'][:].tolist()
+        lc_cache_overview_list_flux_ratio = lc_cache_overview['flux_ratio'][:].tolist()
+        patched_data_arr = array('f', patched_data)
+        inverse_squared_patched_dy_arr = array('f', inverse_squared_patched_dy)
 
-            for row in range(len(lc_cache)):
-                # This is the current transit (of some width, depth) to test
-                itr_cuda[32,32](
-                    patched_data_cuda,
-                    lc_cache[row],
-                    inverse_squared_patched_dy_cuda,
-                    C_global_mem)
+        # In case all sliding window means are smaller than half the
+        # shallowest signal, all tests will be skipped. Then, treat all flux
+        # as out of transit, as this is the better model
+        skipped_all = True
+        
+        
+        for duration in durations:
+            ootr = ootr_efficient(
+                patched_data, duration, inverse_squared_patched_dy)
+            # It has shown to be slower to convert "mean" to Python array
+            mean = 1 - running_mean(patched_data, duration)
+            # Get the row with matching duration
+            chosen_transit_row = 0
+            while lc_cache_overview['width_in_samples'][chosen_transit_row] != duration:
+                chosen_transit_row += 1
 
-                itr = numpy.array(C_global_mem, dtype=numpy.float32)
+            array_to_check = numpy.where(mean > transit_depth_min)[0]
 
-                stats = ootr2 + itr - edge_effect_correction
-                best_roll = numpy.argmin(stats)
-                current_smallest_residual = stats[best_roll]
+            if len(array_to_check) > 0:
+                skipped_all = False
 
-                # Propagate results to outer loop (best duration, depth)
-                if current_smallest_residual < summed_residual_in_rows:
-                    summed_residual_in_rows = current_smallest_residual
-                    best_row = row
+                for k in array_to_check:
+                    start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
+                    end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
 
-        elif method=='normal':
-            # Iterate over all transit shapes (depths and durations)
-
-            # Check if this signal shall be examined (or not: if too deep)
-            # It would be better to test this not globally but per phase position
-            # But to do that, the loop would need to change: first the phase,
-            # then every signal at that phase. Test at the end what is faster
-            # min_mean = 1 - running_mean_max(patched_data, len(lc_cache[0]))
-            # trial_depth = lc_cache_overview['depth'][row]
-            #   if min_mean < trial_depth:
-
-            for row in range(len(lc_cache)):
-                # This is the current transit (of some width, depth) to test
-                scaled_transit = lc_cache[row]
-                itr = in_transit_residuals(
-                    data=patched_data,
-                    signal=scaled_transit,
-                    dy=inverse_squared_patched_dy)
-                stats = ootr2 + itr - edge_effect_correction
-                best_roll = numpy.argmin(stats)
-                current_smallest_residual = stats[best_roll]
-
-                # Propagate results to outer loop (best duration, depth)
-                if current_smallest_residual < summed_residual_in_rows:
-                    summed_residual_in_rows = current_smallest_residual
-                    best_row = row
+                    # Scale signal integral to match mean in this window
+                    signal = lc_cache[chosen_transit_row,start:end]  # 0.3
+                    signal = 1 - signal
+                    min_signal = 1-SIGNAL_DEPTH
+                    target_depth = 1-mean[k]
+                    ratio = target_depth / min_signal
+                    signal = signal * ratio
+                    signal = 1-signal
 
 
-        elif method=='partial':
-            print('Partial search')
-            durations = numpy.unique(lc_cache_overview['width_in_samples'])
-            print('duration', durations)
-            for duration in durations:
-                print('current duration', duration)
-                ootr = ootr_efficient(
-                    patched_data, duration, inverse_squared_patched_dy)
-                sum_ootr = numpy.sum(ootr)
-                mean = 1 - running_mean(patched_data, duration)
-                print(mean)
-                shallowest_transit = numpy.min(lc_cache_overview['depth'])
-                shallowest_transit_row = numpy.argmax(numpy.logical_and(
-                    lc_cache_overview['depth'] >= shallowest_transit,
-                    lc_cache_overview['width_in_samples'] == duration))
-                #shallowest_transit_row = shallowest_transit_row[0,0]
-                print('shallowest_transit_row', shallowest_transit_row)
-                print('data of first shallowest_transit_row')
-                print(lc_cache_overview[shallowest_transit_row])
-                stats = numpy.zeros(len(patched_data) - duration + 1)
+                    #signal = signal * ratio
+                    #signal = 1-signal
+                    #print('signal', signal)
+                    #ratio = lc_cache_overview_list_flux_ratio[chosen_transit_row]  # 0.05
+                    #target_depth = mean[k] * ratio  # 0.3
+                    #ratio = target_depth/SIGNAL_DEPTH  # 0.1
+                    #print(period, ratio)
+                    #print(target_depth, signal_depth)
 
-                # Iterate over windowed mean values in phase space
-                for i in range(len(mean)):
+                    # to fine-tune the depth, use get_residuals_scale_transit_iterator
+                    itr_here, correction_factor = get_residuals_scale_transit_iterator(  # 2.0
+                        patched_data_arr[k:k+duration], # data 0.3
+                        signal,  # signal 0.3
+                        inverse_squared_patched_dy_arr[k:k+duration],  # dy 0.3
+                        ratio)
+                    current_stat = itr_here + ootr[k] - summed_edge_effect_correction  # 0.3
+                    if current_stat < summed_residual_in_rows:  # 0.1
+                        summed_residual_in_rows = current_stat
+                        best_row = chosen_transit_row
+                        best_roll = k/len(y)
+                        if best_roll>1:  # in patched appendix
+                            best_roll = best_roll - 1
+                        #deepest_dip = #/ correction_factor
+                        #mean[k] / (lc_cache_overview_list_flux_ratio[chosen_transit_row]*(1*correction_factor))
+                        best_depth = 1-min(signal)*correction_factor
+                        #print(mean[k], )
 
-                    # get first transit deeper than the mean and test it
-                    # try: if mean < shallowest_transit: do not test; instead
-                    #      add the summed mean flux to the chi2 stats
-                    if mean[i] < shallowest_transit:
-                        chosen_transit_row = shallowest_transit_row
-                        #print(i, 'too shallow', mean[i])
-                    else:
-                        print(i, 'to be tested', mean[i])
-                        chosen_transit_row = numpy.argmax(numpy.logical_and(
-                            lc_cache_overview['depth'] >= mean[i],
-                            lc_cache_overview['width_in_samples'] == duration))
-                        print('chosen_transit_row', chosen_transit_row)
-                        my_data = patched_data[i:i+duration]
-                        raw_signal = lc_cache[chosen_transit_row]
-                        # Need to extract the actual flux values < 1 of this signal
-                        start = lc_cache_overview['first_sample'][chosen_transit_row]
-                        end = lc_cache_overview['last_sample'][chosen_transit_row]
-                        my_signal = lc_cache[chosen_transit_row,start:end]
-                        my_dy = inverse_squared_patched_dy[i:i+duration]
-                        print('signal', my_signal)
-                        print('data', my_data)
-                        itr_here = (my_data-my_signal)**2 * my_dy
-                        print('itr_here', itr_here)
-                        itr_here = numpy.sum(itr_here)
-                        print('sum_ootr', sum_ootr)
-                        stats[i] = itr_here + sum_ootr #+ numpy.sum(edge_effect_correction)
-
-
-                
-            
-
-
+        if skipped_all:
+            my_signal = numpy.ones(len(y))
+            summed_residual_in_rows = get_residuals(
+                y, my_signal, 1/dy**2)
+            best_row = 0  # shortest and shallowest transit
+            best_shift = 1
+            best_roll = 1
+            best_depth = 0
 
         if summed_residual_in_rows < smallest_residuals_in_period:
             smallest_residuals_in_period = summed_residual_in_rows
             best_shift = best_roll
+        
+        #print(period, correction_factor, min(signal))
 
-        return [period, smallest_residuals_in_period, best_shift, best_row]
+        return [period, smallest_residuals_in_period, best_shift, best_row, best_depth]
 
 
-    def _perform_search(self, periods, t, y, dy, depths, durations, 
-            limb_darkening=0.5, impact=0):
-        """Multicore distributor of search to search through all 'periods' """
+    def power(self, **kwargs):
+        """Compute the periodogram for a set user-defined parameters"""
 
-        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(y))
+        # Validate **kwargs and set to defaults where missing 
+        self.limb_darkening = kwargs.get('limb_darkening', LIMB_DARKENING)
+        self.transit_depth_min = kwargs.get('transit_depth_min', TRANSIT_DEPTH_MIN)
+        #self.b = kwargs.get('b', B)
+
+        self.R_star =  kwargs.get('R_star', R_STAR)
+        self.M_star =  kwargs.get('M_star', M_STAR)
+        self.oversampling_factor =  kwargs.get('oversampling_factor', OVERSAMPLING_FACTOR)
+        self.period_max =  kwargs.get('period_max', float('inf'))
+        self.period_min =  kwargs.get('period_min', 0)
+        self.n_transits_min = kwargs.get('n_transits_min', N_TRANSITS_MIN)
+
+        self.R_star_min = kwargs.get('R_star_min', R_STAR_MIN)
+        self.R_star_max = kwargs.get('R_star_max', R_STAR_MAX)
+        self.M_star_min = kwargs.get('M_star_min', M_STAR_MIN)
+        self.M_star_max = kwargs.get('M_star_max', M_STAR_MIN)
+        self.duration_grid_step = kwargs.get('duration_grid_step', DURATION_GRID_STEP)
+
+        self.per = kwargs.get('per', PER)
+        self.rp = kwargs.get('rp', RP)
+        self.a = kwargs.get('a', A)
+        self.inc = kwargs.get('inc', INC)
+
+        # If an impact parameter is given, it overrules the supplied inclination
+        if 'b' in kwargs:
+            self.b = kwargs.get('b')
+            self.inc = self._impact_to_inclination(b=self.b, semimajor_axis=self.a)  
+
+        self.ecc = kwargs.get('ecc', ECC)
+        self.w = kwargs.get('w', W)
+        self.u = kwargs.get('u', U)
+        self.limb_dark = kwargs.get('limb_dark', LIMB_DARK)
+
+        periods = period_grid(
+            R_star=self.R_star,
+            M_star=self.M_star,
+            time_span=numpy.max(self.t)-numpy.min(self.t),
+            period_min=self.period_min,
+            period_max=self.period_max, 
+            oversampling_factor=self.oversampling_factor,
+            n_transits_min=self.n_transits_min)
+        print('len(periods)', len(periods))
+        print('self.transit_depth_min', self.transit_depth_min)
+
+        durations = get_duration_grid(periods, log_step=self.duration_grid_step)
+
+        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
         lc_cache, lc_cache_overview = self._get_cache(
             durations=durations,
-            depths=depths,
             maxwidth_in_samples=maxwidth_in_samples,
-            limb_darkening=limb_darkening,
-            impact=impact)
-        
+            per=self.per,
+            rp=self.rp,
+            a=self.a,
+            inc=self.inc,
+            ecc=self.ecc,
+            w=self.w,
+            u=self.u,
+            limb_dark=self.limb_dark)
+
         # Prepare result arrays
         test_statistic_periods = []
         test_statistic_residuals = []
         test_statistic_rolls = []
         test_statistic_rows = []
-        
+        test_statistic_depths = []
+
         text = 'Searching ' + str(len(self.y)) + ' data points, ' + \
             str(len(periods)) + ' periods from ' + \
             str(round(min(periods), 3)) + ' to ' + \
             str(round(max(periods), 3)) + ' days, using all ' + \
             str(multiprocessing.cpu_count()) + ' CPU threads'
         print(text)
-        p = multiprocessing.Pool(processes=1)#multiprocessing.cpu_count())
-        pbar = tqdm(total=numpy.size(periods), smoothing=0)
-        
+        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
         params = partial(
             self._search_period,
-            t=t,
-            y=y,
-            dy=dy,
+            t=self.t,
+            y=self.y,
+            dy=self.dy,
             lc_cache=lc_cache,
-            lc_cache_overview=lc_cache_overview)
-        for data in p.imap_unordered(params, periods):
+            lc_cache_overview=lc_cache_overview,
+            transit_depth_min=self.transit_depth_min,
+            R_star_min=self.R_star_min,
+            R_star_max=self.R_star_max,
+            M_star_min=self.M_star_min,
+            M_star_max=self.M_star_max)
+        bar_format = '{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}'#' | {rate_fmt}'
+        pbar = tqdm(total=numpy.size(periods), smoothing=0.3, mininterval=1, bar_format=bar_format)
+        for data in p.imap_unordered(params, reversed(periods)):  # small to large
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
             test_statistic_rolls.append(data[2])
             test_statistic_rows.append(data[3])
-
-            # Update progress bar by 1 period step
+            test_statistic_depths.append(data[4])
             pbar.update(1)
         p.close()
         pbar.close()
@@ -662,53 +799,31 @@ class TransitLeastSquares(object):
         test_statistic_residuals = numpy.array(test_statistic_residuals)
         test_statistic_rolls = numpy.array(test_statistic_rolls)
         test_statistic_rows = numpy.array(test_statistic_rows)
+        test_statistic_depths = numpy.array(test_statistic_depths)
         sort_index = numpy.argsort(test_statistic_periods)
         test_statistic_periods = test_statistic_periods[sort_index]
         test_statistic_residuals = test_statistic_residuals[sort_index]
         test_statistic_rolls = test_statistic_rolls[sort_index]
         test_statistic_rows = test_statistic_rows[sort_index]
-
-        return test_statistic_periods, test_statistic_residuals, \
-        test_statistic_rolls, test_statistic_rows, lc_cache_overview
-
-
-    def power(self, periods, durations, depths, limb_darkening=0.5, impact=0):
-        """Compute the periodogram for a set user-defined parameters
-        Parameters:
-        periods : array of periods where the power should be computed
-        durations : array of set of durations to test
-        depths : array of set of depths to test
-        method : {'scipy', 'numba'}, optional
-            The computational method used to compute the periodogram. Both
-            yield identical results but may differ in speed and availability,
-            depending on the available hardware.
-        Returns: BoxLeastSquaresResults"""
-
-        periods, durations, depths = self._validate_period_and_duration(
-            periods, durations, depths)
-
-        test_statistic_periods, test_statistic_residuals, test_statistic_rolls, \
-            test_statistic_rows, lc_cache_overview = self._perform_search(
-            periods,
-            self.t,
-            self.y,
-            self.dy,
-            depths,
-            durations,
-            limb_darkening=limb_darkening,
-            impact=impact)
+        test_statistic_depths = test_statistic_depths[sort_index]
 
         # Sort residuals for best
-
         idx_best = numpy.argmin(test_statistic_residuals)
         best_power = test_statistic_residuals[idx_best]
         best_period = test_statistic_periods[idx_best]
         best_roll = test_statistic_rolls[idx_best]
         best_row = test_statistic_rows[idx_best]
+        best_depth = test_statistic_depths[idx_best]
         best_roll_save = test_statistic_rolls[idx_best]
 
-        best_depth = lc_cache_overview['depth'][best_row]
+        #best_depth = lc_cache_overview['depth'][best_row]
         best_duration = lc_cache_overview['duration'][best_row]
+
+        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
+        print('best_roll (phase)', best_roll)
+        print('best depth', best_depth)
+        
+        
 
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
@@ -732,18 +847,23 @@ class TransitLeastSquares(object):
             maxwidth_in_samples = maxwidth_in_samples + 1
         #t0 =time.perf_counter()
         # Make a model transit with the best fit parameters
+        #best_depth = best_depth * 1.1
         signal = self.fractional_transit(
             duration=best_duration,
             maxwidth=max(durations), 
             depth=best_depth,
             samples=maxwidth_in_samples,
-            limb_darkening=limb_darkening,
-            impact=impact)
-        #t1 =time.perf_counter()
-        #print(t1-t0)
-        lowest_chi2 = sys.maxsize
+            per=self.per,
+            rp=self.rp,
+            a=self.a,
+            inc=self.inc,
+            ecc=self.ecc,
+            w=self.w,
+            u=self.u,
+            limb_dark=self.limb_dark)        
+
+        lowest_chi2 = float('inf')
         best_T0 = 0
-        #signal = lc_cache[best_row]
         start_transit = 0.5 - numpy.max(durations) / 2
         print('Finding best T0 for period', format(best_period, '.5f'))
         pbar2 = tqdm(total=numpy.size(T0_array))
@@ -759,7 +879,7 @@ class TransitLeastSquares(object):
             flux = self.y[sort_index]
             dy = self.dy[sort_index]
 
-            # Sorted array is not perfectly linar: phase = 0.5 != numpy.max(phases)/2
+            # Sorted array is not perfectly linear: phase = 0.5 != numpy.max(phases)/2
             # as there are more points at some phases than others 
             # Thus, we need to find the points around phase 0.5
             points_in_transit_phase = numpy.size(numpy.where(numpy.logical_and(
@@ -774,7 +894,7 @@ class TransitLeastSquares(object):
             phase_segment = phases[id_flux_start:id_flux_start+maxwidth_in_samples]
             dy_segment = dy[id_flux_start:id_flux_start+maxwidth_in_samples]
 
-            # dynot inverted!?
+            # dy not inverted
             current_chi2 = numpy.sum((data_segment - signal)**2 / dy_segment**2)  
             pbar2.update(1)
             if current_chi2 < lowest_chi2:
@@ -783,6 +903,9 @@ class TransitLeastSquares(object):
 
         pbar2.close()
         print('best_T0 ##########', best_T0)
+        best_T0_calculated = (best_roll - 0.5*best_duration)*best_period + numpy.min(self.t)
+        print('best T_0 calculated', best_T0_calculated)
+        #best_T0 = best_T0_calculated
 
         # Calculate all mid-transit times
         if best_T0 < min(self.t):
@@ -822,13 +945,39 @@ class TransitLeastSquares(object):
         SDE_power = SDE_power * scale
         power = SDE_power
 
+        # Detrended SDE
+        kernel_size = 151
+        if kernel_size % 2 == 0:
+            kernel_size = kernel_size + 1
+        my_median = running_median(SDE_power, kernel_size)
+        cleaned_SDE_power = SDE_power - my_median
+        # Re-normalize to range between median = 0 and peak = SDE
+        # shift down to the mean being zero
+        cleaned_SDE_power = cleaned_SDE_power - numpy.mean(cleaned_SDE_power)
+        cleaned_SDE = numpy.max(cleaned_SDE_power / numpy.std(cleaned_SDE_power))     
+        # scale factor to touch max=SDE 
+        scale = cleaned_SDE / numpy.max(cleaned_SDE_power)  
+        cleaned_SDE_power = cleaned_SDE_power * scale
+        # Recalculate SDE
+        
+        print('cleaned_SDE', cleaned_SDE)
+
+
+        #ratio = 0.8
+        #signal = signal / ratio
         folded_model = self.fractional_transit(
             duration=(best_duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
             depth=best_depth,
             samples=int(len(self.t/epochs)),
-            limb_darkening=limb_darkening,
-            impact=impact)
+            per=self.per,
+            rp=self.rp,
+            a=self.a,
+            inc=self.inc,
+            ecc=self.ecc,
+            w=self.w,
+            u=self.u,
+            limb_dark=self.limb_dark)
         # Model and data are off by one cadence
         #folded_model = numpy.roll(folded_model, -1)  
 
@@ -853,9 +1002,14 @@ class TransitLeastSquares(object):
             maxwidth=maxwidth_in_samples / stretch,
             depth=best_depth,
             samples=internal_samples,
-            limb_darkening=limb_darkening,
-            impact=impact)
-
+            per=self.per,
+            rp=self.rp,
+            a=self.a,
+            inc=self.inc,
+            ecc=self.ecc,
+            w=self.w,
+            u=self.u,
+            limb_dark=self.limb_dark)
 
         # Append all periods
         for i in range(rounds):
@@ -896,27 +1050,16 @@ class TransitLeastSquares(object):
         total_depth = numpy.mean(all_flux_intransit)
         total_std = numpy.std(all_flux_intransit)
         total_snr = (1 - numpy.mean(all_flux_intransit)) / numpy.std(flux_ootr)
-        #total_snr = (numpy.sqrt(len(transit_depths)) * total_depth) / numpy.mean(flux_ootr)
-        #print('all_flux_intransit', all_flux_intransit)
+
+
         return TransitLeastSquaresResults(test_statistic_periods, \
             power, test_statistic_rolls, test_statistic_rows, \
             lc_cache_overview, best_period, best_T0, best_row, best_power, \
             SDE, test_statistic_rolls, best_depth, best_duration,\
             transit_times, transit_duration_in_days, maxwidth_in_samples, \
             folded_model, model_flux, chi2red, SDE_power, transit_depths,\
-            transit_stds, transit_snrs, total_depth, total_std, total_snr, SR, chi2)
-
-
-    def autopower(self):
-        periods = period_grid(
-            R_star=1,
-            M_star=1,
-            time_span=(max(self.t) - min(self.t)),
-            oversampling_factor=2)
-        depths = numpy.geomspace(50*10**-6, 0.02, 50)
-        durations = numpy.geomspace(1.01/numpy.size(self.t), 0.05, 50)
-        results = self.power(periods, durations, depths)
-        return results
+            transit_stds, transit_snrs, total_depth, total_std, total_snr, SR, chi2,\
+            cleaned_SDE, cleaned_SDE_power)
 
 
     def transit_mask(self, t, period, duration, transit_time):
@@ -936,7 +1079,8 @@ class TransitLeastSquaresResults(dict):
                 "transit_duration_in_days", "maxwidth_in_samples", \
                 "folded_model", "model_flux", "chi2red", "SDE_power", \
                 "transit_depths", "transit_stds", "transit_snrs", \
-                "total_depth", "total_std", "total_snr", "SR", "chi2"), args))
+                "total_depth", "total_std", "total_snr", "SR", "chi2",\
+                "cleaned_SDE", "cleaned_SDE_power"), args))
 
     def __getattr__(self, name):
         try:
