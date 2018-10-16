@@ -1,7 +1,7 @@
 Interface
 =========
 
-This described the interface to TLS.
+This describes the interface to TLS.
 
 
 Define data for a search
@@ -74,13 +74,33 @@ The TLS spectra:
 :chi2red: *(array)* Minimum chi-squared per degree of freedom (:math:`\chi^2_{\nu}=\chi^2/\nu`) per period, where  :math:`\nu=n-m` with :math:`n` as the number of observations, and :math:`m=4` as the number of fitted parameters (period, T0, transit duration, transit depth).
 
 The TLS statistics:
+
 :SDE: *(float)* Maximum of ``power``
 :SDE_raw: *(float)* Maximum of ``power_raw``
 :chi2_min: *(float)* Minimum of ``chi2``
 :chi2red_min: *(float)*  Minimum of ``chi2red``
 
 Additional transit statistics:
-:bla: *(array)* aaa
+
+:period: *(float)* Period of the best-fit signal
+:T0: *(float)* Mid-transit time of the first transit within the time series
+:duration: *(float)* Best-fit transit duration
+:depth: *(float)* Best-fit transit depth (measured at the transit bottom)
+:depth_err: *(float)* 1-sigma uncertainty of the best-fit transit depth
+:snr_transits: *(array)* Signal-to-noise ratio per individual transit
+:per_transit_count: *(array)* Number of data points during each unique transit
+:transit_times: *(array)* The mid-transit time for each transit within the time series
+
+Models for visualization purpose:
+
+:model: *(array)* Model flux at each time value
+:model_phase: *(array)* Phase of the phase-folded model
+:model_folded: *(array)* Model flux at each phase
+:model_data: *(array)* Data flux at each phase
+
+.. note::
+
+   The models are not exact representations of the models used during the search. They should only be used for rough validation purposes. It is planned to improve the visualiziation in a future release.
 
 
 Period grid
