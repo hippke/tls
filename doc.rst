@@ -146,3 +146,25 @@ returns a period grid with 32172 values:
 ::
 
     [200, 199.889, 199.779, ..., 0.601, 0.601, 0.601]
+
+
+EPIC catalog info
+-----------------
+
+As a convenience function to pull estimates for stellar mass, radius, and limb darkening. Data are collated from the K2 Ecliptic Plane Input Catalog (`Huber et al. 2016 <https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract`_
+
+
+.. function:: catalog_info(EPIC_id)
+
+:EPIC_id: *(int)* The EPIC catalog ID
+
+Returns
+
+:u: *(float)* Linear limb darkening parameter u
+:ab: *(tuple of floats)* Quadratic limb darkening parameters a, b
+:mass: *(float)* Stellar mass (in units of solar masses)
+:mass_min: *(float)* 1-sigma upper confidence intervall on stellar mass (in units of solar mass)
+:mass_max: *(float)* 1-sigma lower confidence intervall on stellar mass (in units of solar mass)
+:radius: *(float)* Stellar radius (in units of solar radii)
+:radius_min: *(float)* 1-sigma upper confidence intervall on stellar radius (in units of solar radii)
+:radius_max: *(float)* 1-sigma lower confidence intervall on stellar radius (in units of solar radii)
