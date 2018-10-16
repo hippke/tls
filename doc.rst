@@ -1,11 +1,7 @@
 Interface
 =========
 
-Bla words...
-
-
-
-
+This described the interface to TLS.
 
 
 Define data for a search
@@ -66,6 +62,7 @@ Parameters to balance detection efficiency and computational requirements:
 
    Higher ``oversampling_factor`` increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift. For a planet with a 365-day period orbiting a solar mass and radius star, this parity is reached for ``oversampling_factor=9`` at 30 min cadence (Kepler LC). Shorter periods have reduced oversampling benefits, as the cadence becomes a larger fraction of the period.
 
+Return values
 
 
 Period grid
