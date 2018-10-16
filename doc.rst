@@ -90,8 +90,9 @@ Additional transit statistics:
 :period: *(float)* Period of the best-fit signal
 :T0: *(float)* Mid-transit time of the first transit within the time series
 :duration: *(float)* Best-fit transit duration
-:depth: *(float)* Best-fit transit depth (measured at the transit bottom)
-:depth_err: *(float)* 1-sigma uncertainty of the best-fit transit depth
+:depth: *(tuple of floats)* Best-fit transit depth (measured at the transit bottom) and 1-sigma uncertainty of the best-fit transit depth
+:depth_odd: *(tuple of floats)* As before, for odd transits (1, 3, ...)
+:depth_even: *(tuple of floats)* As before, for even transits (2, 4, ...)
 :snr_transits: *(array)* Signal-to-noise ratio per individual transit
 :per_transit_count: *(array)* Number of data points during each unique transit
 :transit_times: *(array)* The mid-transit time for each transit within the time series
