@@ -9,9 +9,9 @@ Define data for a search
 
 .. class:: TransitLeastSquares.model(time, data, errors)
 
-:t: *(array)* Time series of the data (in units of days).
-:y: *(array)* Flux series of the data, so that ``1`` is nominal flux (out of transit) and ``0`` is darkness. A transit may be represented by a flux of e.g., ``0.99``.
-:dy: *(array, optional)* Measurement errors of the data.
+:t: *(array)* Time series of the data (in units of days)
+:y: *(array)* Flux series of the data, so that ``1`` is nominal flux (out of transit) and ``0`` is darkness. A transit may be represented by a flux of e.g., ``0.99``
+:dy: *(array, optional)* Measurement errors of the data
 
 
 Define parameters and run search
@@ -31,6 +31,11 @@ Parameters used for the period search grid and the transit duration search grid.
 :period_min:  *(float)* Minimum trial period (in units of days). If none is given, the limit is derived from the Roche limit
 :period_max: *(float)* Maximum trial period (in units of days). Default: Half the duration of the time series
 :n_transits_min: *(int, default: 2)* Minimum number of transits required. Overrules ``period_max=time_span/n_transits_min``
+
+.. note::
+
+   A larger range of stellar radius and mass allows for a wider variety of transits to be found at the expense of computational effort
+ 
 
 
 Physical parameters to create a 
