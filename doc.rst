@@ -62,7 +62,25 @@ Parameters to balance detection efficiency and computational requirements:
 
    Higher ``oversampling_factor`` increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift. For a planet with a 365-day period orbiting a solar mass and radius star, this parity is reached for ``oversampling_factor=9`` at 30 min cadence (Kepler LC). Shorter periods have reduced oversampling benefits, as the cadence becomes a larger fraction of the period.
 
-Return values
+**Return values**
+
+The TLS spectra:
+
+:periods: *(array)* The period grid used in the search
+:power: *(array)* The power spectrum per period as defined in the TLS paper. We recommend to use this spectrum to assess transit signals.
+:power_raw: *(array)* The raw power spectrum (without median smoothing) as defined in the TLS paper
+:SR: *(array)* Signal residue similar to the BLS SR
+:chi2: *(array)* Minimum chi-squared (:math:`\chi^2`) per period 
+:chi2red: *(array)* Minimum chi-squared per degree of freedom (:math:`\chi^2_{\nu}=\chi^2/\nu`) per period, where  :math:`\nu=n-m` with :math:`n` as the number of observations, and :math:`m=4` as the number of fitted parameters (period, T0, transit duration, transit depth).
+
+The TLS statistics:
+:SDE: *(float)* Maximum of ``power``
+:SDE_raw: *(float)* Maximum of ``power_raw``
+:chi2_min: *(float)* Minimum of ``chi2``
+:chi2red_min: *(float)*  Minimum of ``chi2red``
+
+Additional transit statistics:
+:bla: *(array)* aaa
 
 
 Period grid
