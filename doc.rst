@@ -151,7 +151,7 @@ returns a period grid with 32172 values:
 EPIC catalog info
 -----------------
 
-As a convenience function to pull estimates for stellar mass, radius, and limb darkening. Data are collated from the K2 Ecliptic Plane Input Catalog (`Huber et al. 2016 <https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract`_
+As a convenience function to pull estimates for stellar mass, radius, and limb darkening. Data are collated from the K2 Ecliptic Plane Input Catalog (`Huber et al. 2016 <https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract>`_
 
 
 .. function:: catalog_info(EPIC_id)
