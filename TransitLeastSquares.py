@@ -190,38 +190,27 @@ def get_residuals_scale_transit(data, signal, dy, ratio):
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
 def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
 
-    #print(signal)
-
     def f(k):
         value = 0
         for i in range(len(data)):
-            test = signal[i] * k
-            #print(signal[i])
-            #print(signal[i], data[i])
-            value = value + ((data[i]-test)**2) * dy[i]
+            value += ((data[i]-(signal[i] * k))**2) * dy[i]
         return value
 
-    #print(signal[2])
-
-    #smallest_result = 10**10
-    left = 0.998
-    right = 1.002
-    for i in range(10):
-        leftThird = left + (right - left)/3
-        rightThird = right - (right - left)/3
-
-        if f(leftThird) > f(rightThird):
-            left = leftThird
+    left = 0.98
+    right = 1.02
+    required_precision = 10**-5
+    active=True
+    while active:
+        left_third = left + (right - left)/3
+        right_third = right - (right - left)/3
+        if f(left_third) > f(right_third):
+            left = left_third
         else:
-            right = rightThird
-        #print(i, leftThird, f(leftThird))
-
+            right = right_third
+        if abs(right - left) <required_precision:
+            active = False
     result = f((left + right)/2)
     k = (left + right)/2
-    #result = (left + right)/2
-    #print(left, right, k)
-    #print(k)
-    #print(k)
     return result, k
 
 """
@@ -646,16 +635,6 @@ class TransitLeastSquares(object):
                     signal = signal * ratio
                     signal = 1-signal
 
-
-                    #signal = signal * ratio
-                    #signal = 1-signal
-                    #print('signal', signal)
-                    #ratio = lc_cache_overview_list_flux_ratio[chosen_transit_row]  # 0.05
-                    #target_depth = mean[k] * ratio  # 0.3
-                    #ratio = target_depth/SIGNAL_DEPTH  # 0.1
-                    #print(period, ratio)
-                    #print(target_depth, signal_depth)
-
                     # to fine-tune the depth, use get_residuals_scale_transit_iterator
                     itr_here, correction_factor = get_residuals_scale_transit_iterator(  # 2.0
                         patched_data_arr[k:k+duration], # data 0.3
@@ -687,7 +666,7 @@ class TransitLeastSquares(object):
             smallest_residuals_in_period = summed_residual_in_rows
             best_shift = best_roll
         
-        #print(period, correction_factor, min(signal))
+        #print(period, correction_factor)
 
         return [period, smallest_residuals_in_period, best_shift, best_row, best_depth]
 
