@@ -52,7 +52,7 @@ Physical parameters to create a
 :u: *(array)* List of limb darkening coefficients. Default: [X, Y].
 :limb_dark: *(str)* Limb darkening model (choice of ``nonlinear``, ``quadratic``, ``exponential``, ``logarithmic``, ``squareroot``, ``linear``, ``uniform``, or ``power2``. Default: ``quadratic``.
 
-Available defaults for the physical parameters of the transit model:
+Available defaults for the physical parameters of the transit model. When set, the individual parameters are overruled.
 
 :transit_template: *(str)* Choice of ``Earth``, ``Super-Earth``, ``blubb``
 
