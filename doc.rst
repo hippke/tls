@@ -54,9 +54,9 @@ Available defaults for the physical parameters of the transit model:
 
 Parameters to balance detection efficiency and computational requirements:
 
-:duration_grid_step: *(float, optional, default: 1.1)* Grid step width between subsequent trial durations, so that :math:`{\rm dur}_{n+1}={\rm dur}_n \times {\rm duration\_grid\_step}`. With the default value of 1.1, each subsequent trial duration is longer by 10%
-:transit_depth_min: *(float, optional, default: 10 ppm)* Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest known transit is 11.9 ppm (Kepler-37b, `Barclay et al. 2013 <http://adsabs.harvard.edu/abs/2013Natur.494..452B>`_)
-:oversampling_factor: *(int, optional, default: 3)* Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed.
+:duration_grid_step: *(float, default: 1.1)* Grid step width between subsequent trial durations, so that :math:`{\rm dur}_{n+1}={\rm dur}_n \times {\rm duration\_grid\_step}`. With the default value of 1.1, each subsequent trial duration is longer by 10%
+:transit_depth_min: *(float, default: 10 ppm)* Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest known transit is 11.9 ppm (Kepler-37b, `Barclay et al. 2013 <http://adsabs.harvard.edu/abs/2013Natur.494..452B>`_)
+:oversampling_factor: *(int, default: 3)* Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed.
 
 .. note::
 
