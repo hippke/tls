@@ -37,15 +37,15 @@ Physical parameters to create a
 `Mandel & Agol (2002) <https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract>`_ transit model using a subset of the 
 `batman module <https://www.cfa.harvard.edu/~lkreidberg/batman/>`_  and syntax (`Kreidberg 2015 <https://ui.adsabs.harvard.edu/#abs/2015PASP..127.1161K/abstract>`_). Available defaults are described below.
 
-:per: *(float)* Orbital period (in units of days). Default: X. Optional.
-:rp: *(float)* Planet radius (in units of stellar radii). Default: X. Optional.
-:a: *(float)* Semi-major axis (in units of stellar radii). Default: X. Optional.
-:inc: *(float)* Orbital inclination (in degrees). Default: 90. Optional.
-:b: *(float)* Orbital impact parameter as the sky-projected distance between the centre of the stellar disc and the centre of the planetary disc at conjunction. If set, overrules ``inc=degrees(arccos(b/a)``. Default: 0. Optional.
-:ecc: *(float)* Orbital eccentricity. Default: 0. Optional.
-:w: *(float)* Argument of periapse (in degrees). Default: 90. Optional.
-:u: *(array)* List of limb darkening coefficients. Default: [X, Y]. Optional.
-:limb_dark: *(str)* Limb darkening model (choice of ``nonlinear``, ``quadratic``, ``exponential``, ``logarithmic``, ``squareroot``, ``linear``, ``uniform``, or ``power2``. Default: ``quadratic``. Optional.
+:per: *(float)* Orbital period (in units of days). Default: X.
+:rp: *(float)* Planet radius (in units of stellar radii). Default: X.
+:a: *(float)* Semi-major axis (in units of stellar radii). Default: X.
+:inc: *(float)* Orbital inclination (in degrees). Default: 90.
+:b: *(float)* Orbital impact parameter as the sky-projected distance between the centre of the stellar disc and the centre of the planetary disc at conjunction. If set, overrules ``inc=degrees(arccos(b/a)``. Default: 0.
+:ecc: *(float)* Orbital eccentricity. Default: 0.
+:w: *(float)* Argument of periapse (in degrees). Default: 90.
+:u: *(array)* List of limb darkening coefficients. Default: [X, Y].
+:limb_dark: *(str)* Limb darkening model (choice of ``nonlinear``, ``quadratic``, ``exponential``, ``logarithmic``, ``squareroot``, ``linear``, ``uniform``, or ``power2``. Default: ``quadratic``.
 
 Available defaults for the physical parameters of the transit model:
 
