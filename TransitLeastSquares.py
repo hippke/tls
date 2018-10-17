@@ -72,7 +72,7 @@ LIMB_DARK = 'quadratic'
 # depth so that their integral matches the mean flux in the window in question.
 # In principle, "signal_depth" is an arbitrary value. By using a standard close
 # to the expected signal level, floating point inaccuracies are minimized 
-SIGNAL_DEPTH = 1-0.999
+SIGNAL_DEPTH = 0.5
 
 # Maximum fractional transit duration ever observed is 0.117
 # for Kepler-1368 b (as of Oct 2018), so we set upper_limit=0.15
@@ -188,29 +188,45 @@ def get_residuals_scale_transit(data, signal, dy, ratio):
 """
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
-def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
+def get_residuals_scale_transit_iterator(data, sig, dy, target_depth):
 
     def f(k):
         value = 0
         for i in range(len(data)):
-            value += ((data[i]-(signal[i] * k))**2) * dy[i]
+            #mod_signal = signal[i]
+            #mod_signal = 1-signal[i]
+            mod_signal = sig[i] * k
+            mod_signal = 1-mod_signal
+            value += ((data[i]-mod_signal)**2) * dy[i]
         return value
 
-    left = 0.98
-    right = 1.02
-    required_precision = 10**-5
-    active=True
-    while active:
-        left_third = left + (right - left)/3
-        right_third = right - (right - left)/3
+    #print('new')
+    for i in range(len(sig)):
+        buff = sig[i]
+        #print(buff)
+        scale = SIGNAL_DEPTH/target_depth
+        #print(buff)
+        sig[i] = 1-sig[i]
+        sig[i] = sig[i]/scale
+        #sig[i] = 1-sig[i]
+        #print(SIGNAL_DEPTH, target_depth, scale, buff, sig[i])
+    left = 0.1
+    right = 2  # große Zahl macht den Transit tiefer
+    required_precision = 0.1
+    iters = 0
+    while True:
+        iters += 1
+        left_third = left + (right - left) / 3
+        right_third = right - (right - left) / 3
         if f(left_third) > f(right_third):
             left = left_third
         else:
             right = right_third
-        if abs(right - left) <required_precision:
-            active = False
+        if abs(right - left) < required_precision:
+            break
     result = f((left + right)/2)
     k = (left + right)/2
+    #print(iters)
     return result, k
 
 """
@@ -219,7 +235,6 @@ def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
     invphi = (math.sqrt(5) - 1) / 2 # 1/phi                                                                                                                     
     invphi2 = (3 - math.sqrt(5)) / 2 # 1/phi^2   
     #print(ratio)
-
     def f(k):
         value = 0
         for i in range(len(data)):
@@ -227,7 +242,6 @@ def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
             test = 1 - signal[i] * ratio #* k
             value = value + ((data[i]-test)**2) * dy[i]
         return value
-
     #print('ratio', ratio)
     a = 0.5
     b = 1.5
@@ -235,15 +249,12 @@ def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
     (a,b)=(min(a,b),max(a,b))
     h = b - a
     if h <= tol: return (a,b)
-
     # required steps to achieve tolerance                                                                                                                   
     n = int(math.ceil(math.log(tol/h)/math.log(invphi)))
-
     c = a + invphi2 * h
     d = a + invphi * h
     yc = f(c)
     yd = f(d)
-
     for z in range(n-1):
         if yc < yd:
             b = d
@@ -259,9 +270,7 @@ def get_residuals_scale_transit_iterator(data, signal, dy, ratio):
             h = invphi*h
             d = a + invphi * h
             yd = f(d)
-
     result = f(d)
-
     return result, (a-b)/2
 """
 
@@ -411,6 +420,7 @@ class TransitLeastSquares(object):
         # Interpolate to shorter interval
         f = scipy.interpolate.interp1d(reference_time, reference_flux)
         occupied_samples = int((duration / maxwidth) * samples)
+        #print('occupied_samples', occupied_samples)
         xnew = numpy.linspace(-0.5, 0.5, occupied_samples)
         ynew = f(xnew)
 
@@ -424,6 +434,7 @@ class TransitLeastSquares(object):
 
         # Depth rescaling
         result = 1 - ((1 - result) * depth)  
+        #print('result', result)
 
         return result
 
@@ -505,6 +516,7 @@ class TransitLeastSquares(object):
             limb_dark=limb_dark)
         row = 0
         for duration in durations:  
+            #print('duratio', duration)
             scaled_transit = self.fractional_transit(
                 duration=duration,
                 maxwidth=numpy.max(durations),
@@ -523,9 +535,15 @@ class TransitLeastSquares(object):
             lc_cache_overview['duration'][row] = duration
             used_samples = int((duration / numpy.max(durations)) * maxwidth_in_samples)
             lc_cache_overview['width_in_samples'][row] = used_samples
-            empty_samples = maxwidth_in_samples - used_samples
-            first_sample = int(empty_samples/2)
-            last_sample = first_sample + used_samples
+            #empty_samples = maxwidth_in_samples - used_samples
+            #first_sample = int(empty_samples/2)
+            #last_sample = first_sample + used_samples
+            cutoff = 0.01*10**-6  # 0.01 ppm tolerance for numerical stability
+            full_values = numpy.where(scaled_transit<(1-cutoff))
+            first_sample = numpy.min(full_values)
+            last_sample = numpy.max(full_values) + 1
+            #print('first_sample', first_sample, 'last_sample', last_sample)
+            #print(lc_cache[row][first_sample:last_sample])
             lc_cache_overview['first_sample'][row] = first_sample
             lc_cache_overview['last_sample'][row] = last_sample
 
@@ -539,7 +557,9 @@ class TransitLeastSquares(object):
             ratio = integral_transit / integral_box
             #ratio = ratio * magic_number
             lc_cache_overview['flux_ratio'][row] = ratio
+            print('flux_ratio', ratio)
             #print(ratio)
+            #print(min(scaled_transit), scaled_transit)
 
             row += + 1
       
@@ -617,30 +637,47 @@ class TransitLeastSquares(object):
             while lc_cache_overview['width_in_samples'][chosen_transit_row] != duration:
                 chosen_transit_row += 1
 
+            
             array_to_check = numpy.where(mean > transit_depth_min)[0]
+            #print(transit_depth_min, len(array_to_check))
 
             if len(array_to_check) > 0:
                 skipped_all = False
 
                 for k in array_to_check:
-                    start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
-                    end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
+                    #start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
+                    #end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
 
+
+                    start = lc_cache_overview['first_sample'][chosen_transit_row]
+                    end = lc_cache_overview['last_sample'][chosen_transit_row]
                     # Scale signal integral to match mean in this window
-                    signal = lc_cache[chosen_transit_row,start:end]  # 0.3
-                    signal = 1 - signal
-                    min_signal = 1-SIGNAL_DEPTH
-                    target_depth = 1-mean[k]
-                    ratio = target_depth / min_signal
-                    signal = signal * ratio
-                    signal = 1-signal
+                    signal = lc_cache[chosen_transit_row][start:end]  # 0.3
+                    siggi = numpy.copy(signal)
+                    #print('yeah signal', signal)
+                    #print('min(signal)', min(signal))
+                    #print(signal)
+                    #signal = 1 - signal
+                    #corr = lc_cache_overview['flux_ratio'][chosen_transit_row]
+                    #min_signal = max(signal)
+                    #target_depth = mean[k]
+                    #ratio = min_signal/target_depth
+                    #ratio = ratio #/ corr
+                    #signal = signal / ratio
+                    #signal = signal * corr
+                    #signal = 1-signal
+                    #print(chosen_transit_row, start, end, signal)
 
+                    #print(min(signal))
+
+                    
                     # to fine-tune the depth, use get_residuals_scale_transit_iterator
                     itr_here, correction_factor = get_residuals_scale_transit_iterator(  # 2.0
-                        patched_data_arr[k:k+duration], # data 0.3
-                        signal,  # signal 0.3
-                        inverse_squared_patched_dy_arr[k:k+duration],  # dy 0.3
-                        ratio)
+                        numpy.copy(patched_data_arr[k:k+duration]), # data 0.3
+                        siggi,  # signal 0.3
+                        numpy.copy(inverse_squared_patched_dy_arr[k:k+duration]),  # dy 0.3
+                        numpy.copy(mean[k]))
+                    
                     current_stat = itr_here + ootr[k] - summed_edge_effect_correction  # 0.3
                     if current_stat < summed_residual_in_rows:  # 0.1
                         summed_residual_in_rows = current_stat
@@ -650,8 +687,15 @@ class TransitLeastSquares(object):
                             best_roll = best_roll - 1
                         #deepest_dip = #/ correction_factor
                         #mean[k] / (lc_cache_overview_list_flux_ratio[chosen_transit_row]*(1*correction_factor))
-                        best_depth = 1-min(signal)*correction_factor
-                        #print(mean[k], )
+                        fill_factor = lc_cache_overview['flux_ratio'][chosen_transit_row]
+                        scale = SIGNAL_DEPTH/mean[k]
+                        best_depth = (1-min(siggi)) / scale
+                        best_depth = best_depth / correction_factor
+                        best_depth = best_depth * fill_factor
+                        best_depth = 1-best_depth
+
+
+                    
 
         if skipped_all:
             my_signal = numpy.ones(len(y))
@@ -666,7 +710,10 @@ class TransitLeastSquares(object):
             smallest_residuals_in_period = summed_residual_in_rows
             best_shift = best_roll
         
-        #print(period, correction_factor)
+        try:
+            print(period, best_depth, correction_factor)
+        except:
+            pass
 
         return [period, smallest_residuals_in_period, best_shift, best_row, best_depth]
 
@@ -742,13 +789,23 @@ class TransitLeastSquares(object):
         test_statistic_rows = []
         test_statistic_depths = []
 
+        chosen_transit_row = 5
+        
+        """
+        for row in range(len(lc_cache)):
+            start = lc_cache_overview['first_sample'][row]
+            end = lc_cache_overview['last_sample'][row]
+            print(row, start, end, lc_cache[row][start:end])
+        """
+
+
         text = 'Searching ' + str(len(self.y)) + ' data points, ' + \
             str(len(periods)) + ' periods from ' + \
             str(round(min(periods), 3)) + ' to ' + \
             str(round(max(periods), 3)) + ' days, using all ' + \
             str(multiprocessing.cpu_count()) + ' CPU threads'
         print(text)
-        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+        p = multiprocessing.Pool(processes=1)#multiprocessing.cpu_count())
         params = partial(
             self._search_period,
             t=self.t,
@@ -830,7 +887,7 @@ class TransitLeastSquares(object):
         signal = self.fractional_transit(
             duration=best_duration,
             maxwidth=max(durations), 
-            depth=best_depth,
+            depth=1-best_depth,
             samples=maxwidth_in_samples,
             per=self.per,
             rp=self.rp,
@@ -928,18 +985,22 @@ class TransitLeastSquares(object):
         kernel_size = 151
         if kernel_size % 2 == 0:
             kernel_size = kernel_size + 1
-        my_median = running_median(SDE_power, kernel_size)
-        cleaned_SDE_power = SDE_power - my_median
-        # Re-normalize to range between median = 0 and peak = SDE
-        # shift down to the mean being zero
-        cleaned_SDE_power = cleaned_SDE_power - numpy.mean(cleaned_SDE_power)
-        cleaned_SDE = numpy.max(cleaned_SDE_power / numpy.std(cleaned_SDE_power))     
-        # scale factor to touch max=SDE 
-        scale = cleaned_SDE / numpy.max(cleaned_SDE_power)  
-        cleaned_SDE_power = cleaned_SDE_power * scale
-        # Recalculate SDE
-        
-        print('cleaned_SDE', cleaned_SDE)
+        if len(SDE_power) > 2*kernel_size:
+            my_median = running_median(SDE_power, kernel_size)
+            cleaned_SDE_power = SDE_power - my_median
+            # Re-normalize to range between median = 0 and peak = SDE
+            # shift down to the mean being zero
+            cleaned_SDE_power = cleaned_SDE_power - numpy.mean(cleaned_SDE_power)
+            cleaned_SDE = numpy.max(cleaned_SDE_power / numpy.std(cleaned_SDE_power))     
+            # scale factor to touch max=SDE 
+            scale = cleaned_SDE / numpy.max(cleaned_SDE_power)  
+            cleaned_SDE_power = cleaned_SDE_power * scale
+            # Recalculate SDE
+        else:
+            cleaned_SDE_power = SDE_power
+            cleaned_SDE = SDE
+            
+            print('cleaned_SDE', cleaned_SDE)
 
 
         #ratio = 0.8
@@ -947,7 +1008,7 @@ class TransitLeastSquares(object):
         folded_model = self.fractional_transit(
             duration=(best_duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
-            depth=best_depth,
+            depth=1-best_depth,
             samples=int(len(self.t/epochs)),
             per=self.per,
             rp=self.rp,
@@ -979,7 +1040,7 @@ class TransitLeastSquares(object):
         y_array = self.fractional_transit(
             duration=(best_duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
-            depth=best_depth,
+            depth=1-best_depth,
             samples=internal_samples,
             per=self.per,
             rp=self.rp,
