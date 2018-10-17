@@ -1,6 +1,6 @@
 import numpy
 import matplotlib.pyplot as plt
-from TransitLeastSquares_v41 import TransitLeastSquares, period_grid, fold,\
+from TransitLeastSquares_v42 import TransitLeastSquares, period_grid, fold,\
     running_mean, foldfast
 
 import batman
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     # 2: points look OK; 15.6/15.8 (10ppm, 24)
     # 0: points mhm; 10.2/10.3 (10ppm, 24)
     # Create test data
-    start = 0
+    start = 12
     days = 365.25 * 3
     samples_per_day = 12  # 48
     samples = int(days * samples_per_day) # 48
@@ -21,9 +21,9 @@ if __name__ == '__main__':
 
     # Use batman to create transits
     ma = batman.TransitParams()
-    ma.t0 = start + 180 # time of inferior conjunction; first transit is X days after start
+    ma.t0 = start + 20 # time of inferior conjunction; first transit is X days after start
     ma.per = 365.25  # orbital period
-    ma.rp = 6371 / 696342  # planet radius (in units of stellar radii)
+    ma.rp = 6371 / 696342  # 6371 planet radius (in units of stellar radii)
     ma.a = 217  # semi-major axis (in units of stellar radii)
     ma.inc = 90  # orbital inclination (in degrees)
     ma.ecc = 0  # eccentricity
@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
 
     # Create noise and merge with flux
-    ppm = 1
+    ppm = 5
     stdev = 10**-6 * ppm
     noise = numpy.random.normal(0, stdev, int(samples))
     y = original_flux + noise
@@ -76,7 +76,8 @@ if __name__ == '__main__':
     model = TransitLeastSquares(t, y, dy)
     results = model.power(
         period_min=350,
-        period_max=400)
+        period_max=400,
+        transit_depth_min=10*10**-6)
 
     print('Period', format(results.best_period, '.5f'), 'd')
     print(len(results.transit_times), 'transit times in time series:', \
@@ -127,14 +128,15 @@ if __name__ == '__main__':
     max_sde_ld = results.cleaned_SDE
     scale = 1.1
     max_plot_height = max_sde_ld * scale
-    plt.ylim(-1, max_plot_height)
+    #plt.ylim(-1, max_plot_height)
     plt.text(360, results.cleaned_SDE, r'SDE=' + str(round(results.cleaned_SDE, 1)), ha='right')
 
     # Box
     """
     model = TransitLeastSquares(t, y, dy)
     results = model.power(periods, durations, depths, limb_darkening=0.0) # likelihood  # snr
-    """
+    
+    
     from astropy.stats import BoxLeastSquares
     import time
     durations = numpy.linspace(0.2, 1, 25)
@@ -214,6 +216,6 @@ if __name__ == '__main__':
     plt.xlim(min(periods), max(periods))
     plt.ylim(-1, max_plot_height)
     plt.text(360, results.cleaned_SDE, r'SDE=' + str(round(SDE, 1)), ha='right')
-
+    """
     plt.savefig('frontpage.pdf', bbox_inches='tight')
     plt.savefig('frontpage.png', bbox_inches='tight', dpi=300)
