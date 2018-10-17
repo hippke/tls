@@ -1,6 +1,6 @@
 import numpy
 import matplotlib.pyplot as plt
-from TransitLeastSquares_v42 import TransitLeastSquares, period_grid, fold,\
+from TransitLeastSquares_v43 import TransitLeastSquares, period_grid, fold,\
     running_mean, foldfast
 
 import batman
@@ -13,7 +13,7 @@ if __name__ == '__main__':
     # 2: points look OK; 15.6/15.8 (10ppm, 24)
     # 0: points mhm; 10.2/10.3 (10ppm, 24)
     # Create test data
-    start = 12
+    start = 48
     days = 365.25 * 3
     samples_per_day = 12  # 48
     samples = int(days * samples_per_day) # 48
@@ -23,7 +23,7 @@ if __name__ == '__main__':
     ma = batman.TransitParams()
     ma.t0 = start + 20 # time of inferior conjunction; first transit is X days after start
     ma.per = 365.25  # orbital period
-    ma.rp = 6371 / 696342  # 6371 planet radius (in units of stellar radii)
+    ma.rp = 30000 / 696342  # 6371 planet radius (in units of stellar radii)
     ma.a = 217  # semi-major axis (in units of stellar radii)
     ma.inc = 90  # orbital inclination (in degrees)
     ma.ecc = 0  # eccentricity
@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
 
     # Create noise and merge with flux
-    ppm = 5
+    ppm = 1
     stdev = 10**-6 * ppm
     noise = numpy.random.normal(0, stdev, int(samples))
     y = original_flux + noise
@@ -77,7 +77,9 @@ if __name__ == '__main__':
     results = model.power(
         period_min=350,
         period_max=400,
-        transit_depth_min=10*10**-6)
+        transit_depth_min=10*10**-6,
+        oversampling_factor=10,
+        duration_grid_step=1.02)
 
     print('Period', format(results.best_period, '.5f'), 'd')
     print(len(results.transit_times), 'transit times in time series:', \
@@ -152,15 +154,11 @@ if __name__ == '__main__':
     scale = SDE / numpy.max(SDE_power)  # scale factor to touch max=SDE
     SDE_power = SDE_power * scale
     print('SDE BLS', SDE, max(SDE_power))
-
-
     plt.subplot(222)
-
     # Make the box look like a box when plotting
     #modelflux = (results.folded_model-1)*10**6
     #depth = results.best_depth
     # Left
-
     plt.plot(
         ((-results.best_period/2)*24, -(results.transit_duration_in_days/2)*24),
         (0, 0),
@@ -190,7 +188,6 @@ if __name__ == '__main__':
         ((-results.best_depth)*10**6, 0),
         color='blue',
         zorder=10)
-
     data = (flux-1)*10**6
     data = numpy.append(data, [99])
     time = numpy.linspace((-results.best_period/2)*24, (results.best_period/2)*24, 
@@ -202,13 +199,11 @@ if __name__ == '__main__':
     plt.xlim(-15, 15)
     #plt.ylabel(r'Flux (ppm)')
     plt.xlabel('Time from mid-transit (hours)')
-
     plt.subplot(224)
     plt.axvline(results.best_period, alpha=0.4, lw=3)
     for n in range(2, 10):
         plt.axvline(n*results.best_period, alpha=0.4, lw=1, linestyle="dashed")
         plt.axvline(results.best_period / n, alpha=0.4, lw=1, linestyle="dashed")
-
     plt.plot(results_bls.period, SDE_power, color='black', lw=0.5)
     #plt.plot(results_bls.period, results_bls.power, color='black', lw=0.5)
     #plt.ylabel(r'SDE')
