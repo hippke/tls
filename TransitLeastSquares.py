@@ -193,17 +193,12 @@ def get_residuals_scale_transit_iterator(data, sig, dy, target_depth):
     def f(k):
         value = 0
         for i in range(len(data)):
-            #mod_signal = signal[i]
-            #mod_signal = 1-signal[i]
             mod_signal = sig[i] * k
             mod_signal = 1-mod_signal
             value += ((data[i]-mod_signal)**2) * dy[i]
         return value
 
-    #print('new')
     for i in range(len(sig)):
-        buff = sig[i]
-        #print(buff)
         scale = SIGNAL_DEPTH/target_depth
         #print(buff)
         sig[i] = 1-sig[i]
@@ -212,10 +207,10 @@ def get_residuals_scale_transit_iterator(data, sig, dy, target_depth):
         #print(SIGNAL_DEPTH, target_depth, scale, buff, sig[i])
     left = 0.1
     right = 2  # große Zahl macht den Transit tiefer
-    required_precision = 0.1
-    iters = 0
+    required_precision = 0.05
+    #iters = 0
     while True:
-        iters += 1
+        #iters += 1
         left_third = left + (right - left) / 3
         right_third = right - (right - left) / 3
         if f(left_third) > f(right_third):
@@ -225,9 +220,18 @@ def get_residuals_scale_transit_iterator(data, sig, dy, target_depth):
         if abs(right - left) < required_precision:
             break
     result = f((left + right)/2)
-    k = (left + right)/2
+    #k = (left + right)/2
     #print(iters)
-    return result, k
+
+    minimum = 0
+    k = (left + right)/2
+    for i in range(len(sig)):
+        mod_signal = sig[i] * k
+        mod_signal = 1-mod_signal
+        if sig[i] > mod_signal:
+            minimum = mod_signal
+
+    return result, minimum
 
 """
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)  
@@ -645,38 +649,21 @@ class TransitLeastSquares(object):
                 skipped_all = False
 
                 for k in array_to_check:
-                    #start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
-                    #end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
-
-
-                    start = lc_cache_overview['first_sample'][chosen_transit_row]
-                    end = lc_cache_overview['last_sample'][chosen_transit_row]
+                    start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
+                    end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
+                    #start = lc_cache_overview['first_sample'][chosen_transit_row]
+                    #end = lc_cache_overview['last_sample'][chosen_transit_row]
                     # Scale signal integral to match mean in this window
-                    signal = lc_cache[chosen_transit_row][start:end]  # 0.3
-                    siggi = numpy.copy(signal)
-                    #print('yeah signal', signal)
-                    #print('min(signal)', min(signal))
-                    #print(signal)
-                    #signal = 1 - signal
-                    #corr = lc_cache_overview['flux_ratio'][chosen_transit_row]
-                    #min_signal = max(signal)
-                    #target_depth = mean[k]
-                    #ratio = min_signal/target_depth
-                    #ratio = ratio #/ corr
-                    #signal = signal / ratio
-                    #signal = signal * corr
-                    #signal = 1-signal
-                    #print(chosen_transit_row, start, end, signal)
+                    #signal = lc_cache[chosen_transit_row][start:end]  # 0.3
+                    siggi = numpy.copy(lc_cache[chosen_transit_row][start:end])  # expensive but necessary!?
+                    #siggi = array('f', signal)
 
-                    #print(min(signal))
-
-                    
                     # to fine-tune the depth, use get_residuals_scale_transit_iterator
                     itr_here, correction_factor = get_residuals_scale_transit_iterator(  # 2.0
-                        numpy.copy(patched_data_arr[k:k+duration]), # data 0.3
+                        patched_data_arr[k:k+duration], # data 0.3
                         siggi,  # signal 0.3
-                        numpy.copy(inverse_squared_patched_dy_arr[k:k+duration]),  # dy 0.3
-                        numpy.copy(mean[k]))
+                        inverse_squared_patched_dy_arr[k:k+duration],  # dy 0.3
+                        mean[k])
                     
                     current_stat = itr_here + ootr[k] - summed_edge_effect_correction  # 0.3
                     if current_stat < summed_residual_in_rows:  # 0.1
@@ -687,12 +674,24 @@ class TransitLeastSquares(object):
                             best_roll = best_roll - 1
                         #deepest_dip = #/ correction_factor
                         #mean[k] / (lc_cache_overview_list_flux_ratio[chosen_transit_row]*(1*correction_factor))
-                        fill_factor = lc_cache_overview['flux_ratio'][chosen_transit_row]
-                        scale = SIGNAL_DEPTH/mean[k]
-                        best_depth = (1-min(siggi)) / scale
-                        best_depth = best_depth / correction_factor
-                        best_depth = best_depth * fill_factor
-                        best_depth = 1-best_depth
+    
+                        #scale = SIGNAL_DEPTH/mean[k]
+                        #sig = 1-min(siggi)
+                        #sig = sig/scale
+                        #sig = sig
+                        #sig = sig * correction_factor
+                        #sig = 1-sig
+                        best_depth = 1-correction_factor#sig
+                        #print(correction_factor)
+
+
+                        #fill_factor = lc_cache_overview['flux_ratio'][chosen_transit_row]
+                        #scale = SIGNAL_DEPTH/mean[k]
+                        #best_depth = (1-min(siggi)) #/ scale
+                        #best_depth = best_depth / correction_factor
+                        #best_depth = best_depth / scale
+                        ##best_depth = best_depth * fill_factor
+                        #best_depth = 1-best_depth
 
 
                     
@@ -710,10 +709,10 @@ class TransitLeastSquares(object):
             smallest_residuals_in_period = summed_residual_in_rows
             best_shift = best_roll
         
-        try:
-            print(period, best_depth, correction_factor)
-        except:
-            pass
+        #try:
+        #    #print(period, best_depth, correction_factor)
+        #except:
+        #    pass
 
         return [period, smallest_residuals_in_period, best_shift, best_row, best_depth]
 
@@ -805,7 +804,7 @@ class TransitLeastSquares(object):
             str(round(max(periods), 3)) + ' days, using all ' + \
             str(multiprocessing.cpu_count()) + ' CPU threads'
         print(text)
-        p = multiprocessing.Pool(processes=1)#multiprocessing.cpu_count())
+        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
         params = partial(
             self._search_period,
             t=self.t,
@@ -1019,7 +1018,7 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark)
         # Model and data are off by one cadence
-        #folded_model = numpy.roll(folded_model, -1)  
+        folded_model = numpy.roll(folded_model, -1)  
 
         # Full model
         # We oversample the model internally
