@@ -92,8 +92,8 @@ Additional transit statistics:
 :duration: *(float)* Best-fit transit duration
 :depth: *(float)* Best-fit transit depth (measured at the transit bottom)
 :depth_mean: *(tuple of floats)* Transit depth measured as the mean of all intransit points. The second value is the standard deviation of these points multiplied by the square root of the number of intransit points
-:depth_mean_odd: *(float)* Mean depth of odd transits  (1, 3, ...)
-:depth_mean_odd: *(float)* Mean depth of odd transits  (2, 4, ...)
+:depth_mean_odd: *(float)* Mean depth of odd transits (1, 3, ...)
+:depth_mean_odd: *(float)* Mean depth of odd transits (2, 4, ...)
 :snr: *(float)* Signal-to-noise ratio. Definition: :math:`{\rm SNR} = \frac{d/\sigma} n^{1/2}` with :math:`d` as the mean transit depth, 
 :math:`\sigma` as the standard deviation of the out-of-transit points, and :math:`n` as the number of intransit points (`Pont et al. 2006 <https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract>`_)
 :snr_per_transit: *(array)* Signal-to-noise ratio per individual transit
