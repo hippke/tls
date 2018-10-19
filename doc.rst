@@ -98,9 +98,11 @@ Additional transit statistics:
 :snr_per_transit: *(array)* Signal-to-noise ratio per individual transit
 :snr_pink_per_transit: *(array)* Signal-to-pink-noise ratio per individual transit as defined in `Pont et al. (2006) <https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract>`_
 :odd_even_mismatch: *(float)* Significance (in standard deviations) between odd and even transit depths. Example: A value of 5 represents a :math:`5\,\sigma` confidence that the odd and even depths if different depths
-:empty_transit_count: *(int)* The number of transits with no intransit data points 
-:per_transit_count: *(array)* Number of data points during each unique transit
 :transit_times: *(array)* The mid-transit time for each transit within the time series
+:per_transit_count: *(array)* Number of data points during each unique transit
+:transit_count: *(int)* The number of transits
+:distinct_transit_count: *(int)* The number of transits with intransit data points 
+:empty_transit_count: *(int)* The number of transits with no intransit data points 
 
 Models for visualization purpose:
 
