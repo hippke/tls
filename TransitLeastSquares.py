@@ -211,7 +211,7 @@ def get_catalog_info(EPIC):
 
     return (
         u,
-        [a, b],
+        (a, b),
         mass[0],
         mass_min[0],
         mass_max[0],
@@ -526,6 +526,9 @@ class TransitLeastSquares(object):
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
 
+        #lc_arr = array('d', [[1., 2., 3.], [3., 4., 5.]])
+        lc_arr = []#[[], []]
+
         print("Creating model cache for", str(len(durations)), " durations")
         rows = numpy.size(durations)
         lc_cache = numpy.ones([rows, maxwidth_in_samples])
@@ -597,10 +600,19 @@ class TransitLeastSquares(object):
             # print('flux_ratio', ratio)
             # print(ratio)
             # print(min(scaled_transit), scaled_transit)
+            #lc_arr.insert(-1, signal)
+            lc_arr.append(signal)
 
             row += +1
 
-        return lc_cache, lc_cache_overview
+
+        #lc_arr = lc_arr[2:]
+        #print(lc_arr[0])
+        #print(lc_cache[0])
+        #print(lc_arr)
+
+
+        return lc_cache, lc_cache_overview, lc_arr
 
     def _search_period(
         self,
@@ -615,6 +627,7 @@ class TransitLeastSquares(object):
         R_star_max,
         M_star_min,
         M_star_max,
+        lc_arr
     ):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
@@ -690,23 +703,25 @@ class TransitLeastSquares(object):
             if len(array_to_check) > 0:
                 skipped_all = False
 
-                # The pure numba part consumes 28% of the wall time.
+                # The pure numba part consumes 47% of the wall time.
                 # The other part is pulling arrays together
-                # So there is probably a factor of 2 speedup possible in C/Fortran
+                # So there is probably a factor of <2 speedup possible in C/Fortran
                 for k in array_to_check:
-                    start = lc_cache_overview_list_first[chosen_transit_row]  # 0.05
-                    end = lc_cache_overview_list_last[chosen_transit_row]  # 0.05
-                    # siggi = array('f', lc_cache[chosen_transit_row][start:end])
-                    siggi = numpy.copy(
-                        lc_cache[chosen_transit_row][start:end]
-                    )  # 1.5 but required
+                    #siggi = numpy.copy(lc_arr[chosen_transit_row])  # 1.2
+                    # make a copy, as the numba part changes it 
+                    siggi = lc_arr[chosen_transit_row].copy()# 0.3
+                    #t1 = time.perf_counter()
+                    #for i in range(10**6):
+                    #    siggi = list(lc_arr[chosen_transit_row]) # 1.5
+                    #t2 = time.perf_counter()
+                    #print(t2-t1)
                     # Time 5.0
                     itr_here, correction_factor = get_residuals_scale_transit_iterator(
                         patched_data_arr[k : k + duration],  # data 0.3
                         siggi,  # signal 0.3
                         inverse_squared_patched_dy_arr[k : k + duration],  # dy 0.3
-                        mean[k],
-                    )  # 2.2
+                        mean[k],  # 2.2
+                    )  
                     current_stat = (
                         itr_here + ootr[k] - summed_edge_effect_correction
                     )  # 0.3
@@ -840,7 +855,7 @@ class TransitLeastSquares(object):
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
-        lc_cache, lc_cache_overview = self._get_cache(
+        lc_cache, lc_cache_overview, lc_arr = self._get_cache(
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,
@@ -887,6 +902,7 @@ class TransitLeastSquares(object):
             R_star_max=self.R_star_max,
             M_star_min=self.M_star_min,
             M_star_max=self.M_star_max,
+            lc_arr=lc_arr
         )
         bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"  #' | {rate_fmt}'
         pbar = tqdm(
@@ -965,6 +981,8 @@ class TransitLeastSquares(object):
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
 
+        #maxwidth_in_samples = 94
+
         # Make a model transit with the best fit parameters
         signal = self.fractional_transit(
             duration=best_duration,
@@ -981,12 +999,57 @@ class TransitLeastSquares(object):
             limb_dark=self.limb_dark,
         )
 
+        print(signal)
+        sig = lc_arr[best_row]
+        #sig = signal
+
+        print(lc_arr[best_row])
+        dur = len(sig)
+
+        # scale signal!
+
+        scale = SIGNAL_DEPTH / (1-best_depth)
+        sig = 1 - sig
+        sig = sig / scale
+        sig = 1-sig
+        print(sig)
+
+
+
+
         lowest_chi2 = float("inf")
         best_T0 = 0
         start_transit = 0.5 - numpy.max(durations) / 2
         print("Finding best T0 for period", format(best_period, ".5f"))
+        print(best_duration, 1 - best_depth, maxwidth_in_samples)
+
+
+        print('len(signal)', len(signal))
+
         pbar2 = tqdm(total=numpy.size(T0_array))
         # t1 = time.perf_counter()
+
+        for Tx in T0_array:
+            phases = fold(time=self.t, period=best_period, T0=Tx)
+            sort_index = numpy.argsort(phases, kind="mergesort")
+            phases = phases[sort_index]
+            flux = self.y[sort_index]
+            dy = self.dy[sort_index]
+
+            flux = numpy.roll(flux, int(dur/2))
+            data_segment = flux[:dur]
+
+            dy = numpy.roll(dy, int(dur/2))
+            dy_segment = dy[:dur]
+            current_chi2 = numpy.sum((data_segment - sig) ** 2 / dy_segment ** 2)
+            pbar2.update(1)
+            if current_chi2 < lowest_chi2:
+                lowest_chi2 = current_chi2
+                best_T0 = Tx
+
+
+
+        """
         for Tx in T0_array:
             # "fold" is fast (7% of time in this loop) using numba
             phases = fold(time=self.t, period=best_period, T0=Tx + best_period / 2)
@@ -1024,6 +1087,7 @@ class TransitLeastSquares(object):
             if current_chi2 < lowest_chi2:
                 lowest_chi2 = current_chi2
                 best_T0 = Tx
+        """
 
         pbar2.close()
         print("best_T0 ##########", best_T0)
@@ -1050,6 +1114,7 @@ class TransitLeastSquares(object):
             else:
                 break
 
+        print('len(transit_times)', len(transit_times))
         # Calculate transit duration in days
         duration_timeseries = (max(self.t) - min(self.t)) / best_period
         epochs = len(transit_times)
@@ -1097,7 +1162,7 @@ class TransitLeastSquares(object):
 
             print("cleaned_SDE", SDE)
 
-
+        print('BLAAA', maxwidth_in_samples, stretch)
 
         # ratio = 0.8
         # signal = signal / ratio
@@ -1116,7 +1181,7 @@ class TransitLeastSquares(object):
             limb_dark=self.limb_dark,
         )
         # Model and data are off by one cadence
-        folded_model = numpy.roll(folded_model, -1)
+        #folded_model = numpy.roll(folded_model, +1)
 
         # Full model
         # We oversample the model internally
