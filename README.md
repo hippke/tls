@@ -20,7 +20,11 @@ Open the [iPython tutorial](https://github.com/hippke/tls/blob/master/tls_tutori
 Open the [complete documentation](https://www).
 
 ## Installation
-`pip install tls-package`
+`pip install tls-package` or
+
+`git clone https://github.com/hippke/tls.git
+cd tls
+python3 setup.py install`
 
 ## Attribution
 Please cite [Hippke & Heller (2018)](http://www.) if you find this code useful in your research. The BibTeX entry for the paper is:
