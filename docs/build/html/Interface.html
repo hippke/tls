@@ -1,0 +1,558 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Interface &mdash; Transit Least Squares  documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Examples" href="Examples.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search">
+          
+
+          
+            <a href="index.html" class="icon icon-home"> Transit Least Squares
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="Installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Changelog.html">Changelog</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Examples.html">Examples</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#define-data-for-a-search">Define data for a search</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#define-parameters-and-run-search">Define parameters and run search</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#return-values">Return values</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#period-grid">Period grid</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#priors-for-stellar-parameters">Priors for stellar parameters</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/hippke/tls/issues">Submit an issue</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://github.com/hippke/tls">Source at Github</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://">Read the paper</a></li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">Transit Least Squares</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html">Docs</a> &raquo;</li>
+        
+      <li>Interface</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="interface">
+<h1>Interface<a class="headerlink" href="#interface" title="Permalink to this headline">¶</a></h1>
+<p>This describes the interface to TLS.</p>
+<div class="section" id="define-data-for-a-search">
+<h2>Define data for a search<a class="headerlink" href="#define-data-for-a-search" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="TransitLeastSquares.model">
+<em class="property">class </em><code class="descclassname">TransitLeastSquares.</code><code class="descname">model</code><span class="sig-paren">(</span><em>time</em>, <em>data</em>, <em>errors</em><span class="sig-paren">)</span><a class="headerlink" href="#TransitLeastSquares.model" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">t:</th><td class="field-body"><em>(array)</em> Time series of the data (in units of days)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">y:</th><td class="field-body"><em>(array)</em> Flux series of the data, so that <code class="docutils literal notranslate"><span class="pre">1</span></code> is nominal flux (out of transit) and <code class="docutils literal notranslate"><span class="pre">0</span></code> is darkness. A transit may be represented by a flux of e.g., <code class="docutils literal notranslate"><span class="pre">0.99</span></code></td>
+</tr>
+<tr class="field-odd field"><th class="field-name">dy:</th><td class="field-body"><em>(array, optional)</em> Measurement errors of the data</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="define-parameters-and-run-search">
+<h2>Define parameters and run search<a class="headerlink" href="#define-parameters-and-run-search" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="TransitLeastSquares.power">
+<em class="property">class </em><code class="descclassname">TransitLeastSquares.</code><code class="descname">power</code><span class="sig-paren">(</span><em>parameters</em><span class="sig-paren">)</span><a class="headerlink" href="#TransitLeastSquares.power" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<p>Parameters used for the period search grid and the transit duration search grid. All parameters are optional.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">R_star:</th><td class="field-body"><em>(float, default: 1.0)</em> Stellar radius (in units of solar radii)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">R_star_min:</th><td class="field-body"><em>(float, default: 0.13)</em> Minimum stellar radius to be considered (in units of solar radii)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">R_star_max:</th><td class="field-body"><em>(float, default: 3.5)</em> Maximum stellar radius to be considered (in units of solar radii)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">M_star:</th><td class="field-body"><em>(float, default: 1.0)</em> Stellar mass (in units of solar masses).</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">M_star_min:</th><td class="field-body"><em>(float, default: 0.1)</em> Minimum stellar mass to be considered (in units of solar masses)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">M_star_max:</th><td class="field-body"><em>(float, default: 1.0)</em> Maximum stellar mass to be considered (in units of solar masses)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">period_min:</th><td class="field-body"><em>(float)</em> Minimum trial period (in units of days). If none is given, the limit is derived from the Roche limit</td>
+</tr>
+<tr class="field-even field"><th class="field-name">period_max:</th><td class="field-body"><em>(float)</em> Maximum trial period (in units of days). Default: Half the duration of the time series</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">n_transits_min:</th><td class="field-body"><em>(int, default: 2)</em> Minimum number of transits required. Overrules <code class="docutils literal notranslate"><span class="pre">period_max=time_span/n_transits_min</span></code></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">A larger range of stellar radius and mass allows for a wider variety of transits to be found at the expense of computational effort</p>
+</div>
+<p>Physical parameters to create a
+<a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract">Mandel &amp; Agol (2002)</a> transit model using a subset of the
+<a class="reference external" href="https://www.cfa.harvard.edu/~lkreidberg/batman/">batman module</a>  and syntax (<a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2015PASP..127.1161K/abstract">Kreidberg 2015</a>). Available defaults are described below.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">per:</th><td class="field-body"><em>(float)</em> Orbital period (in units of days). Default: X.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">rp:</th><td class="field-body"><em>(float)</em> Planet radius (in units of stellar radii). Default: X.</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">a:</th><td class="field-body"><em>(float)</em> Semi-major axis (in units of stellar radii). Default: X.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">inc:</th><td class="field-body"><em>(float)</em> Orbital inclination (in degrees). Default: 90.</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">b:</th><td class="field-body"><em>(float)</em> Orbital impact parameter as the sky-projected distance between the centre of the stellar disc and the centre of the planetary disc at conjunction. If set, overrules <code class="docutils literal notranslate"><span class="pre">inc=degrees(arccos(b/a)</span></code>. Default: 0.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">ecc:</th><td class="field-body"><em>(float)</em> Orbital eccentricity. Default: 0.</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">w:</th><td class="field-body"><em>(float)</em> Argument of periapse (in degrees). Default: 90.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">u:</th><td class="field-body"><em>(array)</em> List of limb darkening coefficients. Default: [X, Y].</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">limb_dark:</th><td class="field-body"><em>(str)</em> Limb darkening model (choice of <code class="docutils literal notranslate"><span class="pre">nonlinear</span></code>, <code class="docutils literal notranslate"><span class="pre">quadratic</span></code>, <code class="docutils literal notranslate"><span class="pre">exponential</span></code>, <code class="docutils literal notranslate"><span class="pre">logarithmic</span></code>, <code class="docutils literal notranslate"><span class="pre">squareroot</span></code>, <code class="docutils literal notranslate"><span class="pre">linear</span></code>, <code class="docutils literal notranslate"><span class="pre">uniform</span></code>, or <code class="docutils literal notranslate"><span class="pre">power2</span></code>. Default: <code class="docutils literal notranslate"><span class="pre">quadratic</span></code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Available defaults for the physical parameters of the transit model. When set, the individual parameters are overruled.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name" colspan="2">transit_template:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(str)</em> Choice of <code class="docutils literal notranslate"><span class="pre">Earth</span></code>, <code class="docutils literal notranslate"><span class="pre">Super-Earth</span></code>, <code class="docutils literal notranslate"><span class="pre">blubb</span></code></td>
+</tr>
+</tbody>
+</table>
+<p>Parameters to balance detection efficiency and computational requirements:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name" colspan="2">duration_grid_step:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(float, default: 1.1)</em> Grid step width between subsequent trial durations, so that <span class="math notranslate nohighlight">\({\rm dur}_{n+1}={\rm dur}_n \times {\rm duration\_grid\_step}\)</span>. With the default value of 1.1, each subsequent trial duration is longer by 10%</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">transit_depth_min:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><em>(float, default: 10 ppm)</em> Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest known transit is 11.9 ppm (Kepler-37b, <a class="reference external" href="http://adsabs.harvard.edu/abs/2013Natur.494..452B">Barclay et al. 2013</a>)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">oversampling_factor:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(int, default: 3)</em> Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Higher <code class="docutils literal notranslate"><span class="pre">oversampling_factor</span></code> increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift. For a planet with a 365-day period orbiting a solar mass and radius star, this parity is reached for <code class="docutils literal notranslate"><span class="pre">oversampling_factor=9</span></code> at 30 min cadence (Kepler LC). Shorter periods have reduced oversampling benefits, as the cadence becomes a larger fraction of the period.</p>
+</div>
+</div>
+<div class="section" id="return-values">
+<h2>Return values<a class="headerlink" href="#return-values" title="Permalink to this headline">¶</a></h2>
+<p>The TLS spectra:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">periods:</th><td class="field-body"><em>(array)</em> The period grid used in the search</td>
+</tr>
+<tr class="field-even field"><th class="field-name">power:</th><td class="field-body"><em>(array)</em> The power spectrum per period as defined in the TLS paper. We recommend to use this spectrum to assess transit signals. It is the median-smoothed <code class="docutils literal notranslate"><span class="pre">power_raw</span></code> spectrum.</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">power_raw:</th><td class="field-body"><em>(array)</em> The raw power spectrum (without median smoothing) as defined in the TLS paper</td>
+</tr>
+<tr class="field-even field"><th class="field-name">SR:</th><td class="field-body"><em>(array)</em> Signal residue similar to the BLS SR</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">chi2:</th><td class="field-body"><em>(array)</em> Minimum chi-squared (<span class="math notranslate nohighlight">\(\chi^2\)</span>) per period</td>
+</tr>
+<tr class="field-even field"><th class="field-name">chi2red:</th><td class="field-body"><em>(array)</em> Minimum chi-squared per degree of freedom (<span class="math notranslate nohighlight">\(\chi^2_{\nu}=\chi^2/\nu\)</span>) per period, where  <span class="math notranslate nohighlight">\(\nu=n-m\)</span> with <span class="math notranslate nohighlight">\(n\)</span> as the number of observations, and <span class="math notranslate nohighlight">\(m=4\)</span> as the number of fitted parameters (period, T0, transit duration, transit depth).</td>
+</tr>
+</tbody>
+</table>
+<p>The TLS statistics:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">SDE:</th><td class="field-body"><em>(float)</em> Maximum of <code class="docutils literal notranslate"><span class="pre">power</span></code></td>
+</tr>
+<tr class="field-even field"><th class="field-name">SDE_raw:</th><td class="field-body"><em>(float)</em> Maximum of <code class="docutils literal notranslate"><span class="pre">power_raw</span></code></td>
+</tr>
+<tr class="field-odd field"><th class="field-name">chi2_min:</th><td class="field-body"><em>(float)</em> Minimum of <code class="docutils literal notranslate"><span class="pre">chi2</span></code></td>
+</tr>
+<tr class="field-even field"><th class="field-name">chi2red_min:</th><td class="field-body"><em>(float)</em>  Minimum of <code class="docutils literal notranslate"><span class="pre">chi2red</span></code></td>
+</tr>
+</tbody>
+</table>
+<p>Additional transit statistics based on the <code class="docutils literal notranslate"><span class="pre">power</span></code> spectrum:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">period:</th><td class="field-body"><em>(float)</em> Period of the best-fit signal</td>
+</tr>
+<tr class="field-even field"><th class="field-name">T0:</th><td class="field-body"><em>(float)</em> Mid-transit time of the first transit within the time series</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">duration:</th><td class="field-body"><em>(float)</em> Best-fit transit duration</td>
+</tr>
+<tr class="field-even field"><th class="field-name">depth:</th><td class="field-body"><em>(float)</em> Best-fit transit depth (measured at the transit bottom)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">depth_mean:</th><td class="field-body"><em>(tuple of floats)</em> Transit depth measured as the mean of all intransit points. The second value is the standard deviation of these points multiplied by the square root of the number of intransit points</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">depth_mean_even:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><em>(tuple of floats)</em> Mean depth and uncertainty of even transits (1, 3, …)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">depth_mean_odd:</th><td class="field-body"><em>(tuple of floats)</em> Mean depth and uncertainty of odd transits (2, 4, …)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">snr:</th><td class="field-body"><em>(float)</em> Signal-to-noise ratio. Definition: <span class="math notranslate nohighlight">\({\rm SNR} = \frac{d}{\sigma_o}n^{1/2}\)</span> with <span class="math notranslate nohighlight">\(d\)</span> as the mean transit depth,  <span class="math notranslate nohighlight">\(\sigma\)</span> as the standard deviation of the out-of-transit points, and <span class="math notranslate nohighlight">\(n\)</span> as the number of intransit points (<a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract">Pont et al. 2006</a>)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">snr_per_transit:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(array)</em> Signal-to-noise ratio per individual transit</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">snr_pink_per_transit:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><em>(array)</em> Signal-to-pink-noise ratio per individual transit as defined in <a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract">Pont et al. (2006)</a></td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">odd_even_mismatch:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(float)</em> Significance (in standard deviations) between odd and even transit depths. Example: A value of 5 represents a <span class="math notranslate nohighlight">\(5\,\sigma\)</span> confidence that the odd and even depths if different depths</td>
+</tr>
+<tr class="field-even field"><th class="field-name">transit_times:</th><td class="field-body"><em>(array)</em> The mid-transit time for each transit within the time series</td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">per_transit_count:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(array)</em> Number of data points during each unique transit</td>
+</tr>
+<tr class="field-even field"><th class="field-name">transit_count:</th><td class="field-body"><em>(int)</em> The number of transits</td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">distinct_transit_count:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><em>(int)</em> The number of transits with intransit data points</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">empty_transit_count:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><em>(int)</em> The number of transits with no intransit data points</td>
+</tr>
+</tbody>
+</table>
+<p>Models for visualization purpose:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">model:</th><td class="field-body"><em>(array)</em> Model flux at each time value</td>
+</tr>
+<tr class="field-even field"><th class="field-name">model_phase:</th><td class="field-body"><em>(array)</em> Phase of the phase-folded model</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">model_folded:</th><td class="field-body"><em>(array)</em> Model flux at each phase</td>
+</tr>
+<tr class="field-even field"><th class="field-name">model_data:</th><td class="field-body"><em>(array)</em> Data flux at each phase</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The models are not exact representations of the models used during the search. They should only be used for rough validation purposes. It is planned to improve the visualiziation in a future release.</p>
+</div>
+</div>
+<div class="section" id="period-grid">
+<h2>Period grid<a class="headerlink" href="#period-grid" title="Permalink to this headline">¶</a></h2>
+<p>When searching for sine-like signals, e.g. using Fourier Transforms, it is optimal to uniformly sample the trial frequencies. This was also suggested for BLS <a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2002A&amp;A...391..369K/abstract">(Kovács et al. 2002)</a>. However, when searching for transit signals, this is not optimal due to the transit duty cycle which changes as a function of the planetary period due to orbital mechanics. The optimal period grid, compared to a linear grid, reduces the workload (at the same detection efficiency) by a factor of a few. The optimal frequency sampling as a function of stellar mass and radius was derived by <a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2014A&amp;A...561A.138O/abstract">Ofir (2014)</a> as</p>
+<div class="math notranslate nohighlight">
+\[N_{\rm freq,{ }optimal} = \left( f_{\rm max}^{1/3} - f_{\rm min}^{1/3} + \frac{A}{3} \right) \frac{3}{A}\]</div>
+<p>with</p>
+<div class="math notranslate nohighlight">
+\[A=\frac{(2\pi)^{2/3}}{\pi }\frac{R}{(GM)^{1/3}}\frac{1}{S \times OS}\]</div>
+<p>where <span class="math notranslate nohighlight">\(M\)</span> and <span class="math notranslate nohighlight">\(R\)</span> are the stellar mass and radius, <span class="math notranslate nohighlight">\(G\)</span> is the gravitational constant, <span class="math notranslate nohighlight">\(S\)</span> is the time span of the dataset and <span class="math notranslate nohighlight">\(OS\)</span> is the oversampling parameter to ensure that the peak is not missed between frequency samples. The search edges can be found at the Roche limit,</p>
+<div class="math notranslate nohighlight">
+\[f_{\rm max}=\frac{1}{2 \pi} \sqrt{\frac{GM}{(3R)^3}}; f_{\rm min}=2/S\]</div>
+<dl class="function">
+<dt id="autoperiod">
+<code class="descname">autoperiod</code><span class="sig-paren">(</span><em>parameters</em><span class="sig-paren">)</span><a class="headerlink" href="#autoperiod" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">R_star:</th><td class="field-body"><p class="first">Stellar radius (in units of solar radii)</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">M_star:</th><td class="field-body"><p class="first">Stellar mass (in units of solar masses)</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">time_span:</th><td class="field-body"><p class="first">Duration of time series (in units of days)</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">period_min:</th><td class="field-body"><p class="first">Minimum trial period (in units of days). Optional.</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">period_max:</th><td class="field-body"><p class="first">Maximum trial period (in units of days). Optional.</p>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">oversampling_factor:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><p class="first">Default: 2. Optional.</p>
+<p class="last">Returns: a 1D array of float values representing a grid of trial periods in units of days.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>Example usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">TransitLeastSquares</span> <span class="k">import</span> <span class="n">autoperiod</span>
+<span class="n">periods</span> <span class="o">=</span> <span class="n">autoperiod</span><span class="p">(</span><span class="n">R_star</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">M_star</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">time_span</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>returns a period grid with 32172 values:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="mi">200</span><span class="p">,</span> <span class="mf">199.889</span><span class="p">,</span> <span class="mf">199.779</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="mf">0.601</span><span class="p">,</span> <span class="mf">0.601</span><span class="p">,</span> <span class="mf">0.601</span><span class="p">]</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">TLS calls this function automatically to derive its period grid. Calling this function separately can be useful to employ a classical BLS search, e.g., using the astroPy BLS function.</p>
+</div>
+</div>
+<div class="section" id="priors-for-stellar-parameters">
+<h2>Priors for stellar parameters<a class="headerlink" href="#priors-for-stellar-parameters" title="Permalink to this headline">¶</a></h2>
+<p>This function provides priors for stellar mass, radius, and limb darkening for stars observed during the Kepler K2 and TESS mission. It is planned to extend this function for past and future missions such as Kepler, CHEOPS, PLATO.</p>
+<dl class="function">
+<dt id="catalog_info">
+<code class="descname">catalog_info</code><span class="sig-paren">(</span><em>EPIC_ID or TIC_ID</em><span class="sig-paren">)</span><a class="headerlink" href="#catalog_info" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">EPIC_ID:</th><td class="field-body"><em>(int)</em> The EPIC catalog ID (K2, Ecliptic Plane Input Catalog)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">TIC_ID:</th><td class="field-body"><em>(int)</em> The TIC catalog ID (TESS Input Catalog)</td>
+</tr>
+</tbody>
+</table>
+<p>Returns</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">ab:</th><td class="field-body"><em>(tuple of floats)</em> Quadratic limb darkening parameters a, b</td>
+</tr>
+<tr class="field-even field"><th class="field-name">mass:</th><td class="field-body"><em>(float)</em> Stellar mass (in units of solar masses)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">mass_min:</th><td class="field-body"><em>(float)</em> 1-sigma upper confidence interval on stellar mass (in units of solar mass)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">mass_max:</th><td class="field-body"><em>(float)</em> 1-sigma lower confidence interval on stellar mass (in units of solar mass)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">radius:</th><td class="field-body"><em>(float)</em> Stellar radius (in units of solar radii)</td>
+</tr>
+<tr class="field-even field"><th class="field-name">radius_min:</th><td class="field-body"><em>(float)</em> 1-sigma upper confidence interval on stellar radius (in units of solar radii)</td>
+</tr>
+<tr class="field-odd field"><th class="field-name">radius_max:</th><td class="field-body"><em>(float)</em> 1-sigma lower confidence interval on stellar radius (in units of solar radii)</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The matching between the stellar parameter table and the limb darkening table is performed by first finding the nearest <span class="math notranslate nohighlight">\(T_{\rm eff}\)</span>, and subsequently the nearest <span class="math notranslate nohighlight">\({\rm logg}\)</span>.</p>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p><strong>Data sources:</strong></p>
+<p>K2 data are collated from the K2 Ecliptic Plane Input Catalog (<a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract">Huber et al. 2016</a>) with limb darkening coefficients from <a class="reference external" href="https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract">Claret et al. (2012, 2013)</a>. Data are pulled from local CSV files within the TLS package.</p>
+<p class="last">TESS data are collated from the TESS Input Catalog (<a class="reference external" href="http://adsabs.harvard.edu/abs/2017arXiv170600495S">TIC, Stassun et al. 2018</a>) with limb darkening coefficients from <a class="reference external" href="https://ui.adsabs.harvard.edu/?#abs/2017A%26A...600A..30C">Claret et al. (2017)</a>. Due to the large size of the catalog, data are not saved locally. TIC data are pulled from <a class="reference external" href="https://archive.stsci.edu/tess/">MAST</a> and matched to limb darkening values saved locally in a CSV file within the TLS package.</p>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Upper and lower confidence intervals may be identical. Radius confidence interval may be identical to the radius. Values not available in the catalog are returned as <code class="docutils literal notranslate"><span class="pre">None</span></code>. When feeding these values to TLS, make sure to validate accordingly.</p>
+</div>
+<p>Example usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">ab</span><span class="p">,</span> <span class="n">R_star</span><span class="p">,</span> <span class="n">R_star_min</span><span class="p">,</span> <span class="n">R_star_max</span><span class="p">,</span> <span class="n">M_star</span><span class="p">,</span> <span class="n">M_star_min</span><span class="p">,</span> <span class="n">M_star_max</span> <span class="o">=</span> <span class="n">catalog_info</span><span class="p">(</span><span class="n">EPIC_ID</span><span class="o">=</span><span class="mi">211611158</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Quadratic limb darkening a, b&#39;</span><span class="p">,</span> <span class="n">ab</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">ab</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Stellar radius&#39;</span><span class="p">,</span> <span class="n">R_star</span><span class="p">,</span> <span class="s1">&#39;+&#39;</span><span class="p">,</span> <span class="n">R_star_max</span><span class="p">,</span> <span class="s1">&#39;-&#39;</span><span class="p">,</span> <span class="n">R_star_min</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Stellar mass&#39;</span><span class="p">,</span> <span class="n">M_star</span><span class="p">,</span> <span class="s1">&#39;+&#39;</span><span class="p">,</span> <span class="n">M_star_max</span><span class="p">,</span> <span class="s1">&#39;-&#39;</span><span class="p">,</span> <span class="n">M_star_min</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>produces these results:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Quadratic</span> <span class="n">limb</span> <span class="n">darkening</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="mf">0.4899</span> <span class="mf">0.1809</span>
+<span class="n">Stellar</span> <span class="n">radius</span> <span class="mf">1.055</span> <span class="o">+</span> <span class="mf">0.12</span> <span class="o">-</span> <span class="mf">0.1</span>
+<span class="n">Stellar</span> <span class="n">mass</span> <span class="mf">1.267</span> <span class="o">+</span> <span class="mf">0.64</span> <span class="o">-</span> <span class="mf">0.286</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+      
+        <a href="Examples.html" class="btn btn-neutral" title="Examples" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2018, Michael Hippke, René Heller
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  
+
+    
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script type="text/javascript" src="_static/jquery.js"></script>
+        <script type="text/javascript" src="_static/underscore.js"></script>
+        <script type="text/javascript" src="_static/doctools.js"></script>
+        <script async="async" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+
+  
+
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
