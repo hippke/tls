@@ -20,7 +20,9 @@ Open the [iPython tutorial](https://github.com/hippke/tls/blob/master/tls_tutori
 Open the [complete documentation](https://www).
 
 ## Installation
-`pip install tls-package` or
+The stable version can be installed via pip: `pip install tls-package`
+
+The current development version can be installed from this repository:
 ```
 git clone https://github.com/hippke/tls.git
 cd tls
