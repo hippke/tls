@@ -1,18 +1,9 @@
-# ==> Doc: depth_mean_even: to tuple of floats like depth_mean??
-# ==> Test: T0 fitter jetzt mit ootr+itr; Re-Test EPICs
-# ==> Test: Duration grid cutoffs activated (Mstar, Rstar); Re-Test EPICs
-# ==> Paper: Benchmark against which BLS? With constant grid?
-# ==> Implement model API and update Doc
-# ==> Should the best period be identified from the raw power or from the smoothed power?
-# ==> Reintroduce unit tests (github)
-
-
 #                Optimized algorithm to search for transits
 #                of small extrasolar planets
 #                                                                            /
 #       ,        AUTHORS                                                   O/
 #    \  :  /     Michael Hippke (1) [michael@hippke.org]                /\/|
-# `. __/ \__ .'  Rene' Heller (2) [heller@mps.mpg.de]                       |
+# `. __/ \__ .'  Rene' Heller (2) [heller@mps.mpg.de]                      |
 # _ _\     /_ _  _________________________________________________________/ \_
 #    /_   _\
 #  .'  \ /  `.   (1) Sonneberg Observatory, Sternwartestr. 32, Sonneberg
@@ -20,31 +11,22 @@
 #       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany
 
 
-import json
-import sys
-import numpy
-import numba
-import scipy
-import multiprocessing
-import warnings
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
+import http.client as httplib
+import json
+import multiprocessing
+import numba
+import numpy
 import scipy.interpolate
-from tqdm import tqdm
+import sys
+import warnings
+
+from array import array
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees, floor, ceil
-from array import array
+from tqdm import tqdm
+from urllib.parse import quote as urlencode
 
-try: # Python 3.x
-    from urllib.parse import quote as urlencode
-    # from urllib.request import urlretrieve
-except ImportError:  # Python 2.x
-    from urllib import pathname2url as urlencode
-    # from urllib import urlretrieve
-    
-try: # Python 3.x
-    import http.client as httplib 
-except ImportError:  # Python 2.x
-    import httplib
 
 
 """Magic constants"""
@@ -57,7 +39,7 @@ M_sun = 1.989 * 10 ** 30  # mass of the Sun [kg]
 SECONDS_PER_DAY = 86400
 
 # Default values as described in the paper
-TRANSIT_DEPTH_MIN = 10 * 10**-6  # 10 ppm
+TRANSIT_DEPTH_MIN = 10 * 10 ** -6  # 10 ppm
 
 # For the period grid
 R_STAR = 1.0
@@ -113,7 +95,7 @@ REQUIRED_DEPTH_PRECISION = 0.01
 DEPTH_ITER_INITIAL_GUESS_SHALLOW = 0.1
 DEPTH_ITER_INITIAL_GUESS_DEEP = 2
 
-# Oversampling of the reference transit:
+# Oversampling ==> Downsampling of the reference transit:
 # "Don’t fit an unbinned model to binned data."
 # Reference: Kipping, D., "Binning is sinning: morphological light-curve
 #            distortions due to finite integration time"
@@ -169,25 +151,32 @@ def get_duration_grid(periods, log_step=1.1):
 
 
 def mastQuery(request):
-    headers = {"Content-type": "application/x-www-form-urlencoded",
-               "Accept": "text/plain",
-               "User-agent":"python-requests/"+".".join(map(str, sys.version_info[:3]))}
-    conn = httplib.HTTPSConnection('mast.stsci.edu')
-    conn.request("POST", "/api/v0/invoke", "request="+urlencode(json.dumps(request)), headers)
+    headers = {
+        "Content-type": "application/x-www-form-urlencoded",
+        "Accept": "text/plain",
+        "User-agent": "python-requests/" + ".".join(map(str, sys.version_info[:3])),
+    }
+    conn = httplib.HTTPSConnection("mast.stsci.edu")
+    conn.request(
+        "POST", "/api/v0/invoke", "request=" + urlencode(json.dumps(request)), headers
+    )
     response = conn.getresponse()
     header = response.getheaders()
-    content = response.read().decode('utf-8')
+    content = response.read().decode("utf-8")
     conn.close()
     return header, content
 
 
 def get_tic_data(TIC_ID):
-    adv_filters=[{"paramName":"ID", "values":[{"min":TIC_ID,"max":TIC_ID}]}]
-    headers, outString = mastQuery({
-        "service":"Mast.Catalogs.Filtered.Tic",
-        "format":"json",
-        "params":{"columns":"c.*", "filters":adv_filters}})
-    return json.loads(outString)['data']
+    adv_filters = [{"paramName": "ID", "values": [{"min": TIC_ID, "max": TIC_ID}]}]
+    headers, outString = mastQuery(
+        {
+            "service": "Mast.Catalogs.Filtered.Tic",
+            "format": "json",
+            "params": {"columns": "c.*", "filters": adv_filters},
+        }
+    )
+    return json.loads(outString)["data"]
 
 
 def catalog_info(EPIC_ID=None, TIC_ID=None):
@@ -199,16 +188,16 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
           2012A&A...546A..14C, 2013A&A...552A..16C"""
 
     if (EPIC_ID is None) and (TIC_ID is None):
-        raise ValueError('No ID was given')
+        raise ValueError("No ID was given")
     if (EPIC_ID is not None) and (TIC_ID is not None):
-        raise ValueError('Only one ID allowed')
+        raise ValueError("Only one ID allowed")
 
     # EPIC CASE
-    if (EPIC_ID is not None):
+    if EPIC_ID is not None:
         if type(EPIC_ID) is not int:
             raise TypeError('EPIC_ID ID must be of type "int"')
-        if (EPIC_ID<201000001) or (EPIC_ID>251813738):
-            raise TypeError('EPIC_ID ID must be in range 201000001 to 251813738')
+        if (EPIC_ID < 201000001) or (EPIC_ID > 251813738):
+            raise TypeError("EPIC_ID ID must be in range 201000001 to 251813738")
 
         # EPIC K2 catalog, load from locally saved CSV file
         star = numpy.genfromtxt(
@@ -253,15 +242,15 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
         mass_min = star["e_mass"][idx]
 
     # TESS CASE
-    if (TIC_ID is not None):
+    if TIC_ID is not None:
         if type(TIC_ID) is not int:
             raise TypeError('TIC_ID ID must be of type "int"')
 
         # Load entry for TESS Input Catalog from MAST
         tic_data = get_tic_data(TIC_ID)
 
-        if len(tic_data)!=1:
-            raise TypeError('TIC_ID not in catalog')
+        if len(tic_data) != 1:
+            raise TypeError("TIC_ID not in catalog")
 
         star = tic_data[0]
         ld = numpy.genfromtxt(
@@ -299,7 +288,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
     b = relevant_lds["b"][idx_nearest]
 
     # The EPIC catalog was reduced from an array. The return values shall be floats.
-    if (EPIC_ID is not None):
+    if EPIC_ID is not None:
         mass = mass[0]
         mass_min = mass_min[0]
         mass_max = mass_max[0]
@@ -307,15 +296,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
         radius_min = radius_min[0]
         radius_max = radius_max[0]
 
-    return (
-        (a, b),
-        mass,
-        mass_min,
-        mass_max,
-        radius,
-        radius_min,
-        radius_max,
-    )
+    return ((a, b), mass, mass_min, mass_max, radius, radius_min, radius_max)
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
@@ -367,7 +348,7 @@ def pink_noise(data, width):
     std = 0
     datapoints = len(data) - width + 1
     for i in range(datapoints):
-        std += numpy.std(data[i:i+width]) / width**0.5
+        std += numpy.std(data[i : i + width]) / width ** 0.5
     return std / datapoints
 
 
@@ -396,7 +377,7 @@ def running_mean(data, width_signal):
 
 def running_median(data, kernel):
     """Returns sliding median of width 'kernel' and same length as data """
-    idx = (numpy.arange(kernel) + numpy.arange(len(data) - kernel + 1)[:, None])
+    idx = numpy.arange(kernel) + numpy.arange(len(data) - kernel + 1)[:, None]
     med = numpy.median(data[idx], axis=1)
 
     # Append the first/last value at the beginning/end to match the length of
@@ -504,7 +485,6 @@ class TransitLeastSquares(object):
 
         return t, y, dy
 
-
     def fractional_transit(
         self,
         duration,
@@ -565,50 +545,43 @@ class TransitLeastSquares(object):
     def reference_transit(self, samples, per, rp, a, inc, ecc, w, u, limb_dark):
         """Returns an Earth-like transit of width 1 and depth 1"""
 
-        # Box-shaped transit
-        if limb_dark == 0:
-            rescaled = numpy.zeros(samples)
+        f = numpy.ones(SUPERSAMPLE_SIZE)
+        duration = 1  # transit duration in days. Increase for exotic cases
+        t = numpy.linspace(-duration / 2, duration / 2, SUPERSAMPLE_SIZE)
+        ma = batman.TransitParams()
+        ma.t0 = 0  # time of inferior conjunction
+        ma.per = per  # orbital period, use Earth as a reference
+        ma.rp = rp  # planet radius (in units of stellar radii)
+        ma.a = a  # semi-major axis (in units of stellar radii)
+        # orbital inclination (in degrees)
+        ma.inc = inc
+        ma.ecc = ecc  # eccentricity
+        ma.w = w  # longitude of periastron (in degrees)
+        ma.u = u  # limb darkening coefficients
+        ma.limb_dark = limb_dark  # limb darkening model
+        m = batman.TransitModel(ma, t)  # initializes model
+        flux = m.light_curve(ma)  # calculates light curve
 
-        # Limb-darkened transit
-        else:
-            f = numpy.ones(SUPERSAMPLE_SIZE)
-            duration = 1  # transit duration in days. Increase for exotic cases
-            t = numpy.linspace(-duration / 2, duration / 2, SUPERSAMPLE_SIZE)
-            ma = batman.TransitParams()
-            ma.t0 = 0  # time of inferior conjunction
-            ma.per = per  # orbital period, use Earth as a reference
-            ma.rp = rp  # planet radius (in units of stellar radii)
-            ma.a = a  # semi-major axis (in units of stellar radii)
-            # orbital inclination (in degrees)
-            ma.inc = inc
-            ma.ecc = ecc  # eccentricity
-            ma.w = w  # longitude of periastron (in degrees)
-            ma.u = u  # limb darkening coefficients
-            ma.limb_dark = limb_dark  # limb darkening model
-            m = batman.TransitModel(ma, t)  # initializes model
-            flux = m.light_curve(ma)  # calculates light curve
+        # Determine start of transit (first value < 1)
+        idx_first = numpy.argmax(flux < 1)
+        intransit_flux = flux[idx_first : -idx_first + 1]
+        intransit_time = t[idx_first : -idx_first + 1]
 
-            # Determine start of transit (first value < 1)
-            idx_first = numpy.argmax(flux < 1)
-            intransit_flux = flux[idx_first : -idx_first + 1]
-            intransit_time = t[idx_first : -idx_first + 1]
+        # Downsample (bin) to target sample size
+        f = scipy.interpolate.interp1d(intransit_time, intransit_flux)
+        xnew = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
+        downsampled_intransit_flux = f(xnew)
 
-            # Downsample (bin) to target sample size
-            f = scipy.interpolate.interp1d(intransit_time, intransit_flux)
-            xnew = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
-            downsampled_intransit_flux = f(xnew)
-
-            # Rescale to height [0..1]
-            rescaled = (
-                numpy.min(downsampled_intransit_flux) - downsampled_intransit_flux
-            ) / (numpy.min(downsampled_intransit_flux) - 1)
+        # Rescale to height [0..1]
+        rescaled = (
+            numpy.min(downsampled_intransit_flux) - downsampled_intransit_flux
+        ) / (numpy.min(downsampled_intransit_flux) - 1)
 
         return rescaled
 
-
     def _get_cache(
         self, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark
-        ):
+    ):
         """Fetches (size(durations)*size(depths)) light curves of length 
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
@@ -618,11 +591,7 @@ class TransitLeastSquares(object):
         rows = numpy.size(durations)
         lc_cache = numpy.ones([rows, maxwidth_in_samples])
         lc_cache_overview = numpy.zeros(
-            rows,
-            dtype=[
-                ("duration", "f8"),
-                ("width_in_samples", "i8"),
-            ],
+            rows, dtype=[("duration", "f8"), ("width_in_samples", "i8")]
         )  # between transit shape and box
         cached_reference_transit = self.reference_transit(
             samples=maxwidth_in_samples,
@@ -667,7 +636,6 @@ class TransitLeastSquares(object):
 
         return lc_cache, lc_cache_overview, lc_arr
 
-
     def _search_period(
         self,
         period,
@@ -681,7 +649,7 @@ class TransitLeastSquares(object):
         R_star_max,
         M_star_min,
         M_star_max,
-        lc_arr
+        lc_arr,
     ):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
@@ -755,15 +723,15 @@ class TransitLeastSquares(object):
                 # The other part is pulling arrays together
                 # So there is probably a factor of <2 speedup possible in C/Fortran
                 for k in array_to_check:
-                    #t1 = time.perf_counter()
-                    #for i in range(10**6):
+                    # t1 = time.perf_counter()
+                    # for i in range(10**6):
                     #    siggi = list(lc_arr[chosen_transit_row]) # 1.5
-                    #t2 = time.perf_counter()
-                    #print(t2-t1)
+                    # t2 = time.perf_counter()
+                    # print(t2-t1)
                     # Time 5.0
                     itr_here, correction_factor = get_residuals_scale_transit_iterator(
                         patched_data_arr[k : k + duration],  # data 0.3
-                        lc_arr[chosen_transit_row].copy(), # signal 0.3
+                        lc_arr[chosen_transit_row].copy(),  # signal 0.3
                         inverse_squared_patched_dy_arr[k : k + duration],  # dy 0.3
                         mean[k],  # 2.2
                     )
@@ -944,7 +912,7 @@ class TransitLeastSquares(object):
             R_star_max=self.R_star_max,
             M_star_min=self.M_star_min,
             M_star_max=self.M_star_max,
-            lc_arr=lc_arr
+            lc_arr=lc_arr,
         )
         bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"  #' | {rate_fmt}'
         pbar = tqdm(
@@ -963,7 +931,7 @@ class TransitLeastSquares(object):
         else:
             raise ValueError("Unknown PERIODS_SEARCH_ORDER")
 
-        for data in p.imap_unordered(params, reversed(periods)):  # small to large
+        for data in p.imap_unordered(params, periods):  # small to large
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
             test_statistic_rolls.append(data[2])
@@ -986,98 +954,20 @@ class TransitLeastSquares(object):
         test_statistic_rows = test_statistic_rows[sort_index]
         test_statistic_depths = test_statistic_depths[sort_index]
 
-        # Sort residuals for best
         idx_best = numpy.argmin(test_statistic_residuals)
-        period = test_statistic_periods[idx_best]
         best_row = test_statistic_rows[idx_best]
-        depth = test_statistic_depths[idx_best]
         duration = lc_cache_overview["duration"][best_row]
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
 
-        # Now we know the best period, width and duration. But T0 was not preserved
-        # due to speed optimizations. Thus, iterate over T0s using the given parameters
+        if max(test_statistic_residuals)==min(test_statistic_residuals):
+            raise ValueError('No transit were fitted. Try smaller "transit_depth_min"')
 
-        # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
-
-        # ideal step size: number of samples per period
-        samples_per_period = numpy.size(self.y)  # / no_of_periods
-        T0_array = numpy.linspace(
-            start=numpy.min(self.t),
-            stop=numpy.min(self.t) + period,
-            num=samples_per_period,
-        )
-
-        # Fold to all T0s so that the transit is expected at phase = 0
-        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
-        if maxwidth_in_samples % 2 != 0:
-            maxwidth_in_samples = maxwidth_in_samples + 1
-
-        signal = lc_arr[best_row]
-        dur = len(signal)
-        scale = SIGNAL_DEPTH / (1-depth)
-        signal = 1-((1 - signal) / scale)
-
-        residuals_lowest = float("inf")
-        T0 = 0
-        print("Searching for best T0 for period", format(period, ".5f"))
-        pbar2 = tqdm(total=numpy.size(T0_array))
-        signal_ootr = numpy.ones(len(self.y[dur:]))
-
-        for Tx in T0_array:
-            phases = fold(time=self.t, period=period, T0=Tx)
-            sort_index = numpy.argsort(phases, kind="mergesort")  # 66% of CPU time
-            phases = phases[sort_index]
-            flux = self.y[sort_index]
-            dy = self.dy[sort_index]
-
-            # Roll so that the signal starts at index 0
-            flux = numpy.roll(flux, int(dur/2)+1)
-            dy = numpy.roll(dy, int(dur/2)+1)
-
-            residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
-            residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
-
-            residuals_total = residuals_intransit + residuals_ootr
-            pbar2.update(1)
-            if residuals_total < residuals_lowest:
-                residuals_lowest = residuals_total
-                T0 = Tx
-
-        pbar2.close()
-        #best_T0_calculated = (
-        #    best_roll - 0.5 * best_duration
-        #) * period + numpy.min(self.t)
-        # best_T0_calculated = (best_roll)*best_period + numpy.min(self.t)
-
-        # Calculate all mid-transit times
-        if T0 < min(self.t):
-            transit_times = [T0 + period]
-        else:
-            transit_times = [T0]
-        previous_transit_time = transit_times[0]
-        transit_number = 0
-        while True:
-            transit_number = transit_number + 1
-            next_transit_time = previous_transit_time + period
-            if next_transit_time < (numpy.min(self.t) + (numpy.max(self.t) - numpy.min(self.t))):
-                transit_times.append(next_transit_time)
-                previous_transit_time = next_transit_time
-            else:
-                break
-
-        # Calculate transit duration in days
-        duration_timeseries = (numpy.max(self.t) - numpy.min(self.t)) / period
-        epochs = len(transit_times)
-        stretch = duration_timeseries / epochs
-        transit_duration_in_days = duration * stretch * period
-
+        # Power spectra variants
         chi2 = test_statistic_residuals
         chi2red = test_statistic_residuals
         chi2red = chi2red / (len(self.t) - 4)
-
         chi2_min = numpy.min(chi2)
         chi2red_min = numpy.min(chi2red)
-
         SR = numpy.min(chi2) / chi2
         SDE_raw = (1 - numpy.mean(SR)) / numpy.std(SR)
 
@@ -1105,6 +995,89 @@ class TransitLeastSquares(object):
             power = power_raw
             SDE = SDE_raw
 
+        index_highest_power = numpy.argmax(power)
+        period = test_statistic_periods[index_highest_power]
+        depth = test_statistic_depths[index_highest_power]
+
+        # Now we know the best period, width and duration. But T0 was not preserved
+        # due to speed optimizations. Thus, iterate over T0s using the given parameters
+
+        # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
+
+        # ideal step size: number of samples per period
+        samples_per_period = numpy.size(self.y)  # / no_of_periods
+        T0_array = numpy.linspace(
+            start=numpy.min(self.t),
+            stop=numpy.min(self.t) + period,
+            num=samples_per_period,
+        )
+
+        # Fold to all T0s so that the transit is expected at phase = 0
+        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
+        if maxwidth_in_samples % 2 != 0:
+            maxwidth_in_samples = maxwidth_in_samples + 1
+
+        signal = lc_arr[best_row]
+        dur = len(signal)
+        scale = SIGNAL_DEPTH / (1 - depth)
+        signal = 1 - ((1 - signal) / scale)
+
+        residuals_lowest = float("inf")
+        T0 = 0
+        print("Searching for best T0 for period", format(period, ".5f"))
+        pbar2 = tqdm(total=numpy.size(T0_array))
+        signal_ootr = numpy.ones(len(self.y[dur:]))
+
+        for Tx in T0_array:
+            phases = fold(time=self.t, period=period, T0=Tx)
+            sort_index = numpy.argsort(phases, kind="mergesort")  # 66% of CPU time
+            phases = phases[sort_index]
+            flux = self.y[sort_index]
+            dy = self.dy[sort_index]
+
+            # Roll so that the signal starts at index 0
+            flux = numpy.roll(flux, int(dur / 2) + 1)
+            dy = numpy.roll(dy, int(dur / 2) + 1)
+
+            residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
+            residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
+
+            residuals_total = residuals_intransit + residuals_ootr
+            pbar2.update(1)
+            if residuals_total < residuals_lowest:
+                residuals_lowest = residuals_total
+                T0 = Tx
+
+        pbar2.close()
+        # best_T0_calculated = (
+        #    best_roll - 0.5 * best_duration
+        # ) * period + numpy.min(self.t)
+        # best_T0_calculated = (best_roll)*best_period + numpy.min(self.t)
+
+        # Calculate all mid-transit times
+        if T0 < min(self.t):
+            transit_times = [T0 + period]
+        else:
+            transit_times = [T0]
+        previous_transit_time = transit_times[0]
+        transit_number = 0
+        while True:
+            transit_number = transit_number + 1
+            next_transit_time = previous_transit_time + period
+            if next_transit_time < (
+                numpy.min(self.t) + (numpy.max(self.t) - numpy.min(self.t))
+            ):
+                transit_times.append(next_transit_time)
+                previous_transit_time = next_transit_time
+            else:
+                break
+
+        # Calculate transit duration in days
+        duration_timeseries = (numpy.max(self.t) - numpy.min(self.t)) / period
+        epochs = len(transit_times)
+        stretch = duration_timeseries / epochs
+        transit_duration_in_days = duration * stretch * period
+
         folded_model = self.fractional_transit(
             duration=(duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
@@ -1119,8 +1092,19 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
+        
+        phases = fold(self.t, period, T0=T0 + period/2)
+        sort_index = numpy.argsort(phases)
+        model_folded_phase = numpy.linspace(0, 1, numpy.size(phases))
+
+        # Phase is off by half a transit duration
+        print('dur', dur)
+        rolli = int(ceil(dur) / 2)
+        model_folded_phase = numpy.roll(model_folded_phase, rolli)
+        model_folded_flux = self.y[sort_index]
         # Model and data are off by one cadence
-        folded_model = numpy.roll(folded_model, -1)
+        model_folded_model = numpy.roll(folded_model, rolli)
+        #numpy.roll(folded_model, -1)  
 
         # Full model
         # We oversample the model internally
@@ -1137,7 +1121,6 @@ class TransitLeastSquares(object):
         rounds = len(extended_transit_times)
 
         # The model for one period
-
         y_array = self.fractional_transit(
             duration=(duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
@@ -1161,9 +1144,9 @@ class TransitLeastSquares(object):
             full_x_array = numpy.append(full_x_array, x_array)
             full_y_array = numpy.append(full_y_array, y_array)
         # Cut to output time range and sample down to desired resolution
-        # f = scipy.interpolate.interp1d(full_x_array, full_y_array)
-        # xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
-        model_flux = 1  # f(xnew)
+        f = scipy.interpolate.interp1d(full_x_array, full_y_array)
+        xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
+        model_lightcurve = f(xnew)
 
         # Get transit depth, standard deviation and SNR per transit
         per_transit_count = numpy.zeros([len(transit_times)])
@@ -1190,18 +1173,21 @@ class TransitLeastSquares(object):
             transit_depths[i] = mean_flux
             per_transit_count[i] = intransit_points
             # Check if transit odd/even to collect the flux for the mean calculations
-            if i%2 == 0:  # even
-                all_flux_intransit_even = numpy.append(all_flux_intransit_even, flux_intransit)
+            if i % 2 == 0:  # even
+                all_flux_intransit_even = numpy.append(
+                    all_flux_intransit_even, flux_intransit
+                )
             else:
-                all_flux_intransit_odd = numpy.append(all_flux_intransit_odd, flux_intransit)
+                all_flux_intransit_odd = numpy.append(
+                    all_flux_intransit_odd, flux_intransit
+                )
 
         flux_ootr = numpy.delete(self.y, all_idx_intransit)
-
 
         # Estimate SNR and pink SNR
         # Second run because now the out of transit points are known
         std = numpy.std(flux_ootr)
-        for i in range(len(transit_times)):
+        for i in range(len(transit_times)):  # REFACTOR for mid_transit in transit_times
             mid_transit = transit_times[i]
             tmin = mid_transit - 0.5 * transit_duration_in_days
             tmax = mid_transit + 0.5 * transit_duration_in_days
@@ -1211,27 +1197,40 @@ class TransitLeastSquares(object):
             all_flux_intransit = numpy.append(all_flux_intransit, flux_intransit)
             mean_flux = numpy.mean(self.y[idx_intransit])
             intransit_points = numpy.size(self.y[idx_intransit])
-            pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
-            snr_pink_per_transit[i] = ((1-mean_flux) / pinknoise)
-            std_binned = std / intransit_points**0.5
-            snr_per_transit[i] = (1-mean_flux) / std_binned
+            if intransit_points > 1:
+                # print(i, intransit_points, int(numpy.mean(per_transit_count)))
+                pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
+                snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
+                std_binned = std / intransit_points ** 0.5
+                snr_per_transit[i] = (1 - mean_flux) / std_binned
+            else:
+                snr_per_transit[i] = 0
+                snr_pink_per_transit[i] = 0
 
         depth_mean = numpy.mean(all_flux_intransit)
-        depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(per_transit_count)**(0.5)
-        snr = ((1-depth_mean) / numpy.std(flux_ootr)) * len(all_flux_intransit)**(0.5)
-        
+        depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(
+            per_transit_count
+        ) ** (0.5)
+        snr = ((1 - depth_mean) / numpy.std(flux_ootr)) * len(all_flux_intransit) ** (
+            0.5
+        )
+
         depth_mean_odd = numpy.mean(all_flux_intransit_odd)
         depth_mean_even = numpy.mean(all_flux_intransit_even)
-        depth_mean_odd_std = numpy.std(all_flux_intransit_odd) / numpy.sum(len(all_flux_intransit_odd))**(0.5)
-        depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(len(all_flux_intransit_even))**(0.5)
+        depth_mean_odd_std = numpy.std(all_flux_intransit_odd) / numpy.sum(
+            len(all_flux_intransit_odd)
+        ) ** (0.5)
+        depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(
+            len(all_flux_intransit_even)
+        ) ** (0.5)
 
         # Odd even mismatch in standard deviations
-        odd_even_difference = abs(depth_mean_odd-depth_mean_even)
+        odd_even_difference = abs(depth_mean_odd - depth_mean_even)
         odd_even_std_sum = depth_mean_odd_std + depth_mean_even_std
         odd_even_mismatch = odd_even_difference / odd_even_std_sum
 
         transit_count = len(transit_times)
-        empty_transit_count = numpy.count_nonzero(per_transit_count==0)
+        empty_transit_count = numpy.count_nonzero(per_transit_count == 0)
         distinct_transit_count = transit_count - empty_transit_count
 
         duration = transit_duration_in_days
@@ -1248,7 +1247,6 @@ class TransitLeastSquares(object):
             transit_times,
             maxwidth_in_samples,
             folded_model,
-            model_flux,
             chi2red,
             power_raw,
             transit_depths,
@@ -1267,7 +1265,11 @@ class TransitLeastSquares(object):
             empty_transit_count,
             snr_pink_per_transit,
             transit_count,
-            distinct_transit_count
+            distinct_transit_count,
+            model_lightcurve,
+            model_folded_phase,
+            model_folded_flux,
+            model_folded_model
         )
 
     def transit_mask(self, t, period, duration, transit_time):
@@ -1296,7 +1298,6 @@ class TransitLeastSquaresResults(dict):
                     "transit_times",
                     "maxwidth_in_samples",
                     "folded_model",
-                    "model_flux",
                     "chi2red",
                     "power_raw",
                     "transit_depths",
@@ -1315,7 +1316,11 @@ class TransitLeastSquaresResults(dict):
                     "empty_transit_count",
                     "snr_pink_per_transit",
                     "transit_count",
-                    "distinct_transit_count"
+                    "distinct_transit_count",
+                    "model_lightcurve",
+                    "model_folded_phase",
+                    "model_folded_flux",
+                    "model_folded_model"
                 ),
                 args,
             )
