@@ -23,7 +23,9 @@ Open the [complete documentation](https://www).
 `pip install tls-package` or
 
 `git clone https://github.com/hippke/tls.git
+
 cd tls
+
 python3 setup.py install`
 
 ## Attribution
