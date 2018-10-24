@@ -308,7 +308,7 @@ def get_residuals(data, signal, dy):
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
-def get_residuals_scale_transit_iterator(data, sig, dy, target_depth):
+def depth_iterator(data, sig, dy, target_depth):
 
     # The residuals from a single signal-data match.
     # This sub-function will be called iteratively until convergence cutoff
@@ -475,6 +475,7 @@ class TransitLeastSquares(object):
             raise ValueError("Flux values must be positive")
         if max(y) >= float("inf"):
             raise ValueError("Flux values must be finite")
+
         # If no dy is given, create it with the standard deviation of the flux
         if dy is None:
             dy = numpy.full(len(y), numpy.std(y))
@@ -484,6 +485,14 @@ class TransitLeastSquares(object):
             raise ValueError("Inputs (t, y, dy) must be 1-dimensional")
 
         return t, y, dy
+
+
+    def transit_mask(self, t, period, duration, transit_time):
+        half_period = 0.5 * period
+        mask = numpy.abs(
+            (t - transit_time + half_period) % period - half_period) < 0.5 * duration
+        return mask
+
 
     def fractional_transit(
         self,
@@ -538,9 +547,11 @@ class TransitLeastSquares(object):
 
         return result
 
+
     def _impact_to_inclination(self, b, semimajor_axis):
         """Converts planet impact parameter b = [0..1.x] to inclination [deg]"""
         return degrees(arccos(b / semimajor_axis))
+
 
     def reference_transit(self, samples, per, rp, a, inc, ecc, w, u, limb_dark):
         """Returns an Earth-like transit of width 1 and depth 1"""
@@ -578,6 +589,7 @@ class TransitLeastSquares(object):
         ) / (numpy.min(downsampled_intransit_flux) - 1)
 
         return rescaled
+
 
     def _get_cache(
         self, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark
@@ -635,6 +647,7 @@ class TransitLeastSquares(object):
             row += +1
 
         return lc_cache, lc_cache_overview, lc_arr
+
 
     def _search_period(
         self,
@@ -723,13 +736,8 @@ class TransitLeastSquares(object):
                 # The other part is pulling arrays together
                 # So there is probably a factor of <2 speedup possible in C/Fortran
                 for k in array_to_check:
-                    # t1 = time.perf_counter()
-                    # for i in range(10**6):
-                    #    siggi = list(lc_arr[chosen_transit_row]) # 1.5
-                    # t2 = time.perf_counter()
-                    # print(t2-t1)
                     # Time 5.0
-                    itr_here, correction_factor = get_residuals_scale_transit_iterator(
+                    itr_here, correction_factor = depth_iterator(
                         patched_data_arr[k : k + duration],  # data 0.3
                         lc_arr[chosen_transit_row].copy(),  # signal 0.3
                         inverse_squared_patched_dy_arr[k : k + duration],  # dy 0.3
@@ -750,7 +758,6 @@ class TransitLeastSquares(object):
                         # best_roll = best_roll * (len(flux)/len(patched_data))
                         # if best_roll>1:  # in patched appendix
                         #    best_roll = best_roll - 1
-
                         best_depth = mean[k]
                         best_depth = best_depth * correction_factor
                         best_depth = 1 - best_depth
@@ -804,7 +811,7 @@ class TransitLeastSquares(object):
         self.u = kwargs.get("u", U)
         self.limb_dark = kwargs.get("limb_dark", LIMB_DARK)
 
-        """Validations to avoid garbage in ==> garbage out"""
+        """Validations to avoid (garbage in ==> garbage out)"""
 
         # Stellar radius
         # 0 < R_star < inf
@@ -878,7 +885,7 @@ class TransitLeastSquares(object):
             limb_dark=self.limb_dark,
         )
 
-        # Prepare result arrays
+        # Result lists now (faster), convert to numpy array later
         test_statistic_periods = []
         test_statistic_residuals = []
         test_statistic_rolls = []
@@ -914,7 +921,7 @@ class TransitLeastSquares(object):
             M_star_max=self.M_star_max,
             lc_arr=lc_arr,
         )
-        bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"  #' | {rate_fmt}'
+        bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
         pbar = tqdm(
             total=numpy.size(periods),
             smoothing=0.3,
@@ -931,7 +938,7 @@ class TransitLeastSquares(object):
         else:
             raise ValueError("Unknown PERIODS_SEARCH_ORDER")
 
-        for data in p.imap_unordered(params, periods):  # small to large
+        for data in p.imap_unordered(params, periods):
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
             test_statistic_rolls.append(data[2])
@@ -943,16 +950,12 @@ class TransitLeastSquares(object):
 
         # imap_unordered delivers results in unsorted order ==> sort
         test_statistic_periods = numpy.array(test_statistic_periods)
-        test_statistic_residuals = numpy.array(test_statistic_residuals)
-        test_statistic_rolls = numpy.array(test_statistic_rolls)
-        test_statistic_rows = numpy.array(test_statistic_rows)
-        test_statistic_depths = numpy.array(test_statistic_depths)
         sort_index = numpy.argsort(test_statistic_periods)
         test_statistic_periods = test_statistic_periods[sort_index]
-        test_statistic_residuals = test_statistic_residuals[sort_index]
-        test_statistic_rolls = test_statistic_rolls[sort_index]
-        test_statistic_rows = test_statistic_rows[sort_index]
-        test_statistic_depths = test_statistic_depths[sort_index]
+        test_statistic_residuals = numpy.array(test_statistic_residuals)[sort_index]
+        test_statistic_rolls = numpy.array(test_statistic_rolls)[sort_index]
+        test_statistic_rows = numpy.array(test_statistic_rows)[sort_index]
+        test_statistic_depths = numpy.array(test_statistic_depths)[sort_index]
 
         idx_best = numpy.argmin(test_statistic_residuals)
         best_row = test_statistic_rows[idx_best]
@@ -990,7 +993,6 @@ class TransitLeastSquares(object):
             # scale factor to touch max=SDE
             scale = SDE / numpy.max(power)
             power = power * scale
-            # Recalculate SDE
         else:
             power = power_raw
             SDE = SDE_raw
@@ -1003,9 +1005,7 @@ class TransitLeastSquares(object):
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
 
         # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
-
-        # ideal step size: number of samples per period
-        samples_per_period = numpy.size(self.y)  # / no_of_periods
+        samples_per_period = numpy.size(self.y)
         T0_array = numpy.linspace(
             start=numpy.min(self.t),
             stop=numpy.min(self.t) + period,
@@ -1013,10 +1013,6 @@ class TransitLeastSquares(object):
         )
 
         # Fold to all T0s so that the transit is expected at phase = 0
-        maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
-        if maxwidth_in_samples % 2 != 0:
-            maxwidth_in_samples = maxwidth_in_samples + 1
-
         signal = lc_arr[best_row]
         dur = len(signal)
         scale = SIGNAL_DEPTH / (1 - depth)
@@ -1092,23 +1088,19 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
-        
+
+        # Folded model
         phases = fold(self.t, period, T0=T0 + period/2)
         sort_index = numpy.argsort(phases)
         model_folded_phase = numpy.linspace(0, 1, numpy.size(phases))
-
-        # Phase is off by half a transit duration
-        print('dur', dur)
-        rolli = int(ceil(dur) / 2)
-        model_folded_phase = numpy.roll(model_folded_phase, rolli)
-        model_folded_flux = self.y[sort_index]
-        # Model and data are off by one cadence
-        model_folded_model = numpy.roll(folded_model, rolli)
-        #numpy.roll(folded_model, -1)  
+        roll_cadences = int(ceil(dur) / 2)  # Phase is off by half a transit duration
+        model_folded_phase = numpy.roll(model_folded_phase, roll_cadences)
+        model_folded_model = numpy.roll(folded_model, roll_cadences)
+        model_folded_y = self.y[sort_index]
+        model_folded_dy = self.dy[sort_index]
 
         # Full model
-        # We oversample the model internally
-        internal_samples = 100000
+        internal_samples = 100000  # We oversample the model internally
 
         # Append one more transit after and before end of nominal time series
         # to fully cover beginning and end with out of transit calculations
@@ -1143,6 +1135,7 @@ class TransitLeastSquares(object):
             x_array = numpy.linspace(xmin, xmax, internal_samples)
             full_x_array = numpy.append(full_x_array, x_array)
             full_y_array = numpy.append(full_y_array, y_array)
+        
         # Cut to output time range and sample down to desired resolution
         f = scipy.interpolate.interp1d(full_x_array, full_y_array)
         xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
@@ -1234,6 +1227,7 @@ class TransitLeastSquares(object):
         distinct_transit_count = transit_count - empty_transit_count
 
         duration = transit_duration_in_days
+        model_folded_phase = numpy.linspace(0, 1, numpy.size(self.y))
 
         return TransitLeastSquaresResults(
             test_statistic_periods,
@@ -1268,15 +1262,9 @@ class TransitLeastSquares(object):
             distinct_transit_count,
             model_lightcurve,
             model_folded_phase,
-            model_folded_flux,
-            model_folded_model
-        )
-
-    def transit_mask(self, t, period, duration, transit_time):
-        half_period = 0.5 * period
-        return (
-            numpy.abs((t - transit_time + half_period) % period - half_period)
-            < 0.5 * duration
+            model_folded_model,
+            model_folded_y,
+            model_folded_dy
         )
 
 
@@ -1319,8 +1307,9 @@ class TransitLeastSquaresResults(dict):
                     "distinct_transit_count",
                     "model_lightcurve",
                     "model_folded_phase",
-                    "model_folded_flux",
-                    "model_folded_model"
+                    "model_folded_model",
+                    "model_folded_y",
+                    "model_folded_dy"
                 ),
                 args,
             )
