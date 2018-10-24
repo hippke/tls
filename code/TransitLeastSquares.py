@@ -487,10 +487,10 @@ class TransitLeastSquares(object):
         return t, y, dy
 
 
-    def transit_mask(self, t, period, duration, transit_time):
+    def transit_mask(self, t, period, duration, T0):
         half_period = 0.5 * period
         mask = numpy.abs(
-            (t - transit_time + half_period) % period - half_period) < 0.5 * duration
+            (t - T0 + half_period) % period - half_period) < 0.5 * duration
         return mask
 
 
@@ -1074,7 +1074,19 @@ class TransitLeastSquares(object):
         stretch = duration_timeseries / epochs
         transit_duration_in_days = duration * stretch * period
 
-        folded_model = self.fractional_transit(
+        # Folded model / data
+        phases = fold(self.t, period, T0=T0 + period/2)
+        sort_index = numpy.argsort(phases)
+        folded_phase = phases[sort_index]
+        folded_y = self.y[sort_index]
+        folded_dy = self.dy[sort_index]
+
+        # Folded model / model curve
+        # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
+        # so we need to roll the model to match the model so that its mid-transit
+        # is at phase=0.5
+        model_folded_phase = numpy.linspace(0, 1, numpy.size(phases))
+        model_folded_model = self.fractional_transit(
             duration=(duration * maxwidth_in_samples),
             maxwidth=maxwidth_in_samples / stretch,
             depth=1 - depth,
@@ -1088,19 +1100,10 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
-
-        # Folded model
-        phases = fold(self.t, period, T0=T0 + period/2)
-        sort_index = numpy.argsort(phases)
-        model_folded_phase = numpy.linspace(0, 1, numpy.size(phases))
-        roll_cadences = int(ceil(dur) / 2)  # Phase is off by half a transit duration
-        model_folded_phase = numpy.roll(model_folded_phase, roll_cadences)
-        model_folded_model = numpy.roll(folded_model, roll_cadences)
-        model_folded_y = self.y[sort_index]
-        model_folded_dy = self.dy[sort_index]
-
-        # Full model
-        internal_samples = 100000  # We oversample the model internally
+      
+        # Light curve model
+        oversample = 5  # more model data points than real data points
+        internal_samples = (int(len(self.y) / len(transit_times))) * oversample
 
         # Append one more transit after and before end of nominal time series
         # to fully cover beginning and end with out of transit calculations
@@ -1127,6 +1130,7 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
+        #print('len(y_array)', len(y_array))
 
         # Append all periods
         for i in range(rounds):
@@ -1135,11 +1139,22 @@ class TransitLeastSquares(object):
             x_array = numpy.linspace(xmin, xmax, internal_samples)
             full_x_array = numpy.append(full_x_array, x_array)
             full_y_array = numpy.append(full_y_array, y_array)
+
+        # Determine start and end of relevant time series, and crop it
+        start_cadence = numpy.argmax(full_x_array>min(self.t)) #- 1
+        stop_cadence = numpy.argmax(full_x_array>max(self.t)) #+ 1
+        full_x_array = full_x_array[start_cadence:stop_cadence]
+        full_y_array = full_y_array[start_cadence:stop_cadence]
+        #print(full_x_array)
+
         
+        #for i in range(len(full_x_array)):
+        #    print(full_x_array[i], full_y_array[i])
         # Cut to output time range and sample down to desired resolution
-        f = scipy.interpolate.interp1d(full_x_array, full_y_array)
-        xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
-        model_lightcurve = f(xnew)
+        #f = scipy.interpolate.interp1d(full_x_array, full_y_array)
+        #xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
+        model_lightcurve_model = full_y_array  #f(xnew)
+        model_lightcurve_time = full_x_array
 
         # Get transit depth, standard deviation and SNR per transit
         per_transit_count = numpy.zeros([len(transit_times)])
@@ -1227,7 +1242,7 @@ class TransitLeastSquares(object):
         distinct_transit_count = transit_count - empty_transit_count
 
         duration = transit_duration_in_days
-        model_folded_phase = numpy.linspace(0, 1, numpy.size(self.y))
+        #model_folded_phase = numpy.linspace(0, 1, numpy.size(self.y))
 
         return TransitLeastSquaresResults(
             test_statistic_periods,
@@ -1240,7 +1255,6 @@ class TransitLeastSquares(object):
             duration,
             transit_times,
             maxwidth_in_samples,
-            folded_model,
             chi2red,
             power_raw,
             transit_depths,
@@ -1260,11 +1274,15 @@ class TransitLeastSquares(object):
             snr_pink_per_transit,
             transit_count,
             distinct_transit_count,
-            model_lightcurve,
+            model_lightcurve_model,
+            model_lightcurve_time,
+            
             model_folded_phase,
             model_folded_model,
-            model_folded_y,
-            model_folded_dy
+
+            folded_phase,
+            folded_y,
+            folded_dy
         )
 
 
@@ -1285,7 +1303,6 @@ class TransitLeastSquaresResults(dict):
                     "duration",
                     "transit_times",
                     "maxwidth_in_samples",
-                    "folded_model",
                     "chi2red",
                     "power_raw",
                     "transit_depths",
@@ -1305,11 +1322,15 @@ class TransitLeastSquaresResults(dict):
                     "snr_pink_per_transit",
                     "transit_count",
                     "distinct_transit_count",
-                    "model_lightcurve",
+                    "model_lightcurve_model",
+                    "model_lightcurve_time",
+            
                     "model_folded_phase",
                     "model_folded_model",
-                    "model_folded_y",
-                    "model_folded_dy"
+
+                    "folded_phase",
+                    "folded_y",
+                    "folded_dy"
                 ),
                 args,
             )
