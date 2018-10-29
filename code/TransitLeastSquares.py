@@ -55,17 +55,16 @@ R_STAR_MAX = 3.5
 DURATION_GRID_STEP = 1.1
 
 # For the transit template
-PER = 365.25  # orbital period (in days)
-RP = R_earth / R_sun  # planet radius (in units of stellar radii)
-A = 217  # semi-major axis (in units of stellar radii)
-INC = 90  # orbital inclination (in degrees)
-B = 0  # impact parameter
-ECC = 0  # eccentricity
-W = 90  # longitude of periastron (in degrees)
 # quadratic limb darkening for a G2V star in the Kepler bandpass
 # http://vizier.u-strasbg.fr/viz-bin/VizieR?-source=J/A%2BA/552/A16
 U = [0.4804, 0.1867]
 LIMB_DARK = "quadratic"
+ECC = 0  # eccentricity
+W = 90  # longitude of periastron (in degrees)
+#INC = 90  # orbital inclination (in degrees)
+#B = 0
+
+
 
 # Unique depth of trial signals (at various durations). These are rescaled in
 # depth so that their integral matches the mean flux in the window in question.
@@ -112,6 +111,45 @@ PERIODS_SEARCH_ORDER = "shuffled"
 # For periodograms of smaller width, no smoothing is applied. Values in the range
 # [100..200] have shown to yield very similar results and are numerically stable
 SDE_MEDIAN_KERNEL_SIZE = 151
+
+
+def cleaned_array(t, y, dy=None):
+    """Takes numpy arrays with masks and non-float values.
+    Returns unmasked cleaned arrays."""
+
+    # Start with empty Python lists and convert to numpy arrays later (reason: speed)
+    clean_t = []
+    clean_y = []
+    if dy is not None:
+        clean_dy = []
+
+    # Cleaning numpy arrays with both NaN and None values is not trivial, as the usual
+    # mask/delete filters do not accept their simultanous ocurrence.
+    # Instead, we iterate over the array once; this is not Pythonic but works reliably.
+    for i in range(len(y)):
+        if (y[i] is not None) and (y[i] is not numpy.nan) and \
+        (y[i] >= 0) and (y[i] < numpy.inf):
+            clean_y.append(y[i])
+            clean_t.append(t[i])
+            if dy is not None:
+                clean_dy.append(dy[i])
+
+    clean_t = numpy.array(clean_t, dtype=float)
+    clean_y = numpy.array(clean_y, dtype=float)
+
+    if dy is None:
+        return clean_t, clean_y
+    else:
+        clean_dy = numpy.array(clean_dy, dtype=float)
+        return clean_t, clean_y, clean_dy 
+
+
+@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+def transit_mask(t, period, duration, T0):
+        half_period = 0.5 * period
+        mask = numpy.abs(
+            (t - T0 + half_period) % period - half_period) < 0.5 * duration
+        return mask
 
 
 @numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
@@ -463,7 +501,7 @@ class TransitLeastSquares(object):
         duration = max(t) - min(t)
         if duration <= 0:
             raise ValueError("Time duration must positive")
-        if numpy.size(y) < 3 or numpy.size(t) < 3 or numpy.size(dy) < 3:
+        if numpy.size(y) < 3 or numpy.size(t) < 3:# or numpy.size(dy) < 3:
             raise ValueError("Too few values in data set")
         if numpy.mean(y) > 1.01 or numpy.mean(y) < 0.99:
             warnings.warn(
@@ -485,13 +523,6 @@ class TransitLeastSquares(object):
             raise ValueError("Inputs (t, y, dy) must be 1-dimensional")
 
         return t, y, dy
-
-
-    def transit_mask(self, t, period, duration, T0):
-        half_period = 0.5 * period
-        mask = numpy.abs(
-            (t - T0 + half_period) % period - half_period) < 0.5 * duration
-        return mask
 
 
     def fractional_transit(
@@ -796,20 +827,67 @@ class TransitLeastSquares(object):
         self.M_star_max = kwargs.get("M_star_max", M_STAR_MAX)
         self.duration_grid_step = kwargs.get("duration_grid_step", DURATION_GRID_STEP)
 
-        self.per = kwargs.get("per", PER)
-        self.rp = kwargs.get("rp", RP)
-        self.a = kwargs.get("a", A)
-        self.inc = kwargs.get("inc", INC)
-
+        self.per = kwargs.get("per", 13.4)
+        self.rp = kwargs.get("rp", (1.42 * R_earth) / R_sun)
+        self.a = kwargs.get("a", 23.1)
+        
         # If an impact parameter is given, it overrules the supplied inclination
         if "b" in kwargs:
             self.b = kwargs.get("b")
             self.inc = self._impact_to_inclination(b=self.b, semimajor_axis=self.a)
+        else:
+            self.inc = kwargs.get("inc", 90)
 
         self.ecc = kwargs.get("ecc", ECC)
         self.w = kwargs.get("w", W)
         self.u = kwargs.get("u", U)
         self.limb_dark = kwargs.get("limb_dark", LIMB_DARK)
+
+        self.transit_template = kwargs.get("transit_template", "Terran")
+        if (self.transit_template == 'Terran'):
+            self.per = 13.4  # orbital period (in days)
+            self.rp = (1.42 * R_earth) / R_sun  # planet radius (in units of stellar radii)
+            self.a = 23.1  # semi-major axis (in units of stellar radii)
+            self.b = 0.34  # impact parameter
+            self.inc = degrees(arccos(self.b / self.a))
+
+        elif self.transit_template == "grazing":
+            self.b = 0.99  # impact parameter
+            self.inc = degrees(arccos(self.b / self.a))
+
+        elif self.transit_template == "Earth":
+            self.per = 365.25  # orbital period (in days)
+            self.rp = R_earth / R_sun  # planet radius (in units of stellar radii)
+            self.a = 217  # semi-major axis (in units of stellar radii)
+            self.b = 0  # impact parameter
+            self.inc = degrees(arccos(self.b / self.a))
+
+        elif self.transit_template == "Neptunian":
+            self.per = 34.4  # orbital period (in days)
+            self.rp = (2.69 * R_earth) / R_sun  # planet radius (in units of stellar radii)
+            self.a = 41  # semi-major axis (in units of stellar radii)
+            self.b = 0.43  # impact parameter
+            self.inc = degrees(arccos(self.b / self.a))
+
+        elif self.transit_template == "Jovian":
+            self.per = 29  # orbital period (in days)
+            self.rp = (11 * R_earth) / R_sun  # planet radius (in units of stellar radii)
+            self.a = 26.9  # semi-major axis (in units of stellar radii)
+            self.b = 0.45  # impact parameter
+            self.inc = degrees(arccos(B / A))
+
+        elif self.transit_template == "box":
+            self.per = 29  # orbital period (in days)
+            self.rp = (11 * R_earth) / R_sun  # planet radius (in units of stellar radii)
+            self.a = 26.9  # semi-major axis (in units of stellar radii)
+            self.b = 0  # impact parameter
+            self.inc = 90
+            self.u = [0]
+            self.limb_dark = "linear"
+
+        else:
+            raise ValueError('Unknown transit_template. Known values: "Terran", "grazing", \
+                "Earth", "Neptunian", "Jovian"')
 
         """Validations to avoid (garbage in ==> garbage out)"""
 
