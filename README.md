@@ -13,8 +13,8 @@ We present a new method to detect planetary transits from time-series photometry
 
 ![image](https://github.com/hippke/tls/blob/master/images/frontpage_rescaled.png)
 
-## Tutorial
-Open the [iPython tutorial](https://github.com/hippke/tls/blob/master/tls_tutorial.ipynb) for a quick introduction.
+## Tutorials
+Open the [iPython tutorials](file:///home/michael/Desktop/Google%20Drive/Research/ld-transit/doc/build/html/Examples.html) for a quick introduction.
 
 ## Documentation
 Open the [complete documentation](https://www).
