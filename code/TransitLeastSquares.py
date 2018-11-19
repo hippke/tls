@@ -31,6 +31,8 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 
+TLS_VERSION = 'Transit Least Squares TLS 0.X (19 November 2018)' 
+
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
 R_sun = 695508000  # radius of the Sun [m]
@@ -61,10 +63,6 @@ U = [0.4804, 0.1867]
 LIMB_DARK = "quadratic"
 ECC = 0  # eccentricity
 W = 90  # longitude of periastron (in degrees)
-#INC = 90  # orbital inclination (in degrees)
-#B = 0
-
-
 
 # Unique depth of trial signals (at various durations). These are rescaled in
 # depth so that their integral matches the mean flux in the window in question.
@@ -108,9 +106,18 @@ SUPERSAMPLE_SIZE = 10000
 PERIODS_SEARCH_ORDER = "shuffled"
 
 # When converting power_raw to power, a median of a certain window size is subtracted.
-# For periodograms of smaller width, no smoothing is applied. Values in the range
-# [100..200] have shown to yield very similar results and are numerically stable
-SDE_MEDIAN_KERNEL_SIZE = 151
+# For periodograms of smaller width, no smoothing is applied. The kernel size is 
+# calculated as kernel = oversampling_factor * SDE_MEDIAN_KERNEL_SIZE
+# This value has proven to yield numerically stable results.
+SDE_MEDIAN_KERNEL_SIZE = 30
+
+
+def rp_rs_from_depth(depth, a, b):
+    """Takes the maximum transit depth and quadratic limb darkening params a, b
+    Returns R_P / R_S (ratio of planetary to stellar radius
+    Source: Heller et al. 2018 in prep"""
+
+    return ((depth-1)*(2*a+b-6))**(1/2) / 6**(1/2)
 
 
 def cleaned_array(t, y, dy=None):
@@ -288,7 +295,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
         tic_data = get_tic_data(TIC_ID)
 
         if len(tic_data) != 1:
-            raise TypeError("TIC_ID not in catalog")
+            raise ValueError("TIC_ID not in catalog")
 
         star = tic_data[0]
         ld = numpy.genfromtxt(
@@ -874,7 +881,7 @@ class TransitLeastSquares(object):
             self.rp = (11 * R_earth) / R_sun  # planet radius (in units of stellar radii)
             self.a = 26.9  # semi-major axis (in units of stellar radii)
             self.b = 0.45  # impact parameter
-            self.inc = degrees(arccos(B / A))
+            self.inc = degrees(arccos(self.b / self.a))
 
         elif self.transit_template == "box":
             self.per = 29  # orbital period (in days)
@@ -1058,7 +1065,8 @@ class TransitLeastSquares(object):
         power_raw = power_raw * scale
 
         # Detrended SDE, named "power"
-        kernel = SDE_MEDIAN_KERNEL_SIZE
+        kernel = self.oversampling_factor * SDE_MEDIAN_KERNEL_SIZE
+        #print('kernel', kernel)
         if kernel % 2 == 0:
             kernel = kernel + 1
         if len(power_raw) > 2 * kernel:
@@ -1078,6 +1086,29 @@ class TransitLeastSquares(object):
         index_highest_power = numpy.argmax(power)
         period = test_statistic_periods[index_highest_power]
         depth = test_statistic_depths[index_highest_power]
+
+        # Determine estimate for uncertainty in period
+        # Method: Full width at half maximum
+        try:
+            # Upper limit
+            idx = index_highest_power
+            #print('idx', idx)
+            while True:
+                idx += 1
+                #print(idx, power[idx])
+                if power[idx] <= 0.5 * power[index_highest_power]:
+                    idx_upper = idx
+                    break
+            # Lower limit
+            idx = index_highest_power
+            while True:
+                idx -= 1
+                if power[idx] <= 0.5 * power[index_highest_power]:
+                    idx_lower = idx
+                    break
+            period_uncertainty = 0.5 * (test_statistic_periods[idx_upper] - test_statistic_periods[idx_lower])
+        except:
+            period_uncertainty = float('inf')
 
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
@@ -1121,7 +1152,8 @@ class TransitLeastSquares(object):
             if residuals_total < residuals_lowest:
                 residuals_lowest = residuals_total
                 T0 = Tx
-
+        
+        #T0 = 0
         pbar2.close()
         # best_T0_calculated = (
         #    best_roll - 0.5 * best_duration
@@ -1152,6 +1184,13 @@ class TransitLeastSquares(object):
         stretch = duration_timeseries / epochs
         transit_duration_in_days = duration * stretch * period
 
+        # Correct duration for gaps in the data:
+        average_cadence = numpy.median(numpy.diff(self.t))
+        span = max(self.t) - min(self.t)
+        theoretical_cadences = span / average_cadence
+        fill_factor = (len(self.t)-1) / theoretical_cadences
+        transit_duration_in_days = transit_duration_in_days * fill_factor
+
         # Folded model / data
         phases = fold(self.t, period, T0=T0 + period/2)
         sort_index = numpy.argsort(phases)
@@ -1163,9 +1202,19 @@ class TransitLeastSquares(object):
         # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
         # so we need to roll the model to match the model so that its mid-transit
         # is at phase=0.5
-        model_folded_phase = numpy.linspace(0, 1, numpy.size(phases))
+        #print('fill_factor', fill_factor)
+        fill_half = 1-((1-fill_factor)*0.5)
+        #print(duration , maxwidth_in_samples , fill_factor)
+
+        # Model phase, shifted by half a cadence so that mid-transit is at phase=0.5
+        model_folded_phase = numpy.linspace(
+            0 + 1/numpy.size(phases)/2,
+            1 + 1/numpy.size(phases)/2,
+            numpy.size(phases))
+
+        # Model flux
         model_folded_model = self.fractional_transit(
-            duration=(duration * maxwidth_in_samples),
+            duration=duration * maxwidth_in_samples * fill_half, 
             maxwidth=maxwidth_in_samples / stretch,
             depth=1 - depth,
             samples=int(len(self.t / epochs)),
@@ -1283,13 +1332,14 @@ class TransitLeastSquares(object):
             all_flux_intransit = numpy.append(all_flux_intransit, flux_intransit)
             mean_flux = numpy.mean(self.y[idx_intransit])
             intransit_points = numpy.size(self.y[idx_intransit])
-            if intransit_points > 1:
+            try:
+            #if intransit_points > 1:
                 # print(i, intransit_points, int(numpy.mean(per_transit_count)))
                 pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
                 snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
                 std_binned = std / intransit_points ** 0.5
                 snr_per_transit[i] = (1 - mean_flux) / std_binned
-            else:
+            except:
                 snr_per_transit[i] = 0
                 snr_pink_per_transit[i] = 0
 
@@ -1300,6 +1350,12 @@ class TransitLeastSquares(object):
         snr = ((1 - depth_mean) / numpy.std(flux_ootr)) * len(all_flux_intransit) ** (
             0.5
         )
+
+        #print('self.limb_dark', self.limb_dark)
+        if self.limb_dark == 'quadratic':
+            rp_rs = rp_rs_from_depth(depth=depth, a=self.u[0], b=self.u[1])
+        else:
+            rp_rs = None
 
         depth_mean_odd = numpy.mean(all_flux_intransit_odd)
         depth_mean_even = numpy.mean(all_flux_intransit_even)
@@ -1322,10 +1378,17 @@ class TransitLeastSquares(object):
         duration = transit_duration_in_days
         #model_folded_phase = numpy.linspace(0, 1, numpy.size(self.y))
 
+        if empty_transit_count / transit_count >= 0.33:
+            text = str(empty_transit_count) + " of " + str(transit_count) + \
+                " transits without data. The true period may be twice the given period."
+            warnings.warn(text)
+
+
         return TransitLeastSquaresResults(
             test_statistic_periods,
             power,
             period,
+            period_uncertainty,
             T0,
             SDE_raw,
             test_statistic_rolls,
@@ -1354,13 +1417,12 @@ class TransitLeastSquares(object):
             distinct_transit_count,
             model_lightcurve_model,
             model_lightcurve_time,
-            
             model_folded_phase,
             model_folded_model,
-
             folded_phase,
             folded_y,
-            folded_dy
+            folded_dy,
+            rp_rs
         )
 
 
@@ -1374,6 +1436,7 @@ class TransitLeastSquaresResults(dict):
                     "periods",
                     "power",
                     "period",
+                    "period_uncertainty",
                     "T0",
                     "SDE_raw",
                     "rolls",
@@ -1402,13 +1465,12 @@ class TransitLeastSquaresResults(dict):
                     "distinct_transit_count",
                     "model_lightcurve_model",
                     "model_lightcurve_time",
-            
                     "model_folded_phase",
                     "model_folded_model",
-
                     "folded_phase",
                     "folded_y",
-                    "folded_dy"
+                    "folded_dy",
+                    "rp_rs"
                 ),
                 args,
             )
