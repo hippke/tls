@@ -17,7 +17,7 @@ We present a new method to detect planetary transits from time-series photometry
 Open the [iPython tutorials](https://github.com/hippke/tls/tree/master/tutorials) for a quick introduction.
 
 ## Documentation
-Open the [complete documentation](http://jaekle.info/tls/Interface.html).
+Open the [complete documentation](http://jaekle.info/tls/Python%20interface.html).
 
 ## Installation
 The stable version can be installed via pip: `pip install tls-package`
