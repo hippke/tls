@@ -94,7 +94,6 @@ SUPERSAMPLE_SIZE = 10000
 # Order in which the periods are searched: "shuffled"", "descending", "ascending"
 # Shuffled has the advantage of the best estimate for the remaining time
 PERIODS_SEARCH_ORDER = "shuffled"
-PERIODS_SEARCH_ORDER = "ascending"
 
 # When converting power_raw to power, a median of a certain window size is subtracted.
 # For periodograms of smaller width, no smoothing is applied. The kernel size is
@@ -347,11 +346,11 @@ def get_residuals(data, signal, dy):
         value = value + ((data[i] - signal[i]) ** 2) * dy[i]
     return value
 
-
+"""
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def depth_target(data, sig, dy, target_depth):
-    """Creates model by scaling given model transit of given width to given depth
-    Returns residuals between data and this model transit"""
+    Creates model by scaling given model transit of given width to given depth
+    Returns residuals between data and this model transit
 
     # Scale from unique signal depth to the target depth accounting for overshoot (Heller 2018)
     for i in range(len(sig)):
@@ -363,7 +362,7 @@ def depth_target(data, sig, dy, target_depth):
         residuals += ((data[i] - (1 - sig[i])) ** 2) * dy[i]
 
     return residuals
-
+"""
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def pink_noise(data, width):
@@ -380,7 +379,7 @@ def get_lowest_residuals_in_this_duration(
         transit_depth_min, 
         patched_data_arr,
         duration, 
-        lc_arr,
+        signal,
         inverse_squared_patched_dy_arr,
         overshoot,
         ootr, 
@@ -405,8 +404,8 @@ def get_lowest_residuals_in_this_duration(
 
             # Scale model and calculate residuals
             itr_here = 0
-            for j in range(len(lc_arr)):
-                sigi = (1 - lc_arr[j]) / (SIGNAL_DEPTH / target_depth)
+            for j in range(len(signal)):
+                sigi = ((1 - signal[j]) / (SIGNAL_DEPTH / target_depth))
                 itr_here += ((data[j] - (1 - sigi)) ** 2) * dy[j]
 
             current_stat = itr_here + ootr[i] - summed_edge_effect_correction
@@ -676,6 +675,7 @@ class TransitLeastSquares(object):
             u=u,
             limb_dark=limb_dark,
         )
+
         row = 0
         for duration in durations:
             scaled_transit = self.fractional_transit(
@@ -703,7 +703,8 @@ class TransitLeastSquares(object):
             last_sample = numpy.max(full_values) + 1
             signal = lc_cache[row][first_sample:last_sample]
             lc_arr.append(signal)
-            lc_cache_overview["overshoot"][row] = numpy.mean(signal) / numpy.min(signal)
+            #print(duration, numpy.mean(signal) / numpy.min(signal))
+            lc_cache_overview["overshoot"][row] = numpy.mean(signal) / numpy.min(signal)  # 1.22
             row += +1
 
         return lc_cache, lc_cache_overview, lc_arr
@@ -774,6 +775,12 @@ class TransitLeastSquares(object):
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
 
+        #dur = max(t) - min(t)
+        #cycles = dur / period
+        #print(cycles)
+
+        overshoot_correction = 1.05
+
         for duration in durations:
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
             mean = 1 - running_mean(patched_data, duration)
@@ -785,14 +792,14 @@ class TransitLeastSquares(object):
 
             overshoot = lc_cache_overview["overshoot"][chosen_transit_row]
             this_residual, this_row, this_depth = get_lowest_residuals_in_this_duration(
-                mean=mean.copy(),
+                mean=mean,
                 transit_depth_min=transit_depth_min, 
-                patched_data_arr=patched_data.copy(),
+                patched_data_arr=patched_data,
                 duration=duration,
-                lc_arr=numpy.array(lc_arr[chosen_transit_row]).copy(),
-                inverse_squared_patched_dy_arr=inverse_squared_patched_dy.copy(),
-                overshoot=overshoot,
-                ootr=ootr.copy(), 
+                signal=numpy.array(lc_arr[chosen_transit_row]),
+                inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
+                overshoot=overshoot * overshoot_correction,
+                ootr=ootr, 
                 summed_edge_effect_correction=summed_edge_effect_correction,
                 chosen_transit_row=chosen_transit_row,
                 datapoints = len(flux))
@@ -800,6 +807,7 @@ class TransitLeastSquares(object):
             if this_residual < summed_residual_in_rows:
                 summed_residual_in_rows = this_residual
                 best_row = chosen_transit_row
+                #print(this_depth, this_depth * overshoot, (1-(this_depth * overshoot)))
                 best_depth = this_depth
 
         return [period, summed_residual_in_rows, best_row, best_depth]
@@ -982,7 +990,7 @@ class TransitLeastSquares(object):
             + " CPU threads"
         )
         print(text)
-        p = multiprocessing.Pool(processes=1)#multiprocessing.cpu_count())
+        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
         params = partial(
             self._search_period,
             t=self.t,
