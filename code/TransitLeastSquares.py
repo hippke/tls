@@ -17,9 +17,12 @@ import json
 import multiprocessing
 import numba
 import numpy
+
 import scipy.interpolate
 import sys
 import warnings
+import argparse
+import configparser
 
 from array import array
 from functools import partial
@@ -30,13 +33,14 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-
-TLS_VERSION = 'Transit Least Squares TLS 0.X (19 November 2018)' 
+TLS_VERSION = 'Transit Least Squares TLS 0.x (21 November 2018)'
+numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
 R_sun = 695508000  # radius of the Sun [m]
 R_earth = 6371000  # radius of the Earth [m]
+R_jup = 69911000  # radius of Jupiter [m]
 M_sun = 1.989 * 10 ** 30  # mass of the Sun [kg]
 SECONDS_PER_DAY = 86400
 
@@ -93,7 +97,7 @@ DEPTH_ITER_INITIAL_GUESS_SHALLOW = 0.1
 DEPTH_ITER_INITIAL_GUESS_DEEP = 2
 
 # Oversampling ==> Downsampling of the reference transit:
-# "Don’t fit an unbinned model to binned data."
+# "Do not fit an unbinned model to binned data."
 # Reference: Kipping, D., "Binning is sinning: morphological light-curve
 #            distortions due to finite integration time"
 #            MNRAS, Volume 408, Issue 3, pp. 1758-1769
@@ -106,7 +110,7 @@ SUPERSAMPLE_SIZE = 10000
 PERIODS_SEARCH_ORDER = "shuffled"
 
 # When converting power_raw to power, a median of a certain window size is subtracted.
-# For periodograms of smaller width, no smoothing is applied. The kernel size is 
+# For periodograms of smaller width, no smoothing is applied. The kernel size is
 # calculated as kernel = oversampling_factor * SDE_MEDIAN_KERNEL_SIZE
 # This value has proven to yield numerically stable results.
 SDE_MEDIAN_KERNEL_SIZE = 30
@@ -148,10 +152,10 @@ def cleaned_array(t, y, dy=None):
         return clean_t, clean_y
     else:
         clean_dy = numpy.array(clean_dy, dtype=float)
-        return clean_t, clean_y, clean_dy 
+        return clean_t, clean_y, clean_dy
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def transit_mask(t, period, duration, T0):
         half_period = 0.5 * period
         mask = numpy.abs(
@@ -159,24 +163,28 @@ def transit_mask(t, period, duration, T0):
         return mask
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
-def T14(R_s, M_s, P, upper_limit=FRACTIONAL_TRANSIT_DURATION_MAX):
+@numba.jit(fastmath=True, parallel=False, nopython=True)
+def T14(R_s, M_s, P, upper_limit=FRACTIONAL_TRANSIT_DURATION_MAX, small=False):
     """Input:  Stellar radius and mass; planetary period
                    Units: Solar radius and mass; days
-           Output: Maximum planetary transit duration T_14max
-                   Unit: Fraction of period P"""
+       Output: Maximum planetary transit duration T_14max
+               Unit: Fraction of period P"""
 
     P = P * SECONDS_PER_DAY
     R_s = R_sun * R_s
     M_s = M_sun * M_s
-    T14max = R_s * ((4 * P) / (pi * G * M_s)) ** (1 / 3)
+
+    if small:  # small planet assumption
+        T14max = R_s * ((4 * P) / (pi * G * M_s)) ** (1 / 3)
+    else:  # planet size 2 R_jup
+        T14max = (R_s + 2 * R_jup) * ((4 * P) / (pi * G * M_s)) ** (1 / 3)
     result = T14max / P
     if result > upper_limit:
         result = upper_limit
     return result
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def get_edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_dy):
     regular = numpy.sum(((1 - flux) ** 2) * 1 / dy ** 2)
     patched = numpy.sum(((1 - patched_data) ** 2) * inverse_squared_patched_dy)
@@ -344,7 +352,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
     return ((a, b), mass, mass_min, mass_max, radius, radius_min, radius_max)
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def get_residuals(data, signal, dy):
     value = 0
     for i in range(len(data)):
@@ -352,7 +360,7 @@ def get_residuals(data, signal, dy):
     return value
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def depth_iterator(data, sig, dy, target_depth):
 
     # The residuals from a single signal-data match.
@@ -388,7 +396,7 @@ def depth_iterator(data, sig, dy, target_depth):
     return result, k
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def pink_noise(data, width):
     std = 0
     datapoints = len(data) - width + 1
@@ -397,7 +405,7 @@ def pink_noise(data, width):
     return std / datapoints
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def ootr_efficient(data, width_signal, dy):
     chi2 = numpy.zeros(len(data) - width_signal + 1)
     fullsum = numpy.sum(((1 - data) ** 2) * dy)
@@ -437,13 +445,13 @@ def running_median(data, kernel):
     return med
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def fold(time, period, T0):
     """Normal phase folding"""
     return (time - T0) / period - numpy.floor((time - T0) / period)
 
 
-@numba.jit(fastmath=True, parallel=False, cache=True, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def foldfast(time, period):
     """Fast phase folding with T0=0 hardcoded"""
     return time / period - numpy.floor(time / period)
@@ -632,8 +640,8 @@ class TransitLeastSquares(object):
     def _get_cache(
         self, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark
     ):
-        """Fetches (size(durations)*size(depths)) light curves of length 
-        maxwidth_in_samples and returns these LCs in a 2D array, together with 
+        """Fetches (size(durations)*size(depths)) light curves of length
+        maxwidth_in_samples and returns these LCs in a 2D array, together with
         their metadata in a separate array."""
 
         print("Creating model cache for", str(len(durations)), " durations")
@@ -736,13 +744,18 @@ class TransitLeastSquares(object):
         summed_residual_in_rows = float("inf")
 
         # Make unique to avoid duplicates in dense grids
+        correction = 1.15  # BUG  1.15
         durations = numpy.unique(lc_cache_overview["width_in_samples"])
-        duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period)
-        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period)
+        duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period) * correction
+        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True) * correction
+
         duration_min_in_samples = int(floor(duration_min * len(y)))
         duration_max_in_samples = int(ceil(duration_max * len(y)))
         durations = durations[durations >= duration_min_in_samples]
         durations = durations[durations <= duration_max_in_samples]
+        #print('durations', durations)
+        #print(period, duration_min, duration_max, R_star_max, M_star_max)
+        #print(min(durations), max(durations))
 
         # Iterating over the full lc_cache_overview is slow
         # Thus, make a temporary reduced version
@@ -837,7 +850,7 @@ class TransitLeastSquares(object):
         self.per = kwargs.get("per", 13.4)
         self.rp = kwargs.get("rp", (1.42 * R_earth) / R_sun)
         self.a = kwargs.get("a", 23.1)
-        
+
         # If an impact parameter is given, it overrules the supplied inclination
         if "b" in kwargs:
             self.b = kwargs.get("b")
@@ -850,8 +863,8 @@ class TransitLeastSquares(object):
         self.u = kwargs.get("u", U)
         self.limb_dark = kwargs.get("limb_dark", LIMB_DARK)
 
-        self.transit_template = kwargs.get("transit_template", "Terran")
-        if (self.transit_template == 'Terran'):
+        self.transit_template = kwargs.get("transit_template", "default")
+        if (self.transit_template == 'default'):
             self.per = 13.4  # orbital period (in days)
             self.rp = (1.42 * R_earth) / R_sun  # planet radius (in units of stellar radii)
             self.a = 23.1  # semi-major axis (in units of stellar radii)
@@ -893,7 +906,7 @@ class TransitLeastSquares(object):
             self.limb_dark = "linear"
 
         else:
-            raise ValueError('Unknown transit_template. Known values: "Terran", "grazing", \
+            raise ValueError('Unknown transit_template. Known values: "default", "grazing", \
                 "Earth", "Neptunian", "Jovian"')
 
         """Validations to avoid (garbage in ==> garbage out)"""
@@ -991,7 +1004,7 @@ class TransitLeastSquares(object):
             + " CPU threads"
         )
         print(text)
-        p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+        p = multiprocessing.Pool(processes=1)#multiprocessing.cpu_count())
         params = partial(
             self._search_period,
             t=self.t,
@@ -1152,7 +1165,7 @@ class TransitLeastSquares(object):
             if residuals_total < residuals_lowest:
                 residuals_lowest = residuals_total
                 T0 = Tx
-        
+
         #T0 = 0
         pbar2.close()
         # best_T0_calculated = (
@@ -1214,7 +1227,7 @@ class TransitLeastSquares(object):
 
         # Model flux
         model_folded_model = self.fractional_transit(
-            duration=duration * maxwidth_in_samples * fill_half, 
+            duration=duration * maxwidth_in_samples * fill_half,
             maxwidth=maxwidth_in_samples / stretch,
             depth=1 - depth,
             samples=int(len(self.t / epochs)),
@@ -1227,7 +1240,7 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
-      
+
         # Light curve model
         oversample = 5  # more model data points than real data points
         internal_samples = (int(len(self.y) / len(transit_times))) * oversample
@@ -1274,7 +1287,7 @@ class TransitLeastSquares(object):
         full_y_array = full_y_array[start_cadence:stop_cadence]
         #print(full_x_array)
 
-        
+
         #for i in range(len(full_x_array)):
         #    print(full_x_array[i], full_y_array[i])
         # Cut to output time range and sample down to desired resolution
@@ -1317,7 +1330,7 @@ class TransitLeastSquares(object):
                     all_flux_intransit_odd, flux_intransit
                 )
 
-        flux_ootr = numpy.delete(self.y, all_idx_intransit)
+        flux_ootr = numpy.delete(self.y, all_idx_intransit.astype(int))
 
         # Estimate SNR and pink SNR
         # Second run because now the out of transit points are known
@@ -1385,44 +1398,45 @@ class TransitLeastSquares(object):
 
 
         return TransitLeastSquaresResults(
-            test_statistic_periods,
-            power,
+            SDE,
+            SDE_raw,
+            chi2_min,
+            chi2red_min,
             period,
             period_uncertainty,
             T0,
-            SDE_raw,
-            test_statistic_rolls,
-            depth,
             duration,
-            transit_times,
-            maxwidth_in_samples,
-            chi2red,
-            power_raw,
-            transit_depths,
-            snr_per_transit,
+            depth,
             (depth_mean, depth_mean_std),
-            snr,
-            SR,
-            chi2,
-            SDE,
-            chi2_min,
-            chi2red_min,
-            per_transit_count,
             (depth_mean_even, depth_mean_even_std),
             (depth_mean_odd, depth_mean_odd_std),
-            odd_even_mismatch,
-            empty_transit_count,
+            transit_depths,
+            rp_rs,
+            snr,
+            snr_per_transit,
             snr_pink_per_transit,
+            odd_even_mismatch,
+            transit_times,
+            per_transit_count,
             transit_count,
             distinct_transit_count,
-            model_lightcurve_model,
+            empty_transit_count,
+
+            test_statistic_periods,
+            power,
+            power_raw,
+            SR,
+            chi2,
+            chi2red,
+
             model_lightcurve_time,
+            model_lightcurve_model,
+
             model_folded_phase,
-            model_folded_model,
-            folded_phase,
             folded_y,
             folded_dy,
-            rp_rs
+            folded_phase,
+            model_folded_model,
         )
 
 
@@ -1433,44 +1447,45 @@ class TransitLeastSquaresResults(dict):
         super(TransitLeastSquaresResults, self).__init__(
             zip(
                 (
-                    "periods",
-                    "power",
+                    "SDE",
+                    "SDE_raw",
+                    "chi2_min",
+                    "chi2red_min",
                     "period",
                     "period_uncertainty",
                     "T0",
-                    "SDE_raw",
-                    "rolls",
-                    "depth",
                     "duration",
-                    "transit_times",
-                    "maxwidth_in_samples",
-                    "chi2red",
-                    "power_raw",
-                    "transit_depths",
-                    "snr_per_transit",
+                    "depth",
                     "depth_mean",
-                    "snr",
-                    "SR",
-                    "chi2",
-                    "SDE",
-                    "chi2_min",
-                    "chi2red_min",
-                    "per_transit_count",
                     "depth_mean_even",
                     "depth_mean_odd",
-                    "odd_even_mismatch",
-                    "empty_transit_count",
+                    "transit_depths",
+                    "rp_rs",
+                    "snr",
+                    "snr_per_transit",
                     "snr_pink_per_transit",
+                    "odd_even_mismatch",
+                    "transit_times",
+                    "per_transit_count",
                     "transit_count",
                     "distinct_transit_count",
-                    "model_lightcurve_model",
+                    "empty_transit_count",
+
+                    "periods",
+                    "power",
+                    "power_raw",
+                    "SR",
+                    "chi2",
+                    "chi2red",
+
                     "model_lightcurve_time",
+                    "model_lightcurve_model",
+
                     "model_folded_phase",
-                    "model_folded_model",
-                    "folded_phase",
                     "folded_y",
                     "folded_dy",
-                    "rp_rs"
+                    "folded_phase",
+                    "model_folded_model",
                 ),
                 args,
             )
@@ -1484,3 +1499,88 @@ class TransitLeastSquaresResults(dict):
 
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
+
+# This is the command line interface
+if __name__ == "__main__":
+    print(TLS_VERSION)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("lightcurve", help="path to lightcurve file")
+    parser.add_argument("-o", "--output", help="path to output directory")
+    parser.add_argument("-c", "--config", help="path to configuration file")
+    args = parser.parse_args()
+
+    use_config_file = False
+    if args.config is not None:
+        try:
+            config = configparser.ConfigParser()
+            config.read("tls_config.cfg")
+            R_star = float(config['Grid']['R_star'])
+            R_star_min=float(config['Grid']['R_star_min'])
+            R_star_max=float(config['Grid']['R_star_max'])
+            M_star=float(config['Grid']['M_star'])
+            M_star_min=float(config['Grid']['M_star_min'])
+            M_star_max=float(config['Grid']['M_star_max'])
+            period_min=float(config['Grid']['period_min'])
+            period_max=float(config['Grid']['period_max'])
+            n_transits_min=int(config['Grid']['n_transits_min'])
+            transit_template=config['Template']['transit_template']
+            duration_grid_step=float(config['Speed']['duration_grid_step'])
+            transit_depth_min=float(config['Speed']['transit_depth_min'])
+            oversampling_factor=int(config['Speed']['oversampling_factor'])
+            use_config_file = True
+            print('Using TLS configuration from config file', args.config)
+        except:
+            print('Using default values because of broken or missing configuration file', args.config)
+    else:
+        print('No config file given. Using default values')
+
+    #try:
+    data = numpy.genfromtxt(args.lightcurve)
+    time = data[:,0]
+    flux = data[:,1]
+
+    try:
+        dy = data[:,2]
+    except:
+        dy = numpy.full(len(flux), numpy.std(flux))
+
+    time, flux, dy = cleaned_array(time, flux, dy)
+
+    model = TransitLeastSquares(time, flux, dy)
+
+    if use_config_file:
+        results = model.power(
+            R_star=R_star,
+            R_star_min=R_star_min,
+            R_star_max=R_star_max,
+            M_star=M_star,
+            M_star_min=M_star_min,
+            M_star_max=M_star_max,
+            period_min=period_min,
+            period_max=period_max,
+            n_transits_min=n_transits_min,
+            transit_template=transit_template,
+            duration_grid_step=duration_grid_step,
+            transit_depth_min=transit_depth_min,
+            oversampling_factor=oversampling_factor
+            )
+    else:
+        results = model.power()
+
+    if args.output is None:
+        target_path_file = "TLS_results.csv"
+    else:
+        target_path_file = args.output
+
+    try:
+        with open(target_path_file, 'w') as f:
+            for key in results.keys():
+                f.write("%s %s\n"%(key, results[key]))
+        print('Results saved to', target_path_file)
+    except IOError:
+        print("Error saving result file")
+
+    #except:
+    #    print('Error loading file', args.lightcurve)
