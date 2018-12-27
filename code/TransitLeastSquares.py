@@ -33,7 +33,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (21 November 2018)'
+TLS_VERSION = 'Transit Least Squares TLS 0.x (26 December 2018)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
