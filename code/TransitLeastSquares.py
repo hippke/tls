@@ -34,7 +34,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (28 December 2018)'
+TLS_VERSION = 'Transit Least Squares TLS 0.x (27 December 2018)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -101,6 +101,14 @@ PERIODS_SEARCH_ORDER = "shuffled"
 # calculated as kernel = oversampling_factor * SDE_MEDIAN_KERNEL_SIZE
 # This value has proven to yield numerically stable results.
 SDE_MEDIAN_KERNEL_SIZE = 30
+
+# AFFECTS ONLY THE FINAL T0 FIT, NOT THE SDE
+# We can give user the option to not scan the phase space for T0 at every cadence
+# For speed reasons, it may be acceptable to approximate T0 to within X %
+# Useful in large datasets. 100k points: Extra runtime of order 2 minutes
+# While individual transits often are only a few cadences long, in the stacked
+# phase space it is (N transits * transit duration) [cadences] long
+T0_FIT_MARGIN = 0.01  # of transit duration e.g., 0.01 (=1%)
 
 
 def resample(time, flux, factor):
@@ -821,6 +829,8 @@ class TransitLeastSquares(object):
         self.rp = kwargs.get("rp", (1.42 * R_earth) / R_sun)
         self.a = kwargs.get("a", 23.1)
 
+        self.T0_fit_margin = kwargs.get("T0_fit_margin", T0_FIT_MARGIN)
+
         # If an impact parameter is given, it overrules the supplied inclination
         if "b" in kwargs:
             self.b = kwargs.get("b")
@@ -1091,20 +1101,29 @@ class TransitLeastSquares(object):
 
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
-
-        # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
-        samples_per_period = numpy.size(self.y)
-        T0_array = numpy.linspace(
-            start=numpy.min(self.t),
-            stop=numpy.min(self.t) + period,
-            num=samples_per_period,
-        )
-
         # Fold to all T0s so that the transit is expected at phase = 0
         signal = lc_arr[best_row]
         dur = len(signal)
         scale = SIGNAL_DEPTH / (1 - depth)
         signal = 1 - ((1 - signal) / scale)
+        samples_per_period = numpy.size(self.y)
+
+        if self.T0_fit_margin == 0:
+            points = samples_per_period
+        elif self.T0_fit_margin > 0.1:  # Sensible limit 10% of transit duration
+            self.T0_fit_margin = 0.1
+            step_factor = self.T0_fit_margin * dur
+            points = int(samples_per_period / step_factor)
+        else:
+            step_factor = self.T0_fit_margin * dur
+            points = int(samples_per_period / step_factor)
+
+        # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
+        T0_array = numpy.linspace(
+            start=numpy.min(self.t),
+            stop=numpy.min(self.t) + period,
+            num=points,  # samples_per_period
+        )
 
         residuals_lowest = float("inf")
         T0 = 0
@@ -1118,7 +1137,7 @@ class TransitLeastSquares(object):
 
         for Tx in T0_array:
             phases = fold(time=self.t, period=period, T0=Tx)
-            sort_index = numpy.argsort(phases, kind="mergesort")  # 66% of CPU time
+            sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
             phases = phases[sort_index]
             flux = self.y[sort_index]
             dy = self.dy[sort_index]
