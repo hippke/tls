@@ -700,7 +700,6 @@ class TransitLeastSquares(object):
         return lc_cache_overview, lc_arr
 
 
-
     def _search_period(
         self,
         period,
@@ -765,13 +764,7 @@ class TransitLeastSquares(object):
         skipped_all = True
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
-        overshoot_correction = 1.02  #1.05
-        #         bin 8   bin 2
-        # 0.99 - 
-        # 1    - 18.5772  18.57993
-        # 1.01 - 18.5822
-        # 1.02 - 18.5819  18.5864
-        # 1.03 - 18.5763  18.5814
+        downsampling_correction = 1.02  # empirical downsampling factor
 
         for duration in durations:
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
@@ -790,7 +783,7 @@ class TransitLeastSquares(object):
                 duration=duration,
                 signal=lc_arr[chosen_transit_row],
                 inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
-                overshoot=overshoot * overshoot_correction,
+                overshoot=overshoot * downsampling_correction,
                 ootr=ootr, 
                 summed_edge_effect_correction=summed_edge_effect_correction,
                 chosen_transit_row=chosen_transit_row,
@@ -799,7 +792,6 @@ class TransitLeastSquares(object):
             if this_residual < summed_residual_in_rows:
                 summed_residual_in_rows = this_residual
                 best_row = chosen_transit_row
-                #print(this_depth, this_depth * overshoot, (1-(this_depth * overshoot)))
                 best_depth = this_depth
 
         return [period, summed_residual_in_rows, best_row, best_depth]
@@ -970,7 +962,7 @@ class TransitLeastSquares(object):
         test_statistic_rows = []
         test_statistic_depths = []
 
-        text = (
+        print(
             "Searching "
             + str(len(self.y))
             + " data points, "
@@ -983,7 +975,6 @@ class TransitLeastSquares(object):
             + str(multiprocessing.cpu_count())
             + " CPU threads"
         )
-        print(text)
         p = multiprocessing.Pool(processes=multiprocessing.cpu_count())
         params = partial(
             self._search_period,
@@ -1018,7 +1009,6 @@ class TransitLeastSquares(object):
         for data in p.imap_unordered(params, periods):
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])
-            #test_statistic_rolls.append(data[2])
             test_statistic_rows.append(data[2])
             test_statistic_depths.append(data[3])
             pbar.update(1)
@@ -1131,10 +1121,6 @@ class TransitLeastSquares(object):
         pbar2 = tqdm(total=numpy.size(T0_array))
         signal_ootr = numpy.ones(len(self.y[dur:]))
 
-
-        # Takes: t, y, dy, period, dur
-        # Returns: period, residuals
-
         for Tx in T0_array:
             phases = fold(time=self.t, period=period, T0=Tx)
             sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
@@ -1158,13 +1144,7 @@ class TransitLeastSquares(object):
             if residuals_total < residuals_lowest:
                 residuals_lowest = residuals_total
                 T0 = Tx
-
-        #T0 = 0
         pbar2.close()
-        # best_T0_calculated = (
-        #    best_roll - 0.5 * best_duration
-        # ) * period + numpy.min(self.t)
-        # best_T0_calculated = (best_roll)*best_period + numpy.min(self.t)
 
         # Calculate all mid-transit times
         if T0 < min(self.t):
@@ -1208,9 +1188,7 @@ class TransitLeastSquares(object):
         # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
         # so we need to roll the model to match the model so that its mid-transit
         # is at phase=0.5
-        #print('fill_factor', fill_factor)
         fill_half = 1-((1-fill_factor)*0.5)
-        #print(duration , maxwidth_in_samples , fill_factor)
 
         # Model phase, shifted by half a cadence so that mid-transit is at phase=0.5
         model_folded_phase = numpy.linspace(
@@ -1263,7 +1241,6 @@ class TransitLeastSquares(object):
             u=self.u,
             limb_dark=self.limb_dark,
         )
-        #print('len(y_array)', len(y_array))
 
         # Append all periods
         for i in range(rounds):
@@ -1274,19 +1251,11 @@ class TransitLeastSquares(object):
             full_y_array = numpy.append(full_y_array, y_array)
 
         # Determine start and end of relevant time series, and crop it
-        start_cadence = numpy.argmax(full_x_array>min(self.t)) #- 1
-        stop_cadence = numpy.argmax(full_x_array>max(self.t)) #+ 1
+        start_cadence = numpy.argmax(full_x_array>min(self.t))
+        stop_cadence = numpy.argmax(full_x_array>max(self.t))
         full_x_array = full_x_array[start_cadence:stop_cadence]
         full_y_array = full_y_array[start_cadence:stop_cadence]
-        #print(full_x_array)
-
-
-        #for i in range(len(full_x_array)):
-        #    print(full_x_array[i], full_y_array[i])
-        # Cut to output time range and sample down to desired resolution
-        #f = scipy.interpolate.interp1d(full_x_array, full_y_array)
-        #xnew = numpy.linspace(min(self.t), max(self.t), len(self.t))
-        model_lightcurve_model = full_y_array  #f(xnew)
+        model_lightcurve_model = full_y_array
         model_lightcurve_time = full_x_array
 
         # Get transit depth, standard deviation and SNR per transit
@@ -1340,7 +1309,6 @@ class TransitLeastSquares(object):
             intransit_points = numpy.size(self.y[idx_intransit])
             try:
             #if intransit_points > 1:
-                # print(i, intransit_points, int(numpy.mean(per_transit_count)))
                 pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
                 snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
                 std_binned = std / intransit_points ** 0.5
@@ -1357,7 +1325,6 @@ class TransitLeastSquares(object):
             0.5
         )
 
-        #print('self.limb_dark', self.limb_dark)
         if self.limb_dark == 'quadratic':
             rp_rs = rp_rs_from_depth(depth=depth, a=self.u[0], b=self.u[1])
         else:
@@ -1382,13 +1349,11 @@ class TransitLeastSquares(object):
         distinct_transit_count = transit_count - empty_transit_count
 
         duration = transit_duration_in_days
-        #model_folded_phase = numpy.linspace(0, 1, numpy.size(self.y))
 
         if empty_transit_count / transit_count >= 0.33:
             text = str(empty_transit_count) + " of " + str(transit_count) + \
                 " transits without data. The true period may be twice the given period."
             warnings.warn(text)
-
 
         return TransitLeastSquaresResults(
             SDE,
