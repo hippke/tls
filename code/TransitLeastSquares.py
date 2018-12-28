@@ -17,6 +17,7 @@ import json
 import multiprocessing
 import numba
 import numpy
+import time
 
 import scipy.interpolate
 import sys
@@ -33,7 +34,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (27 December 2018)'
+TLS_VERSION = 'Transit Least Squares TLS 0.x (28 December 2018)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -100,6 +101,14 @@ PERIODS_SEARCH_ORDER = "shuffled"
 # calculated as kernel = oversampling_factor * SDE_MEDIAN_KERNEL_SIZE
 # This value has proven to yield numerically stable results.
 SDE_MEDIAN_KERNEL_SIZE = 30
+
+
+def resample(time, flux, factor):
+    f = scipy.interpolate.interp1d(time, flux)
+    time_grid = int(len(flux) / factor)
+    time_resampled = numpy.linspace(min(time), max(time), time_grid)
+    flux_resampled = f(time_resampled)
+    return time_resampled, flux_resampled
 
 
 def rp_rs_from_depth(depth, a, b):
@@ -340,31 +349,6 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
 
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
-def get_residuals(data, signal, dy):
-    value = 0
-    for i in range(len(data)):
-        value = value + ((data[i] - signal[i]) ** 2) * dy[i]
-    return value
-
-"""
-@numba.jit(fastmath=True, parallel=False, nopython=True)
-def depth_target(data, sig, dy, target_depth):
-    Creates model by scaling given model transit of given width to given depth
-    Returns residuals between data and this model transit
-
-    # Scale from unique signal depth to the target depth accounting for overshoot (Heller 2018)
-    for i in range(len(sig)):
-        sig[i] = (1 - sig[i]) / (SIGNAL_DEPTH / target_depth)
-
-    # The residuals between this model and the data
-    residuals = 0
-    for i in range(len(data)):
-        residuals += ((data[i] - (1 - sig[i])) ** 2) * dy[i]
-
-    return residuals
-"""
-
-@numba.jit(fastmath=True, parallel=False, nopython=True)
 def pink_noise(data, width):
     std = 0
     datapoints = len(data) - width + 1
@@ -392,28 +376,27 @@ def get_lowest_residuals_in_this_duration(
     summed_residual_in_rows = datapoints  
     best_row = 0
     best_depth = 0
-    skipped_all = True
-    #print(summed_edge_effect_correction)
 
     for i in range(len(mean)):
         if mean[i] > transit_depth_min:  # Yes, check
-            skipped_all = False
             data = patched_data_arr[i : i + duration]
             dy = inverse_squared_patched_dy_arr[i : i + duration]
             target_depth = mean[i] * overshoot
+            scale = SIGNAL_DEPTH / target_depth
+            reverse_scale = 1 / scale  # speed: one division now, many multiplications later
 
             # Scale model and calculate residuals
-            itr_here = 0
+            intransit_residual = 0
             for j in range(len(signal)):
-                sigi = ((1 - signal[j]) / (SIGNAL_DEPTH / target_depth))
-                itr_here += ((data[j] - (1 - sigi)) ** 2) * dy[j]
+                sigi = (1 - signal[j]) * reverse_scale
+                intransit_residual += ((data[j] - (1 - sigi)) ** 2) * dy[j]
 
-            current_stat = itr_here + ootr[i] - summed_edge_effect_correction
+            current_stat = intransit_residual + ootr[i] - summed_edge_effect_correction
 
             if current_stat < summed_residual_in_rows:
                 summed_residual_in_rows = current_stat
                 best_row = chosen_transit_row
-                best_depth = 1 - (mean[i] * overshoot)
+                best_depth = 1 - target_depth
 
     return summed_residual_in_rows, best_row, best_depth
 
@@ -660,10 +643,10 @@ class TransitLeastSquares(object):
         print("Creating model cache for", str(len(durations)), " durations")
         lc_arr = []
         rows = numpy.size(durations)
-        lc_cache = numpy.ones([rows, maxwidth_in_samples])
         lc_cache_overview = numpy.zeros(
-            rows, dtype=[("duration", "f8"), ("width_in_samples", "i8"), ("overshoot", "f8")]
-        )  # between transit shape and box
+            rows,
+            dtype=[("duration", "f8"), ("width_in_samples", "i8"), ("overshoot", "f8")]
+        )
         cached_reference_transit = self.reference_transit(
             samples=maxwidth_in_samples,
             per=per,
@@ -693,7 +676,6 @@ class TransitLeastSquares(object):
                 limb_dark=limb_dark,
                 cached_reference_transit=cached_reference_transit,
             )
-            lc_cache[row] = scaled_transit
             lc_cache_overview["duration"][row] = duration
             used_samples = int((duration / numpy.max(durations)) * maxwidth_in_samples)
             lc_cache_overview["width_in_samples"][row] = used_samples
@@ -701,13 +683,13 @@ class TransitLeastSquares(object):
             full_values = numpy.where(scaled_transit < (1 - cutoff))
             first_sample = numpy.min(full_values)
             last_sample = numpy.max(full_values) + 1
-            signal = lc_cache[row][first_sample:last_sample]
+            signal = scaled_transit[first_sample:last_sample]
             lc_arr.append(signal)
-            #print(duration, numpy.mean(signal) / numpy.min(signal))
             lc_cache_overview["overshoot"][row] = numpy.mean(signal) / numpy.min(signal)  # 1.22
             row += +1
 
-        return lc_cache, lc_cache_overview, lc_arr
+        lc_arr = numpy.array(lc_arr)
+        return lc_cache_overview, lc_arr
 
 
 
@@ -717,19 +699,21 @@ class TransitLeastSquares(object):
         t,
         y,
         dy,
-        lc_cache,
-        lc_cache_overview,
         transit_depth_min,
         R_star_min,
         R_star_max,
         M_star_min,
         M_star_max,
         lc_arr,
+        lc_cache_overview,
     ):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
         # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
-        maxwidth_in_samples = numpy.shape(lc_cache)[1]
+        durations = numpy.unique(lc_cache_overview["width_in_samples"])
+        maxwidth_in_samples = int(max(durations) * numpy.size(y))
+        if maxwidth_in_samples % 2 != 0:
+            maxwidth_in_samples = maxwidth_in_samples + 1
 
         # Phase fold
         phases = foldfast(t, period)
@@ -760,7 +744,6 @@ class TransitLeastSquares(object):
         summed_residual_in_rows = float("inf")
 
         # Make unique to avoid duplicates in dense grids
-        durations = numpy.unique(lc_cache_overview["width_in_samples"])
         duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period)
         duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period)
         duration_min_in_samples = int(floor(duration_min * len(y)))
@@ -774,12 +757,13 @@ class TransitLeastSquares(object):
         skipped_all = True
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
-
-        #dur = max(t) - min(t)
-        #cycles = dur / period
-        #print(cycles)
-
-        overshoot_correction = 1.05
+        overshoot_correction = 1.02  #1.05
+        #         bin 8   bin 2
+        # 0.99 - 
+        # 1    - 18.5772  18.57993
+        # 1.01 - 18.5822
+        # 1.02 - 18.5819  18.5864
+        # 1.03 - 18.5763  18.5814
 
         for duration in durations:
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
@@ -796,7 +780,7 @@ class TransitLeastSquares(object):
                 transit_depth_min=transit_depth_min, 
                 patched_data_arr=patched_data,
                 duration=duration,
-                signal=numpy.array(lc_arr[chosen_transit_row]),
+                signal=lc_arr[chosen_transit_row],
                 inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
                 overshoot=overshoot * overshoot_correction,
                 ootr=ootr, 
@@ -956,7 +940,7 @@ class TransitLeastSquares(object):
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
-        lc_cache, lc_cache_overview, lc_arr = self._get_cache(
+        lc_cache_overview, lc_arr = self._get_cache(
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,
@@ -995,15 +979,14 @@ class TransitLeastSquares(object):
             self._search_period,
             t=self.t,
             y=self.y,
-            dy=self.dy,
-            lc_cache=lc_cache,
-            lc_cache_overview=lc_cache_overview,
+            dy=self.dy,            
             transit_depth_min=self.transit_depth_min,
             R_star_min=self.R_star_min,
             R_star_max=self.R_star_max,
             M_star_min=self.M_star_min,
             M_star_max=self.M_star_max,
             lc_arr=lc_arr,
+            lc_cache_overview=lc_cache_overview,
         )
         bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
         pbar = tqdm(
@@ -1129,6 +1112,10 @@ class TransitLeastSquares(object):
         pbar2 = tqdm(total=numpy.size(T0_array))
         signal_ootr = numpy.ones(len(self.y[dur:]))
 
+
+        # Takes: t, y, dy, period, dur
+        # Returns: period, residuals
+
         for Tx in T0_array:
             phases = fold(time=self.t, period=period, T0=Tx)
             sort_index = numpy.argsort(phases, kind="mergesort")  # 66% of CPU time
@@ -1137,13 +1124,17 @@ class TransitLeastSquares(object):
             dy = self.dy[sort_index]
 
             # Roll so that the signal starts at index 0
-            flux = numpy.roll(flux, int(dur / 2) + 1)
-            dy = numpy.roll(dy, int(dur / 2) + 1)
+            # Numpy roll is slow, so we replace it with less elegant concatenate
+            # flux = numpy.roll(flux, roll_cadences)
+            # dy = numpy.roll(dy, roll_cadences)
+            roll_cadences = int(dur / 2) + 1
+            flux = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
+            dy = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
 
             residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
             residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
-
             residuals_total = residuals_intransit + residuals_ootr
+
             pbar2.update(1)
             if residuals_total < residuals_lowest:
                 residuals_lowest = residuals_total
@@ -1404,17 +1395,14 @@ class TransitLeastSquares(object):
             transit_count,
             distinct_transit_count,
             empty_transit_count,
-
             test_statistic_periods,
             power,
             power_raw,
             SR,
             chi2,
             chi2red,
-
             model_lightcurve_time,
             model_lightcurve_model,
-
             model_folded_phase,
             folded_y,
             folded_dy,
