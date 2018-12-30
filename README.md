@@ -18,6 +18,7 @@ Open the [complete documentation](http://jaekle.info/tls/Python%20interface.html
 
 ## Installation
 The stable version can be installed via pip: `pip install tls-package`
+Dependencies: Python 3, [SciPy](https://www.scipy.org/), [NumPy](http://www.numpy.org/), [numba](http://numba.pydata.org/), [batman](https://www.cfa.harvard.edu/~lkreidberg/batman/), [tqdm](https://github.com/tqdm/tqdm), [argparse](https://docs.python.org/3/library/argparse.html)
 
 The current development version can be installed from this repository:
 ```
