@@ -27,14 +27,14 @@ python3 setup.py install
 ```
 
 ## Attribution
-Please cite [Hippke & Heller (2018)](http://www.) if you find this code useful in your research. The BibTeX entry for the paper is:
+Please cite [Hippke & Heller (2019)](http://www.) if you find this code useful in your research. The BibTeX entry for the paper is:
 
 ```
 @article{abc,
    author = {},
     title = {},
   journal = {},
-     year = ,
+     year = 2019,
    volume = ,
     pages = {},
    eprint = {},
