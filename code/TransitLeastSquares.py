@@ -34,7 +34,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (27 December 2018)'
+TLS_VERSION = 'Transit Least Squares TLS 0.x (30 December 2018)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -368,6 +368,7 @@ def pink_noise(data, width):
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def get_lowest_residuals_in_this_duration(
         mean,
+        #mean_test_grid,
         transit_depth_min, 
         patched_data_arr,
         duration, 
@@ -386,6 +387,7 @@ def get_lowest_residuals_in_this_duration(
     best_depth = 0
 
     for i in range(len(mean)):
+    #for i in mean_test_grid:
         if mean[i] > transit_depth_min:  # Yes, check
             data = patched_data_arr[i : i + duration]
             dy = inverse_squared_patched_dy_arr[i : i + duration]
@@ -718,7 +720,7 @@ class TransitLeastSquares(object):
 
         # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
         durations = numpy.unique(lc_cache_overview["width_in_samples"])
-        maxwidth_in_samples = int(max(durations) * numpy.size(y))
+        maxwidth_in_samples = int(max(durations))# * numpy.size(y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
 
@@ -738,6 +740,7 @@ class TransitLeastSquares(object):
         # and continue at the beginning. To avoid (slow) rolling,
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
+        #print(len(flux), len(patched_data), maxwidth_in_samples)
 
         # Edge effect correction (numba speedup 40x)
         edge_effect_correction = get_edge_effect_correction(
@@ -770,6 +773,9 @@ class TransitLeastSquares(object):
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
             mean = 1 - running_mean(patched_data, duration)
 
+            #mean_test_grid = numpy.linspace(start=0, stop=len(mean), num=int(len(mean)/2), dtype=numpy.int32)
+            #print(mean_test_grid)
+
             # Get the row with matching duration
             chosen_transit_row = 0
             while lc_cache_overview["width_in_samples"][chosen_transit_row] != duration:
@@ -778,6 +784,7 @@ class TransitLeastSquares(object):
             overshoot = lc_cache_overview["overshoot"][chosen_transit_row]
             this_residual, this_row, this_depth = get_lowest_residuals_in_this_duration(
                 mean=mean,
+                #mean_test_grid=mean_test_grid,
                 transit_depth_min=transit_depth_min, 
                 patched_data_arr=patched_data,
                 duration=duration,
@@ -1107,6 +1114,8 @@ class TransitLeastSquares(object):
         else:
             step_factor = self.T0_fit_margin * dur
             points = int(samples_per_period / step_factor)
+        if points > samples_per_period:
+            points = samples_per_period
 
         # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
         T0_array = numpy.linspace(
