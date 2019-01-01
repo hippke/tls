@@ -1,5 +1,4 @@
-#                Optimized algorithm to search for transits
-#                of small extrasolar planets
+#  Optimized algorithm to search for transits of small extrasolar planets
 #                                                                            /
 #       ,        AUTHORS                                                   O/
 #    \  :  /     Michael Hippke (1) [michael@hippke.org]                /\/|
@@ -23,17 +22,15 @@ import sys
 import warnings
 import argparse
 import configparser
-
-from array import array
+from os import path
 from functools import partial
 from numpy import pi, sqrt, arccos, degrees, floor, ceil
 from tqdm import tqdm
 from urllib.parse import quote as urlencode
 
 
-
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (01 January 2019)'
+TLS_VERSION = 'Transit Least Squares TLS 1.0 (01 January 2019)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -236,6 +233,9 @@ def get_tic_data(TIC_ID):
 
 
 def catalog_info(EPIC_ID=None, TIC_ID=None):
+    
+    resources_dir = path.join(path.dirname(__file__))
+    #print('resources_dir', resources_dir)
     """Takes EPIC ID, returns limb darkening parameters u (linear) and
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
         absolute deviation between given/catalog Teff and logg. Data are from:
@@ -257,7 +257,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
 
         # EPIC K2 catalog, load from locally saved CSV file
         star = numpy.genfromtxt(
-            "k2cat.tsv",
+            path.join(resources_dir, "k2cat.csv"),
             skip_header=1,
             delimiter=";",
             dtype="int32, int32, f8, f8, f8, f8, f8, f8, f8",
@@ -276,7 +276,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
 
         # Kepler limb darkening, load from locally saved CSV file
         ld = numpy.genfromtxt(
-            "JAA546A14limb1-4.csv",
+            path.join(resources_dir, "JAA546A14limb1-4.csv"),
             skip_header=1,
             delimiter=",",
             dtype="f8, int32, f8, f8, f8",
@@ -310,7 +310,7 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
 
         star = tic_data[0]
         ld = numpy.genfromtxt(
-            "ld_claret_tess.csv",
+            path.join(resources_dir, "ld_claret_tess.csv"),
             skip_header=1,
             delimiter=";",
             dtype="f8, int32, f8, f8",
@@ -385,21 +385,15 @@ def get_lowest_residuals_in_this_duration(
     best_row = 0
     best_depth = 0
 
-    if T0_fit_margin == 0:
-        xth_point = 1
-    else:
+    xth_point = 1
+    if T0_fit_margin > 0 and duration > T0_fit_margin:
         T0_fit_margin = 1/T0_fit_margin
-        if duration > T0_fit_margin:
-            xth_point = int(duration/T0_fit_margin)
-            if xth_point < 1:
-                xth_point = 1
-        else:
-            xth_point = 1
-
-    #print('duration', duration, 'xth_point', xth_point)
+        xth_point = int(duration/T0_fit_margin)
+        if xth_point < 1:
+            xth_point = 1            
 
     for i in range(len(mean)):
-        if (mean[i] > transit_depth_min) and (i % xth_point==0):  # Yes, check
+        if (mean[i] > transit_depth_min) and (i % xth_point==0):
             data = patched_data_arr[i : i + duration]
             dy = inverse_squared_patched_dy_arr[i : i + duration]
             target_depth = mean[i] * overshoot
@@ -521,7 +515,7 @@ def period_grid(
     return periods[selected_index]  # periods in [days]
 
 
-class TransitLeastSquares(object):
+class transitleastsquares(object):
     """Compute the transit least squares of limb-darkened transit models"""
 
     def __init__(self, t, y, dy=None):
@@ -955,8 +949,8 @@ class TransitLeastSquares(object):
             raise ValueError("n_transits_min must be an integer value >= 1")
 
         # Assert 0 < T0_fit_margin < 0.1
-        if self.T0_fit_margin == 0:
-            points = samples_per_period
+        if self.T0_fit_margin < 0:
+            self.T0_fit_margin = 0
         elif self.T0_fit_margin > 0.1:  # Sensible limit 10% of transit duration
             self.T0_fit_margin = 0.1
 
@@ -994,7 +988,6 @@ class TransitLeastSquares(object):
         test_statistic_rolls = []
         test_statistic_rows = []
         test_statistic_depths = []
-        print('T0_fit_margin', self.T0_fit_margin)
 
         print(
             "Searching "
@@ -1388,7 +1381,7 @@ class TransitLeastSquares(object):
                 " transits without data. The true period may be twice the given period."
             warnings.warn(text)
 
-        return TransitLeastSquaresResults(
+        return transitleastsquaresresults(
             SDE,
             SDE_raw,
             chi2_min,
@@ -1428,11 +1421,11 @@ class TransitLeastSquares(object):
         )
 
 
-class TransitLeastSquaresResults(dict):
+class transitleastsquaresresults(dict):
     """The results of a TransitLeastSquares search"""
 
     def __init__(self, *args):
-        super(TransitLeastSquaresResults, self).__init__(
+        super(transitleastsquaresresults, self).__init__(
             zip(
                 (
                     "SDE",
@@ -1533,7 +1526,7 @@ if __name__ == "__main__":
 
     time, flux, dy = cleaned_array(time, flux, dy)
 
-    model = TransitLeastSquares(time, flux, dy)
+    model = transitleastlquares(time, flux, dy)
 
     if use_config_file:
         results = model.power(
