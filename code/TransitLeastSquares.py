@@ -18,7 +18,6 @@ import multiprocessing
 import numba
 import numpy
 import time
-
 import scipy.interpolate
 import sys
 import warnings
@@ -34,7 +33,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 0.x (30 December 2018)'
+TLS_VERSION = 'Transit Least Squares TLS 0.x (01 January 2019)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -368,7 +367,6 @@ def pink_noise(data, width):
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def get_lowest_residuals_in_this_duration(
         mean,
-        #mean_test_grid,
         transit_depth_min, 
         patched_data_arr,
         duration, 
@@ -378,17 +376,30 @@ def get_lowest_residuals_in_this_duration(
         ootr, 
         summed_edge_effect_correction,
         chosen_transit_row,
-        datapoints):
-    
+        datapoints,
+        T0_fit_margin):
+
     # if nothing is fit, we fit a straight line: signal=1. Then, at dy=1,
     # the squared sum of residuals equals the number of datapoints
     summed_residual_in_rows = datapoints  
     best_row = 0
     best_depth = 0
 
+    if T0_fit_margin == 0:
+        xth_point = 1
+    else:
+        T0_fit_margin = 1/T0_fit_margin
+        if duration > T0_fit_margin:
+            xth_point = int(duration/T0_fit_margin)
+            if xth_point < 1:
+                xth_point = 1
+        else:
+            xth_point = 1
+
+    #print('duration', duration, 'xth_point', xth_point)
+
     for i in range(len(mean)):
-    #for i in mean_test_grid:
-        if mean[i] > transit_depth_min:  # Yes, check
+        if (mean[i] > transit_depth_min) and (i % xth_point==0):  # Yes, check
             data = patched_data_arr[i : i + duration]
             dy = inverse_squared_patched_dy_arr[i : i + duration]
             target_depth = mean[i] * overshoot
@@ -715,11 +726,13 @@ class TransitLeastSquares(object):
         M_star_max,
         lc_arr,
         lc_cache_overview,
+        T0_fit_margin
     ):
         """Core routine to search the flux data set 'injected' over all 'periods'"""
 
         # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
         durations = numpy.unique(lc_cache_overview["width_in_samples"])
+        #print(max(durations))
         maxwidth_in_samples = int(max(durations))# * numpy.size(y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
@@ -768,8 +781,10 @@ class TransitLeastSquares(object):
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
         downsampling_correction = 1.02  # empirical downsampling factor
+        #print('T0_fit_margin', T0_fit_margin)
 
         for duration in durations:
+            #t1 = time.perf_counter()
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
             mean = 1 - running_mean(patched_data, duration)
 
@@ -782,6 +797,7 @@ class TransitLeastSquares(object):
                 chosen_transit_row += 1
 
             overshoot = lc_cache_overview["overshoot"][chosen_transit_row]
+
             this_residual, this_row, this_depth = get_lowest_residuals_in_this_duration(
                 mean=mean,
                 #mean_test_grid=mean_test_grid,
@@ -794,12 +810,16 @@ class TransitLeastSquares(object):
                 ootr=ootr, 
                 summed_edge_effect_correction=summed_edge_effect_correction,
                 chosen_transit_row=chosen_transit_row,
-                datapoints = len(flux))
+                datapoints = len(flux),
+                T0_fit_margin=T0_fit_margin)
 
             if this_residual < summed_residual_in_rows:
                 summed_residual_in_rows = this_residual
                 best_row = chosen_transit_row
                 best_depth = this_depth
+
+            #t2 = time.perf_counter()
+            #print(duration, t2-t1)
 
         return [period, summed_residual_in_rows, best_row, best_depth]
 
@@ -934,6 +954,12 @@ class TransitLeastSquares(object):
         if self.n_transits_min < 1:
             raise ValueError("n_transits_min must be an integer value >= 1")
 
+        # Assert 0 < T0_fit_margin < 0.1
+        if self.T0_fit_margin == 0:
+            points = samples_per_period
+        elif self.T0_fit_margin > 0.1:  # Sensible limit 10% of transit duration
+            self.T0_fit_margin = 0.1
+
         periods = period_grid(
             R_star=self.R_star,
             M_star=self.M_star,
@@ -968,6 +994,7 @@ class TransitLeastSquares(object):
         test_statistic_rolls = []
         test_statistic_rows = []
         test_statistic_depths = []
+        print('T0_fit_margin', self.T0_fit_margin)
 
         print(
             "Searching "
@@ -995,6 +1022,7 @@ class TransitLeastSquares(object):
             M_star_max=self.M_star_max,
             lc_arr=lc_arr,
             lc_cache_overview=lc_cache_overview,
+            T0_fit_margin=self.T0_fit_margin,
         )
         bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
         pbar = tqdm(
@@ -1107,10 +1135,6 @@ class TransitLeastSquares(object):
 
         if self.T0_fit_margin == 0:
             points = samples_per_period
-        elif self.T0_fit_margin > 0.1:  # Sensible limit 10% of transit duration
-            self.T0_fit_margin = 0.1
-            step_factor = self.T0_fit_margin * dur
-            points = int(samples_per_period / step_factor)
         else:
             step_factor = self.T0_fit_margin * dur
             points = int(samples_per_period / step_factor)
