@@ -35,11 +35,14 @@ if __name__ == '__main__':
     # Plot raw data
     plt.figure()
     ax = plt.gca()
-    ax.plot(time, flux, "k")
+    ax.scatter(time, flux, color='black', s=1)
     ax.set_ylabel("Flux")
-    ax.set_xlabel("Time (s)")
+    ax.set_xlabel("Time (days)")
+    plt.xlim(min(time), max(time))
+    plt.ylim(min(flux), max(flux))
     plt.savefig('synt_fig1.pdf', bbox_inches='tight')
 
+    
     # Run TLS
     model = transitleastsquares(time, flux)
     results = model.power(
