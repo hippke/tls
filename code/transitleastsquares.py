@@ -30,7 +30,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 1.0 (01 January 2019)'
+TLS_VERSION = 'Transit Least Squares TLS 1.0.2 (02 January 2019)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -163,7 +163,7 @@ def transit_mask(t, period, duration, T0):
 
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
-def T14(R_s, M_s, P, upper_limit=FRACTIONAL_TRANSIT_DURATION_MAX, small=True):
+def T14(R_s, M_s, P, upper_limit=FRACTIONAL_TRANSIT_DURATION_MAX, small=False):
     """Input:  Stellar radius and mass; planetary period
                    Units: Solar radius and mass; days
        Output: Maximum planetary transit duration T_14max
@@ -655,7 +655,7 @@ class transitleastsquares(object):
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
 
-        print("Creating model cache for", str(len(durations)), " durations")
+        print("Creating model cache for", str(len(durations)), "durations")
         lc_arr = []
         rows = numpy.size(durations)
         lc_cache_overview = numpy.zeros(
@@ -761,29 +761,28 @@ class transitleastsquares(object):
         summed_residual_in_rows = float("inf")
 
         # Make unique to avoid duplicates in dense grids
-        duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period)
-        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period)
+        duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
+        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
+
+        # Fractional transit duration can be longer than this. 
+        # Example: Data length 11 days, 2 transits at 0.5 days and 10.5 days
+        length = max(t) - min(t)
+        no_of_transits_naive = length / period
+        no_of_transits_worst = no_of_transits_naive + 1
+        correction_factor = no_of_transits_worst / no_of_transits_naive
         duration_min_in_samples = int(floor(duration_min * len(y)))
-        duration_max_in_samples = int(ceil(duration_max * len(y)))
+        duration_max_in_samples = int(ceil(duration_max * len(y) * correction_factor))
         durations = durations[durations >= duration_min_in_samples]
         durations = durations[durations <= duration_max_in_samples]
 
-        # In case all sliding window means are smaller than half the
-        # shallowest signal, all tests will be skipped. Then, treat all flux
-        # as out of transit, as this is the better model
         skipped_all = True
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
         downsampling_correction = 1.02  # empirical downsampling factor
-        #print('T0_fit_margin', T0_fit_margin)
 
         for duration in durations:
-            #t1 = time.perf_counter()
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
             mean = 1 - running_mean(patched_data, duration)
-
-            #mean_test_grid = numpy.linspace(start=0, stop=len(mean), num=int(len(mean)/2), dtype=numpy.int32)
-            #print(mean_test_grid)
 
             # Get the row with matching duration
             chosen_transit_row = 0
@@ -794,7 +793,6 @@ class transitleastsquares(object):
 
             this_residual, this_row, this_depth = get_lowest_residuals_in_this_duration(
                 mean=mean,
-                #mean_test_grid=mean_test_grid,
                 transit_depth_min=transit_depth_min, 
                 patched_data_arr=patched_data,
                 duration=duration,
@@ -812,15 +810,13 @@ class transitleastsquares(object):
                 best_row = chosen_transit_row
                 best_depth = this_depth
 
-            #t2 = time.perf_counter()
-            #print(duration, t2-t1)
-
         return [period, summed_residual_in_rows, best_row, best_depth]
 
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
 
+        print(TLS_VERSION)
         # Validate **kwargs and set to defaults where missing
         self.transit_depth_min = kwargs.get("transit_depth_min", TRANSIT_DEPTH_MIN)
         self.R_star = kwargs.get("R_star", R_STAR)
