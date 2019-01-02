@@ -28,13 +28,6 @@ Python 3,
 [tqdm](https://github.com/tqdm/tqdm),
 [argparse](https://docs.python.org/3/library/argparse.html)
 
-The current development version can be installed from this repository:
-```
-git clone https://github.com/hippke/tls.git
-cd tls
-python3 setup.py install
-```
-
 ## Attribution
 Please cite [Hippke & Heller (2019)](http://www.) if you find this code useful in your research. The BibTeX entry for the paper is:
 
