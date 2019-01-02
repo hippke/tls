@@ -108,7 +108,7 @@ T0_FIT_MARGIN = 0.01  # of transit duration e.g., 0.01 (=1%)
 
 
 def resample(time, flux, factor):
-    f = scipy.interpolate.interp1d(time, flux)
+    f = scipy.interpolate.interp1d(time, flux, assume_sorted=True)
     time_grid = int(len(flux) / factor)
     time_resampled = numpy.linspace(min(time), max(time), time_grid)
     flux_resampled = f(time_resampled)
@@ -156,9 +156,8 @@ def cleaned_array(t, y, dy=None):
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def transit_mask(t, period, duration, T0):
-        half_period = 0.5 * period
         mask = numpy.abs(
-            (t - T0 + half_period) % period - half_period) < 0.5 * duration
+            (t - T0 + 0.5 * period) % period - 0.5 * period) < 0.5 * duration
         return mask
 
 
@@ -448,7 +447,7 @@ def running_median(data, kernel):
     first_values = med[0]
     last_values = med[-1]
     missing_values = len(data) - len(med)
-    values_front = int(missing_values / 2)
+    values_front = int(missing_values * 0.5)
     values_end = missing_values - values_front
     med = numpy.append(numpy.full(values_front, first_values), med)
     med = numpy.append(med, numpy.full(values_end, last_values))
@@ -586,13 +585,13 @@ class transitleastsquares(object):
             reference_flux = cached_reference_transit
 
         # Interpolate to shorter interval
-        f = scipy.interpolate.interp1d(reference_time, reference_flux)
+        f = scipy.interpolate.interp1d(reference_time, reference_flux, assume_sorted=True)
         occupied_samples = int((duration / maxwidth) * samples)
         ynew = f(numpy.linspace(-0.5, 0.5, occupied_samples))
 
         # Patch ends with ones ("1")
         missing_samples = samples - occupied_samples
-        emtpy_segment = numpy.ones(int(missing_samples / 2))
+        emtpy_segment = numpy.ones(int(missing_samples * 0.5))
         result = numpy.append(emtpy_segment, ynew)
         result = numpy.append(result, emtpy_segment)
         if numpy.size(result) < samples:  # If odd number of samples
@@ -614,7 +613,7 @@ class transitleastsquares(object):
 
         f = numpy.ones(SUPERSAMPLE_SIZE)
         duration = 1  # transit duration in days. Increase for exotic cases
-        t = numpy.linspace(-duration / 2, duration / 2, SUPERSAMPLE_SIZE)
+        t = numpy.linspace(-duration * 0.5, duration * 0.5, SUPERSAMPLE_SIZE)
         ma = batman.TransitParams()
         ma.t0 = 0  # time of inferior conjunction
         ma.per = per  # orbital period, use Earth as a reference
@@ -635,7 +634,7 @@ class transitleastsquares(object):
         intransit_time = t[idx_first : -idx_first + 1]
 
         # Downsample (bin) to target sample size
-        f = scipy.interpolate.interp1d(intransit_time, intransit_flux)
+        f = scipy.interpolate.interp1d(intransit_time, intransit_flux, assume_sorted=True)
         xnew = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
         downsampled_intransit_flux = f(xnew)
 
@@ -857,35 +856,13 @@ class transitleastsquares(object):
 
         self.transit_template = kwargs.get("transit_template", "default")
         if (self.transit_template == 'default'):
-            self.per = 13.4  # orbital period (in days)
-            self.rp = (1.42 * R_earth) / R_sun  # planet radius (in units of stellar radii)
+            self.per = 12.9  # orbital period (in days)
+            self.rp = 0.03  # planet radius (in units of stellar radii)
             self.a = 23.1  # semi-major axis (in units of stellar radii)
-            self.b = 0.34  # impact parameter
-            self.inc = degrees(arccos(self.b / self.a))
+            self.inc = 89.21
 
         elif self.transit_template == "grazing":
             self.b = 0.99  # impact parameter
-            self.inc = degrees(arccos(self.b / self.a))
-
-        elif self.transit_template == "Earth":
-            self.per = 365.25  # orbital period (in days)
-            self.rp = R_earth / R_sun  # planet radius (in units of stellar radii)
-            self.a = 217  # semi-major axis (in units of stellar radii)
-            self.b = 0  # impact parameter
-            self.inc = degrees(arccos(self.b / self.a))
-
-        elif self.transit_template == "Neptunian":
-            self.per = 34.4  # orbital period (in days)
-            self.rp = (2.69 * R_earth) / R_sun  # planet radius (in units of stellar radii)
-            self.a = 41  # semi-major axis (in units of stellar radii)
-            self.b = 0.43  # impact parameter
-            self.inc = degrees(arccos(self.b / self.a))
-
-        elif self.transit_template == "Jovian":
-            self.per = 29  # orbital period (in days)
-            self.rp = (11 * R_earth) / R_sun  # planet radius (in units of stellar radii)
-            self.a = 26.9  # semi-major axis (in units of stellar radii)
-            self.b = 0.45  # impact parameter
             self.inc = degrees(arccos(self.b / self.a))
 
         elif self.transit_template == "box":
@@ -898,8 +875,8 @@ class transitleastsquares(object):
             self.limb_dark = "linear"
 
         else:
-            raise ValueError('Unknown transit_template. Known values: "default", "grazing", \
-                "Earth", "Neptunian", "Jovian"')
+            raise ValueError('Unknown transit_template. Known values: \
+                "default", "grazing", "box"')
 
         """Validations to avoid (garbage in ==> garbage out)"""
 
@@ -1335,7 +1312,6 @@ class transitleastsquares(object):
             mean_flux = numpy.mean(self.y[idx_intransit])
             intransit_points = numpy.size(self.y[idx_intransit])
             try:
-            #if intransit_points > 1:
                 pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
                 snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
                 std_binned = std / intransit_points ** 0.5
@@ -1475,7 +1451,6 @@ class transitleastsquaresresults(dict):
             return self[name]
         except KeyError:
             raise AttributeError(name)
-
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
@@ -1494,7 +1469,7 @@ if __name__ == "__main__":
     if args.config is not None:
         try:
             config = configparser.ConfigParser()
-            config.read("tls_config.cfg")
+            config.read(args.config)
             R_star = float(config['Grid']['R_star'])
             R_star_min=float(config['Grid']['R_star_min'])
             R_star_max=float(config['Grid']['R_star_max'])
@@ -1508,6 +1483,7 @@ if __name__ == "__main__":
             duration_grid_step=float(config['Speed']['duration_grid_step'])
             transit_depth_min=float(config['Speed']['transit_depth_min'])
             oversampling_factor=int(config['Speed']['oversampling_factor'])
+            T0_fit_margin=int(config['Speed']['T0_fit_margin'])
             use_config_file = True
             print('Using TLS configuration from config file', args.config)
         except:
@@ -1543,7 +1519,8 @@ if __name__ == "__main__":
             transit_template=transit_template,
             duration_grid_step=duration_grid_step,
             transit_depth_min=transit_depth_min,
-            oversampling_factor=oversampling_factor
+            oversampling_factor=oversampling_factor,
+            T0_fit_margin=T0_fit_margin
             )
     else:
         results = model.power()
