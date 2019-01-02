@@ -235,7 +235,6 @@ def get_tic_data(TIC_ID):
 def catalog_info(EPIC_ID=None, TIC_ID=None):
     
     resources_dir = path.join(path.dirname(__file__))
-    #print('resources_dir', resources_dir)
     """Takes EPIC ID, returns limb darkening parameters u (linear) and
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
         absolute deviation between given/catalog Teff and logg. Data are from:
@@ -398,7 +397,7 @@ def get_lowest_residuals_in_this_duration(
             dy = inverse_squared_patched_dy_arr[i : i + duration]
             target_depth = mean[i] * overshoot
             scale = SIGNAL_DEPTH / target_depth
-            reverse_scale = 1 / scale  # speed: one division now, many multiplications later
+            reverse_scale = 1 / scale  # speed: one division now, many mults later
 
             # Scale model and calculate residuals
             intransit_residual = 0
@@ -700,7 +699,13 @@ class transitleastsquares(object):
             last_sample = numpy.max(full_values) + 1
             signal = scaled_transit[first_sample:last_sample]
             lc_arr.append(signal)
-            lc_cache_overview["overshoot"][row] = numpy.mean(signal) / numpy.min(signal)  # 1.22
+
+            # Overshoot: Fraction of transit bottom and mean flux
+            overshoot = numpy.mean(signal) / numpy.min(signal)
+
+            # Later, we multiply the inverse fraction ==> convert to inverse percentage 
+            lc_cache_overview["overshoot"][row] = 1/(2-overshoot)
+
             row += +1
 
         lc_arr = numpy.array(lc_arr)
@@ -726,7 +731,6 @@ class transitleastsquares(object):
 
         # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
         durations = numpy.unique(lc_cache_overview["width_in_samples"])
-        #print(max(durations))
         maxwidth_in_samples = int(max(durations))# * numpy.size(y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
@@ -747,7 +751,6 @@ class transitleastsquares(object):
         # and continue at the beginning. To avoid (slow) rolling,
         # we patch the beginning again to the end of the data
         patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
-        #print(len(flux), len(patched_data), maxwidth_in_samples)
 
         # Edge effect correction (numba speedup 40x)
         edge_effect_correction = get_edge_effect_correction(
@@ -778,7 +781,6 @@ class transitleastsquares(object):
         skipped_all = True
         best_row = 0  # shortest and shallowest transit
         best_depth = 0
-        downsampling_correction = 1.02  # empirical downsampling factor
 
         for duration in durations:
             ootr = ootr_efficient(patched_data, duration, inverse_squared_patched_dy)
@@ -798,7 +800,7 @@ class transitleastsquares(object):
                 duration=duration,
                 signal=lc_arr[chosen_transit_row],
                 inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
-                overshoot=overshoot * downsampling_correction,
+                overshoot=overshoot,
                 ootr=ootr, 
                 summed_edge_effect_correction=summed_edge_effect_correction,
                 chosen_transit_row=chosen_transit_row,
@@ -817,6 +819,7 @@ class transitleastsquares(object):
         """Compute the periodogram for a set of user-defined parameters"""
 
         print(TLS_VERSION)
+
         # Validate **kwargs and set to defaults where missing
         self.transit_depth_min = kwargs.get("transit_depth_min", TRANSIT_DEPTH_MIN)
         self.R_star = kwargs.get("R_star", R_STAR)
@@ -1044,7 +1047,6 @@ class transitleastsquares(object):
         sort_index = numpy.argsort(test_statistic_periods)
         test_statistic_periods = test_statistic_periods[sort_index]
         test_statistic_residuals = numpy.array(test_statistic_residuals)[sort_index]
-        #test_statistic_rolls = numpy.array(test_statistic_rolls)[sort_index]
         test_statistic_rows = numpy.array(test_statistic_rows)[sort_index]
         test_statistic_depths = numpy.array(test_statistic_depths)[sort_index]
 
@@ -1143,6 +1145,9 @@ class transitleastsquares(object):
         pbar2 = tqdm(total=numpy.size(T0_array))
         signal_ootr = numpy.ones(len(self.y[dur:]))
 
+        # Future speed improvement possible: Add multiprocessing. Will be slower for
+        # short data and T0_FIT_MARGIN > 0.01, but faster for large data with dense 
+        # sampling (T0_FIT_MARGIN=0)
         for Tx in T0_array:
             phases = fold(time=self.t, period=period, T0=Tx)
             sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
