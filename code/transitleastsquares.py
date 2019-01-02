@@ -30,7 +30,7 @@ from urllib.parse import quote as urlencode
 
 
 """Magic constants"""
-TLS_VERSION = 'Transit Least Squares TLS 1.0.2 (02 January 2019)'
+TLS_VERSION = 'Transit Least Squares TLS 1.0.4 (02 January 2019)'
 numpy.set_printoptions(threshold=numpy.nan)
 
 # astrophysical constants
@@ -190,11 +190,14 @@ def get_edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_d
     return patched - regular
 
 
-def get_duration_grid(periods, log_step=1.1):
+def get_duration_grid(periods, shortest, log_step=1.1):
     duration_max = T14(R_s=3.50, M_s=1.0, P=min(periods))
-    duration_min = T14(R_s=0.13, M_s=0.1, P=max(periods))
-    durations = [duration_min]
+    duration_min = 2*shortest#T14(R_s=0.13, M_s=0.1, P=max(periods))
+    #duration_min = shortest
+    durations = [duration_min]#[duration_min]
     current_depth = duration_min
+    print('duration_min', duration_min)
+    print('duration_max', duration_max)
     while current_depth * log_step < duration_max:
         current_depth = current_depth * log_step
         durations.append(current_depth)
@@ -764,7 +767,7 @@ class transitleastsquares(object):
 
         # Make unique to avoid duplicates in dense grids
         duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
-        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
+        #duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
 
         # Fractional transit duration can be longer than this. 
         # Example: Data length 11 days, 2 transits at 0.5 days and 10.5 days
@@ -772,7 +775,9 @@ class transitleastsquares(object):
         no_of_transits_naive = length / period
         no_of_transits_worst = no_of_transits_naive + 1
         correction_factor = no_of_transits_worst / no_of_transits_naive
-        duration_min_in_samples = int(floor(duration_min * len(y)))
+
+        # Minimum can be (x-times) 1 cadence: grazing
+        duration_min_in_samples = 1#int(floor(duration_min * len(y)))
         duration_max_in_samples = int(ceil(duration_max * len(y) * correction_factor))
         durations = durations[durations >= duration_min_in_samples]
         durations = durations[durations <= duration_max_in_samples]
@@ -940,7 +945,8 @@ class transitleastsquares(object):
             n_transits_min=self.n_transits_min,
         )
 
-        durations = get_duration_grid(periods, log_step=self.duration_grid_step)
+        #print()
+        durations = get_duration_grid(periods, shortest=1/len(self.t), log_step=self.duration_grid_step)
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
