@@ -196,8 +196,6 @@ def get_duration_grid(periods, shortest, log_step=1.1):
     duration_min = T14(R_s=0.13, M_s=0.1, P=max(periods))
     durations = [duration_min]
     current_depth = duration_min
-    print('duration_min', duration_min)
-    print('duration_max', duration_max)
     while current_depth * log_step < duration_max:
         current_depth = current_depth * log_step
         durations.append(current_depth)
