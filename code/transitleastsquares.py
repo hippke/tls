@@ -777,7 +777,7 @@ class transitleastsquares(object):
         correction_factor = no_of_transits_worst / no_of_transits_naive
 
         # Minimum can be (x-times) 1 cadence: grazing
-        duration_min_in_samples = 1#int(floor(duration_min * len(y)))
+        duration_min_in_samples = int(floor(duration_min * len(y)))  # 1
         duration_max_in_samples = int(ceil(duration_max * len(y) * correction_factor))
         durations = durations[durations >= duration_min_in_samples]
         durations = durations[durations <= duration_max_in_samples]
