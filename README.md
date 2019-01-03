@@ -47,4 +47,4 @@ Please cite [Hippke & Heller (2019)](http://www.) if you find this code useful i
 ## Contributing Code, Bugfixes, or Feedback
 We welcome and encourage contributions.
 
-Copyright 2018 Michael Hippke & René Heller.
+Copyright 2019 Michael Hippke & René Heller.
