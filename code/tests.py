@@ -26,10 +26,33 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)
     numpy.testing.assert_equal(len(durations), 49)
 
+
+    # 266980320
+    # 279741377
+    # 394137592
+    # 261136679
+    try:
+        (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(TIC_ID=261136679)
+        numpy.testing.assert_equal((a, b), (0.4224, 0.3037))
+        numpy.testing.assert_equal(mass, 0.509)
+        numpy.testing.assert_equal(radius, 0.498)
+    except:
+        print('catalog_info for TIC_ID failed')
+        error=True
+
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(EPIC_ID=204099713)
     numpy.testing.assert_equal((a, b), (0.4804, 0.1867))
     numpy.testing.assert_equal(mass, 1.046)
     numpy.testing.assert_equal(radius, 1.261)
+
+    (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(KOI_ID='952.01')
+    numpy.testing.assert_equal((a, b), (0.4224, 0.3037))
+    numpy.testing.assert_equal(mass, 0.509)
+    numpy.testing.assert_equal(radius, 0.498)
+
+
+
+
 
     # Create test data
     start = 48
@@ -79,4 +102,7 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(results.snr_per_transit[0], 47.52343719198146, decimal=5)
     numpy.testing.assert_almost_equal(results.snr_pink_per_transit[0], 53.37882224182496, decimal=5)
 
-    print('All tests completed successfully.')
+    if not error:
+        print('All tests completed successfully.')
+    else:
+        print('Some tests failed')
