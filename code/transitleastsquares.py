@@ -272,10 +272,11 @@ def get_tic_data(TIC_ID):
             },
         }
     )
+    print(outString)
     return json.loads(outString)["data"]
 
 
-def catalog_info(EPIC_ID=None, TIC_ID=None):
+def catalog_info(EPIC_ID=None, TIC_ID=None, KOI_ID=None):
 
     resources_dir = path.join(path.dirname(__file__))
     """Takes EPIC ID, returns limb darkening parameters u (linear) and
@@ -285,12 +286,35 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
         - New limb-darkening coefficients, Claret+ 2012, 2013,
           2012A&A...546A..14C, 2013A&A...552A..16C"""
 
-    if (EPIC_ID is None) and (TIC_ID is None):
+    if (EPIC_ID is None) and (TIC_ID is None) and (KOI_ID is None):
         raise ValueError("No ID was given")
     if (EPIC_ID is not None) and (TIC_ID is not None):
         raise ValueError("Only one ID allowed")
+    if (EPIC_ID is not None) and (KOI_ID is not None):
+        raise ValueError("Only one ID allowed")
+    if (TIC_ID is not None) and (KOI_ID is not None):
+        raise ValueError("Only one ID allowed")
 
-    # EPIC CASE
+    # KOI CASE (Kepler K1)
+    if KOI_ID is not None:
+        try:
+            import kplr
+        except:
+            raise ImportError(
+                'Package kplr required for KOI_ID but failed to import'
+            )
+        koi = kplr.API().koi(KOI_ID)
+        a = koi.koi_ldm_coeff1
+        b = koi.koi_ldm_coeff2
+        mass = koi.koi_smass
+        mass_min = koi.koi_smass_err1
+        mass_max = koi.koi_smass_err2
+        radius = koi.koi_srad
+        radius_min = koi.koi_srad_err1
+        radius_max = koi.koi_srad_err2
+
+
+    # EPIC CASE (Kepler K2)
     if EPIC_ID is not None:
         if type(EPIC_ID) is not int:
             raise TypeError(
@@ -301,24 +325,22 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
                 "EPIC_ID ID must be in range 201000001 to 251813738"
             )
 
-        # EPIC K2 catalog, load from locally saved CSV file
-        star = numpy.genfromtxt(
-            path.join(resources_dir, "k2cat.csv"),
-            skip_header=1,
-            delimiter=";",
-            dtype="int32, int32, f8, f8, f8, f8, f8, f8, f8",
-            names=[
-                "EPIC_ID",
-                "Teff",
-                "logg",
-                "radius",
-                "E_radius",
-                "e_radius",
-                "mass",
-                "E_mass",
-                "e_mass",
-            ],
-        )
+        try:
+            import k2plr
+        except:
+            raise ImportError(
+                'Package k2plr required for KOI_ID but failed to import'
+            )
+
+        star = k2plr.API().k2_star(EPIC_ID)
+        Teff = star.teff
+        logg = star.logg
+        radius = star.rad
+        radius_max = star.e_rad
+        radius_min = star.e_rad
+        mass = star.mass
+        mass_max = star.e_mass
+        mass_min = star.e_mass
 
         # Kepler limb darkening, load from locally saved CSV file
         ld = numpy.genfromtxt(
@@ -330,20 +352,6 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
             dtype="f8, int32, f8, f8, f8",
             names=["logg", "Teff", "u", "a", "b"],
         )
-
-        # Find row in EPIC catalog
-        idx = numpy.where(star["EPIC_ID"] == EPIC_ID)
-        if numpy.size(idx) == 0:
-            raise ValueError("EPIC_ID not in catalog")
-
-        Teff = star["Teff"][idx]
-        logg = star["logg"][idx]
-        radius = star["radius"][idx]
-        radius_max = star["E_radius"][idx]
-        radius_min = star["e_radius"][idx]
-        mass = star["mass"][idx]
-        mass_max = star["E_mass"][idx]
-        mass_min = star["e_mass"][idx]
 
     # TESS CASE
     if TIC_ID is not None:
@@ -385,32 +393,23 @@ def catalog_info(EPIC_ID=None, TIC_ID=None):
                 "No logg in catalog. Proceeding with logg=4"
             )
 
-    """From here on, all catalogs should work the same:
+    """From here on, K2 and TESS catalogs work the same:
         - Take Teff from star catalog and find nearest entry in LD catalog
         - Same for logg, but only for the Teff values returned before
         - Return stellar parameters and best-match LD
     """
-
-    # Find nearest Teff and logg
-    nearest_Teff = ld["Teff"][
-        (numpy.abs(ld["Teff"] - Teff)).argmin()
-    ]
-    idx_all_Teffs = numpy.where(ld["Teff"] == nearest_Teff)
-    relevant_lds = numpy.copy(ld[idx_all_Teffs])
-    idx_nearest = numpy.abs(
-        relevant_lds["logg"] - logg
-    ).argmin()
-    a = relevant_lds["a"][idx_nearest]
-    b = relevant_lds["b"][idx_nearest]
-
-    # The EPIC catalog was reduced from an array. The return values shall be floats.
-    if EPIC_ID is not None:
-        mass = mass[0]
-        mass_min = mass_min[0]
-        mass_max = mass_max[0]
-        radius = radius[0]
-        radius_min = radius_min[0]
-        radius_max = radius_max[0]
+    if KOI_ID is None:
+        # Find nearest Teff and logg
+        nearest_Teff = ld["Teff"][
+            (numpy.abs(ld["Teff"] - Teff)).argmin()
+        ]
+        idx_all_Teffs = numpy.where(ld["Teff"] == nearest_Teff)
+        relevant_lds = numpy.copy(ld[idx_all_Teffs])
+        idx_nearest = numpy.abs(
+            relevant_lds["logg"] - logg
+        ).argmin()
+        a = relevant_lds["a"][idx_nearest]
+        b = relevant_lds["b"][idx_nearest]
 
     return (
         (a, b),
