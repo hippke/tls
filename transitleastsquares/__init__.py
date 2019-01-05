@@ -8,7 +8,6 @@
 #  .'  \ /  `.   (1) Sonneberg Observatory, Sternwartestr. 32, Sonneberg
 #    /  :  \     (2) Max Planck Institute for Solar System Research,
 #       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany 
-#test
 
 
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
