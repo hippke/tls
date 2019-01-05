@@ -25,7 +25,7 @@ Python 3,
 [argparse](https://docs.python.org/3/library/argparse.html)
 
 ## Getting started
-Here is a short animation of a real search for planets in Kepler K2 planets for EPIC 206154641. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](http://jaekle.info/tls/index.html).
+Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](http://jaekle.info/tls/index.html).
 
 ![image](https://github.com/hippke/tls/blob/master/images/animation.gif)
 
