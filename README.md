@@ -2,7 +2,7 @@
 ### An optimized transit-fitting algorithm to search for periodic transits of small planets
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE)
 [![Image](https://img.shields.io/badge/Python-3.5%20%7C%203.6%20%7C%203.7-blue.svg)](https://pypi.org/project/transitleastsquares/)
-[![Image](https://img.shields.io/badge/documentation-%E2%9C%93-blue.svg)](http://jaekle.info/tls/index.html)
+[![Image](https://img.shields.io/badge/documentation-%E2%9C%93-blue.svg)](https://transitleastsquares.readthedocs.io/en/latest/index.html)
 [![Image](https://img.shields.io/badge/tutorials-%E2%9C%93-blue.svg)](https://github.com/hippke/tls/tree/master/tutorials)
 Add badge: ADS, arxiv, DOI
 
@@ -25,7 +25,7 @@ Python 3,
 [argparse](https://docs.python.org/3/library/argparse.html)
 
 ## Getting started
-Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](http://jaekle.info/tls/index.html).
+Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).
 
 ![image](https://github.com/hippke/tls/blob/master/images/animation.gif)
 
