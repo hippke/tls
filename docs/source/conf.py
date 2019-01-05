@@ -20,8 +20,8 @@ html_show_sourcelink = False
 # -- Project information -----------------------------------------------------
 
 project = 'Transit Least Squares'
-copyright = '2018, Michael Hippke, René Heller'
-author = 'Michael Hippke, René Heller'
+copyright = '2018, Michael Hippke, Rene Heller'
+author = 'Michael Hippke, Rene Heller'
 
 # The short X.Y version
 version = ''
@@ -132,7 +132,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'TLS.tex', 'TLS Documentation',
-     'Michael Hippke, René Heller', 'manual'),
+     'Michael Hippke, Rene Heller', 'manual'),
 ]
 
 
