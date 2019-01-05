@@ -24,8 +24,8 @@ Python 3,
 [tqdm](https://github.com/tqdm/tqdm),
 [argparse](https://docs.python.org/3/library/argparse.html)
 
-## TLS live
-Here is a short animation of a real search for planets in Kepler K2 planets for EPIC 206154641. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials).
+## Getting started
+Here is a short animation of a real search for planets in Kepler K2 planets for EPIC 206154641. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](http://jaekle.info/tls/index.html).
 
 ![image](https://github.com/hippke/tls/blob/master/images/animation.gif)
 
