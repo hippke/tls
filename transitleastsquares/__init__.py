@@ -31,7 +31,7 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.7 (04 January 2019)"
+    "Transit Least Squares TLS 1.0.8 (05 January 2019)"
 )
 numpy.set_printoptions(threshold=numpy.nan)
 
