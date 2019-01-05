@@ -108,6 +108,12 @@ SDE_MEDIAN_KERNEL_SIZE = 30
 # phase space it is (N transits * transit duration) [cadences] long
 T0_FIT_MARGIN = 0.01  # of transit duration e.g., 0.01 (=1%)
 
+# The secondary fit for T0 can take negligible or significant time, depending on the
+# number of data points and on T0_FIT_MARGIN. Set an empirical threshold to avoid
+# displaying a progress bar when the estimated runtime is low (<~1 sec)
+# To display the progress bar in more cases, use a lower number
+PROGRESSBAR_THRESHOLD = 5000
+
 
 def resample(time, flux, factor):
     f = scipy.interpolate.interp1d(
@@ -1237,7 +1243,6 @@ class transitleastsquares(object):
             n_transits_min=self.n_transits_min,
         )
 
-        # print()
         durations = get_duration_grid(
             periods,
             shortest=1 / len(self.t),
@@ -1303,7 +1308,7 @@ class transitleastsquares(object):
         pbar = tqdm(
             total=numpy.size(periods),
             smoothing=0.3,
-            mininterval=1,
+            #mininterval=1,
             bar_format=bar_format,
         )
 
@@ -1454,13 +1459,22 @@ class transitleastsquares(object):
             num=points,  # samples_per_period
         )
 
+        # Avoid showing progress bar when expected runtime is short
+        if points < PROGRESSBAR_THRESHOLD:
+            show_progress_info = False
+        else:
+            show_progress_info = True
+
         residuals_lowest = float("inf")
         T0 = 0
-        print(
-            "Searching for best T0 for period",
-            format(period, ".5f"),
-        )
-        pbar2 = tqdm(total=numpy.size(T0_array))
+
+        if show_progress_info:
+            print(
+                "Searching for best T0 for period",
+                format(period, ".5f"),
+                "days"
+                )
+            pbar2 = tqdm(total=numpy.size(T0_array))
         signal_ootr = numpy.ones(len(self.y[dur:]))
 
         # Future speed improvement possible: Add multiprocessing. Will be slower for
@@ -1504,11 +1518,13 @@ class transitleastsquares(object):
                 residuals_intransit + residuals_ootr
             )
 
-            pbar2.update(1)
+            if show_progress_info:
+                pbar2.update(1)
             if residuals_total < residuals_lowest:
                 residuals_lowest = residuals_total
                 T0 = Tx
-        pbar2.close()
+        if show_progress_info:
+            pbar2.close()
 
         # Calculate all mid-transit times
         if T0 < min(self.t):
@@ -1973,7 +1989,6 @@ if __name__ == "__main__":
     else:
         print("No config file given. Using default values")
 
-    # try:
     data = numpy.genfromtxt(args.lightcurve)
     time = data[:, 0]
     flux = data[:, 1]
