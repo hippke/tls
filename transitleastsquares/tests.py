@@ -12,7 +12,6 @@ if __name__ == '__main__':
     numpy.testing.assert_equal(FAP(SDE=7), 0.009443778)
     numpy.testing.assert_equal(FAP(SDE=99), 8.0032e-05)
 
-
     # Period grid
     periods = period_grid(
             R_star=1,  # R_sun
@@ -95,8 +94,8 @@ if __name__ == '__main__':
 
     numpy.testing.assert_equal(results.per_transit_count[0], 7)
     numpy.testing.assert_equal(len(results.transit_times), 3)
-    numpy.testing.assert_almost_equal(results.period, 365.2582192473641, decimal=5)
 
+    numpy.testing.assert_almost_equal(results.period, 365.2582192473641, decimal=5)
     numpy.testing.assert_almost_equal(results.transit_times[0], 68.00197123958793, decimal=5)
     numpy.testing.assert_almost_equal(results.depth, 0.999897160189092, decimal=5)
     numpy.testing.assert_almost_equal(results.duration, 0.5908701024202706, decimal=5)
@@ -106,6 +105,7 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(results.odd_even_mismatch, 0.005767912763555982, decimal=5)
     numpy.testing.assert_almost_equal(results.snr_per_transit[0], 47.52343719198146, decimal=5)
     numpy.testing.assert_almost_equal(results.snr_pink_per_transit[0], 53.37882224182496, decimal=5)
+
 
     if not error:
         print('All tests completed successfully.')

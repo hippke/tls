@@ -10,7 +10,7 @@ False alarm probability
 From an experiment with >10000 white noise-only TLS search runs, we can estimate false alarm probabilities (FAP) as follows:
 
 ======   =====
-FAP      SDE 
+1-FAP    SDE 
 ======   =====
 0.9      5.7
 0.95     6.1
@@ -19,7 +19,9 @@ FAP      SDE
 0.9999   9.1
 ======   =====
 
-In noise-only data, 1% of the observed cases (FAP=0.99) had an SDE>7.0. If an SDE of 9.1 is observed in a data set, the probability of this happening from noise fluctuations is 0.01%. This assumes Gaussian white noise. Real data often has partially correlated (red) noise. Then, the FAP estimates are too optimistic, i.e., high SDE values will occur more often than measured in the experiment. Vice versa, the SDE values per given FAP value will be higher in red noise.
+In noise-only data, 1% of the observed cases (1-FAP=0.99) had an SDE>7.0. If an SDE of 9.1 is observed in a data set, the probability of this happening from noise fluctuations is 0.01%. This assumes Gaussian white noise. Real data often has partially correlated (red) noise. Then, the FAP estimates are too optimistic, i.e., high SDE values will occur more often than measured in the experiment. Vice versa, the SDE values per given FAP value will be higher in red noise. 
+
+TLS returns the FAP value per SDE as results.FAP (see Python interface).
 
 
 Truncation of the power spectrum
