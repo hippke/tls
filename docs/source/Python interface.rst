@@ -121,7 +121,8 @@ Additional transit statistics based on the ``power`` spectrum:
 :per_transit_count: *(array)* Number of data points during each unique transit
 :transit_count: *(int)* The number of transits
 :distinct_transit_count: *(int)* The number of transits with intransit data points 
-:empty_transit_count: *(int)* The number of transits with no intransit data points 
+:empty_transit_count: *(int)* The number of transits with no intransit data points
+:FAP:  *(float)* The false alarm probability for the SDE assuming white noise. Returns NaN for FAP>0.1.
 
 Time series model for visualization purpose:
 

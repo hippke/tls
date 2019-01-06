@@ -1,12 +1,17 @@
 import numpy
 import batman
 from transitleastsquares import transitleastsquares, catalog_info, period_grid, \
-    get_duration_grid
+    get_duration_grid, FAP
 
 
 if __name__ == '__main__':
     numpy.random.seed(seed=0)  # reproducibility
     print('Starting tests. This should take less than one minute...')
+
+    numpy.testing.assert_equal(FAP(SDE=2), numpy.nan)
+    numpy.testing.assert_equal(FAP(SDE=7), 0.009443778)
+    numpy.testing.assert_equal(FAP(SDE=99), 8.0032e-05)
+
 
     # Period grid
     periods = period_grid(
