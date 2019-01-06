@@ -7,7 +7,7 @@
 #    /_   _\
 #  .'  \ /  `.   (1) Sonneberg Observatory, Sternwartestr. 32, Sonneberg
 #    /  :  \     (2) Max Planck Institute for Solar System Research,
-#       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany 
+#       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany
 
 
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
@@ -31,9 +31,10 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.8 (05 January 2019)"
+    "Transit Least Squares TLS 1.0.8 (06 January 2019)"
 )
 numpy.set_printoptions(threshold=numpy.nan)
+resources_dir = path.join(path.dirname(__file__))
 
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
@@ -113,6 +114,16 @@ T0_FIT_MARGIN = 0.01  # of transit duration e.g., 0.01 (=1%)
 # displaying a progress bar when the estimated runtime is low (<~1 sec)
 # To display the progress bar in more cases, use a lower number
 PROGRESSBAR_THRESHOLD = 5000
+
+
+def FAP(SDE):
+    """Returns FAP (False Alarm Probability) for a given SDE"""
+    data = numpy.genfromtxt(
+            path.join(resources_dir, "fap.csv"),
+            dtype="f8, f8",
+            names=["FAP", "SDE"],
+        )
+    return data["FAP"][numpy.argmax(data["SDE"]>SDE)]
 
 
 def resample(time, flux, factor):
@@ -284,7 +295,6 @@ def get_tic_data(TIC_ID):
 
 def catalog_info(EPIC_ID=None, TIC_ID=None, KOI_ID=None):
 
-    resources_dir = path.join(path.dirname(__file__))
     """Takes EPIC ID, returns limb darkening parameters u (linear) and
         a,b (quadratic), and stellar parameters. Values are pulled for minimum
         absolute deviation between given/catalog Teff and logg. Data are from:
@@ -1855,6 +1865,7 @@ class transitleastsquares(object):
             transit_count,
             distinct_transit_count,
             empty_transit_count,
+            FAP(SDE),
             test_statistic_periods,
             power,
             power_raw,
@@ -1901,6 +1912,7 @@ class transitleastsquaresresults(dict):
                     "transit_count",
                     "distinct_transit_count",
                     "empty_transit_count",
+                    "FAP",
                     "periods",
                     "power",
                     "power_raw",
