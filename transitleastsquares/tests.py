@@ -52,11 +52,13 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(radius, 1.261)
     numpy.testing.assert_almost_equal(radius_min, 1.044)
     numpy.testing.assert_almost_equal(radius_max, 0.925)
+    print('Test passed: EPIC catalog pull from Vizier using astroquery')
 
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(KOI_ID='952.01')
     numpy.testing.assert_equal((a, b), (0.4224, 0.3037))
     numpy.testing.assert_equal(mass, 0.509)
     numpy.testing.assert_equal(radius, 0.498)
+    print('Test passed: KIC catalog pull from MAST using kplr')
 
     # Create test data
     start = 48
