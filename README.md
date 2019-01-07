@@ -1,4 +1,4 @@
-![Logo](https://raw.githubusercontent.com/hippke/tls/blob/master/docs/source/logo.png)
+![Logo](https://raw.githubusercontent.com/hippke/tls/master/docs/source/logo.png)
 ### An optimized transit-fitting algorithm to search for periodic transits of small planets
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE)
 [![Image](https://img.shields.io/badge/Python-3.5%20%7C%203.6%20%7C%203.7-blue.svg)](https://pypi.org/project/transitleastsquares/)
