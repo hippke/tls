@@ -31,7 +31,7 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.8 (06 January 2019)"
+    "Transit Least Squares TLS 1.0.9 (07 January 2019)"
 )
 numpy.set_printoptions(threshold=numpy.nan)
 resources_dir = path.join(path.dirname(__file__))
@@ -329,7 +329,6 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KOI_ID=None):
         radius_min = koi.koi_srad_err1
         radius_max = koi.koi_srad_err2
 
-
     # EPIC CASE (Kepler K2)
     if EPIC_ID is not None:
         if type(EPIC_ID) is not int:
@@ -342,21 +341,23 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KOI_ID=None):
             )
 
         try:
-            import k2plr
+            from astroquery.vizier import Vizier
         except:
             raise ImportError(
-                'Package k2plr required for KOI_ID but failed to import'
+                'Package astroquery.vizier required for EPIC_ID but failed to import'
             )
 
-        star = k2plr.API().k2_star(EPIC_ID)
-        Teff = star.teff
-        logg = star.logg
-        radius = star.rad
-        radius_max = star.e_rad
-        radius_min = star.e_rad
-        mass = star.mass
-        mass_max = star.e_mass
-        mass_min = star.e_mass
+        columns=["Teff", "logg", "Rad", "E_Rad", "e_Rad", "Mass", "E_Mass", "e_Mass"]
+        catalog="IV/34/epic"
+        result = Vizier(columns=columns).query_constraints(ID=EPIC_ID, catalog=catalog)[0].as_array()
+        Teff = result[0][0]
+        logg = result[0][1]
+        radius = result[0][2]
+        radius_max = result[0][3]
+        radius_min = result[0][4]
+        mass = result[0][5]
+        mass_max = result[0][6]
+        mass_min = result[0][7]
 
         # Kepler limb darkening, load from locally saved CSV file
         ld = numpy.genfromtxt(

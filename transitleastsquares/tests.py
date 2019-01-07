@@ -45,18 +45,18 @@ if __name__ == '__main__':
         error=True
 
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(EPIC_ID=204099713)
-    numpy.testing.assert_equal((a, b), (0.4804, 0.1867))
-    numpy.testing.assert_equal(mass, 1.046)
-    numpy.testing.assert_equal(radius, 1.261)
+    numpy.testing.assert_almost_equal((a, b), (0.4804, 0.1867))
+    numpy.testing.assert_almost_equal(mass, 1.046)
+    numpy.testing.assert_almost_equal(mass_min, 0.898)
+    numpy.testing.assert_almost_equal(mass_max, 0.642)
+    numpy.testing.assert_almost_equal(radius, 1.261)
+    numpy.testing.assert_almost_equal(radius_min, 1.044)
+    numpy.testing.assert_almost_equal(radius_max, 0.925)
 
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(KOI_ID='952.01')
     numpy.testing.assert_equal((a, b), (0.4224, 0.3037))
     numpy.testing.assert_equal(mass, 0.509)
     numpy.testing.assert_equal(radius, 0.498)
-
-
-
-
 
     # Create test data
     start = 48
