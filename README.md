@@ -24,7 +24,7 @@ Python 3,
 [tqdm](https://github.com/tqdm/tqdm),
 [argparse](https://docs.python.org/3/library/argparse.html),
 [kplr](https://github.com/dfm/kplr) (optional, for LD and stellar density priors from Kepler K1),
-[k2plr](https://github.com/rodluger/k2plr) (optional, for LD and stellar density priors from Kepler K2)
+[astroquery](https://astroquery.readthedocs.io/en/latest/) (optional, for LD and stellar density priors from Kepler K2)
 
 ## Getting started
 Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).

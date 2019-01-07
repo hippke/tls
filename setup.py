@@ -6,7 +6,7 @@ with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='transitleastsquares',
-      version='1.0.9',
+      version='1.0.12',
       description='An optimized transit-fitting algorithm to search for periodic transits of small planets',
       long_description=long_description,
       long_description_content_type='text/markdown',
@@ -27,6 +27,6 @@ setup(name='transitleastsquares',
           'batman-package',
           'argparse',
           'kplr',
-          'k2plr'
+          'astroquery'
       ]
 )
