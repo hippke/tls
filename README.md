@@ -22,8 +22,8 @@ Python 3,
 [numba](http://numba.pydata.org/),
 [batman](https://www.cfa.harvard.edu/~lkreidberg/batman/),
 [tqdm](https://github.com/tqdm/tqdm),
-[argparse](https://docs.python.org/3/library/argparse.html)
-[kplr](https://github.com/dfm/kplr) (optional, for LD and stellar density priors from Kepler K1)
+[argparse](https://docs.python.org/3/library/argparse.html),
+[kplr](https://github.com/dfm/kplr) (optional, for LD and stellar density priors from Kepler K1),
 [k2plr](https://github.com/rodluger/k2plr) (optional, for LD and stellar density priors from Kepler K2)
 
 ## Getting started
