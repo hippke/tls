@@ -50,5 +50,4 @@ Please cite [Hippke & Heller (2019)](http://www.) if you find this code useful i
 ## Contributing Code, Bugfixes, or Feedback
 We welcome and encourage contributions. If you have any trouble, [open an issue](https://github.com/hippke/tls/issues).
 
-Copyright 2019 Michael Hippke & René Heller.
-<img src="https://raw.githubusercontent.com/hippke/tls/master/docs/source/logo.png" data-canonical-src="https://raw.githubusercontent.com/hippke/tls/master/docs/source/logo.png" width="10" height="10" />
+Copyright 2019 Michael Hippke & René Heller [![Image](https://www.counter12.com/img-260YBcdBwAwDacwd-3.gif)]()
