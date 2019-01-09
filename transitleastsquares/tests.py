@@ -107,6 +107,7 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(results.odd_even_mismatch, 0.005767912763555982, decimal=5)
     numpy.testing.assert_almost_equal(results.snr_per_transit[0], 47.52343719198146, decimal=5)
     numpy.testing.assert_almost_equal(results.snr_pink_per_transit[0], 53.37882224182496, decimal=5)
+    numpy.testing.assert_almost_equal(results.rp_rs, 0.009119851811944274, decimal=5)
 
 
     if not error:

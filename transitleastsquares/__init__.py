@@ -20,7 +20,6 @@ import time
 import scipy.interpolate
 import sys
 import warnings
-import argparse
 import configparser
 from os import path
 from functools import partial
@@ -31,7 +30,7 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.12 (07 January 2019)"
+    "Transit Least Squares TLS 1.0.13 (09 January 2019)"
 )
 numpy.set_printoptions(threshold=numpy.nan)
 resources_dir = path.join(path.dirname(__file__))
@@ -138,14 +137,46 @@ def resample(time, flux, factor):
     return time_resampled, flux_resampled
 
 
-def rp_rs_from_depth(depth, a, b):
-    """Takes the maximum transit depth and quadratic limb darkening params a, b
-    Returns R_P / R_S (ratio of planetary to stellar radius
-    Source: Heller et al. 2018 in prep"""
+def rp_rs_from_depth(depth, law, params):
+    """Takes the maximum transit depth, limb-darkening law and parameters
+    Returns R_P / R_S (ratio of planetary to stellar radius)
+    Source: Heller 2019, https://arxiv.org/abs/1901.01730"""
 
-    return ((depth - 1) * (2 * a + b - 6)) ** (
-        1 / 2
-    ) / 6 ** (1 / 2)
+    # Validations:
+    # - LD law must exist
+    # - All parameters must be floats or ints
+    # - All parameters must be given in the correct quanitity for the law
+    if not isinstance(params, (float, int)) and not all(isinstance(x, (float, int)) for x in params):
+            raise ValueError('All limb-darkening parameters must be numbers')
+
+    laws = "linear, quadratic, squareroot, logarithmic, nonlinear"
+    if law not in laws:
+        raise ValueError('Please provide a supported limb-darkening law:', laws)
+
+    if law=='linear' and not isinstance(params, float):
+            raise ValueError('Please provide exactly one parameter')
+
+    if law in "quadratic, logarithmic, squareroot" and len(params) != 2:
+        raise ValueError('Please provide exactly two limb-darkening parameters')
+
+    if law=='nonlinear' and len(params) != 4:
+            raise ValueError('Please provide exactly four limb-darkening parameters')
+
+    # Actual calculations of the return value
+    if law=='linear':
+        return (depth * (1 - params/3))**(1/2)
+
+    if law=='quadratic':
+        return (depth * (1 - params[0]/3 - params[1]/6))**(1/2)
+
+    if law=='squareroot':
+        return (depth * (1 - params[0]/3 - params[1]/5))**(1/2)
+
+    if law=='logarithmic':
+        return (depth * (1 + 2*params[1]/9 - params[0]/3) )**(1/2)
+
+    if law=='nonlinear':
+        return ( depth * (1 - params[0]/5 - params[1]/3 - 3*params[2]/7 - params[3]/2) )**(1/2)
 
 
 def cleaned_array(t, y, dy=None):
@@ -1794,12 +1825,7 @@ class transitleastsquares(object):
             (1 - depth_mean) / numpy.std(flux_ootr)
         ) * len(all_flux_intransit) ** (0.5)
 
-        if self.limb_dark == "quadratic":
-            rp_rs = rp_rs_from_depth(
-                depth=depth, a=self.u[0], b=self.u[1]
-            )
-        else:
-            rp_rs = None
+        rp_rs = rp_rs_from_depth(depth=1-depth, law=self.limb_dark, params=self.u)
 
         depth_mean_odd = numpy.mean(all_flux_intransit_odd)
         depth_mean_even = numpy.mean(
@@ -1944,7 +1970,10 @@ class transitleastsquaresresults(dict):
 
 # This is the command line interface
 if __name__ == "__main__":
-    print(TLS_VERSION)
+    try:
+        import argparse
+    except:
+        raise ImportError("Could not import package argparse")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
