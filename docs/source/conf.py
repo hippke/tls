@@ -28,5 +28,6 @@ texinfo_documents = [
     (master_doc, 'TLS', 'TLS Documentation',
      author, 'TLS', 'One line description of project.',
      'Miscellaneous'),
-epub_title = project,
+]
+epub_title = project
 epub_exclude_files = ['search.html']
