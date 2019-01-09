@@ -111,7 +111,7 @@ Additional transit statistics based on the ``power`` spectrum:
 :depth_mean: *(tuple of floats)* Transit depth measured as the mean of all intransit points. The second value is the standard deviation of these points multiplied by the square root of the number of intransit points
 :depth_mean_even: *(tuple of floats)* Mean depth and uncertainty of even transits (1, 3, ...)
 :depth_mean_odd: *(tuple of floats)* Mean depth and uncertainty of odd transits (2, 4, ...)
-:rp_rs: *(float)* Radius ratio of planet and star using the analytic equations from (`Heller 2019 <https://arxiv.org/abs/1901.01730>`_)
+:rp_rs: *(float)* Radius ratio of planet and star using the analytic equations from `Heller 2019 <https://arxiv.org/abs/1901.01730>`_
 :transit_depths: *(array)* Mean depth of each transit
 :snr: *(float)* Signal-to-noise ratio. Definition: :math:`{\rm SNR} = \frac{d}{\sigma_o}n^{1/2}` with :math:`d` as the mean transit depth,  :math:`\sigma` as the standard deviation of the out-of-transit points, and :math:`n` as the number of intransit points (`Pont et al. 2006 <https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract>`_)
 :snr_per_transit: *(array)* Signal-to-noise ratio per individual transit
