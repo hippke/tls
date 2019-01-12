@@ -7,7 +7,7 @@ This describes the Python interface to TLS.
 Define data for a search
 ------------------------
 
-.. class:: TransitLeastSquares.model(t, y, dy)
+.. class:: transitleastsquares.model(t, y, dy)
 
 :t: *(array)* Time series of the data (**in units of days**)
 :y: *(array)* Flux series of the data, so that ``1`` is nominal flux (out of transit) and ``0`` is darkness. A transit may be represented by a flux of e.g., ``0.99``
@@ -28,7 +28,7 @@ Define data for a search
 Define parameters and run search
 --------------------------------
 
-.. class:: TransitLeastSquares.power(parameters)
+.. class:: transitleastsquares.power(parameters)
 
 Parameters used for the period search grid and the transit duration search grid. All parameters are optional.
 
@@ -158,7 +158,7 @@ where :math:`M` and :math:`R` are the stellar mass and radius, :math:`G` is the 
 
 .. math:: f_{\rm max}=\frac{1}{2 \pi} \sqrt{\frac{GM}{(3R)^3}}; f_{\rm min}=2/S
 
-.. function:: autoperiod(parameters)
+.. function:: period_grid(parameters)
 
 :R_star: Stellar radius (in units of solar radii)
 :M_star: Stellar mass (in units of solar masses) 
@@ -173,8 +173,8 @@ Example usage:
 
 ::
 
-    from TransitLeastSquares import autoperiod
-    periods = autoperiod(R_star=1, M_star=1, time_span=400)
+    from transitleastsquares import period_grid
+    periods = period_grid(R_star=1, M_star=1, time_span=400)
 
 returns a period grid with 32172 values:
 
@@ -301,7 +301,7 @@ Example usage:
 
 ::
 
-    from TransitLeastSquares import cleaned_array
+    from transitleastsquares import cleaned_array
     dirty_array = numpy.ones(10, dtype=object)
     time_array = numpy.linspace(1, 10, 10)
     dy_array = numpy.ones(10, dtype=object)
@@ -351,7 +351,7 @@ Example usage:
 
 ::
 
-    from TransitLeastSquares import resample
+    from transitleastsquares import resample
     time_new, flux_new = resample(time, flux, factor=3.0)
 
 .. note::
