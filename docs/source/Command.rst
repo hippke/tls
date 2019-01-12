@@ -9,18 +9,18 @@ Usage
 Syntax:
 ::
 
-    TransitLeastSquares.py [-h] [-o OUTPUT] [-c CONFIG] lightcurve
+    transitleastsquares.py [-h] [-o OUTPUT] [-c CONFIG] lightcurve
 
 Minimum example:
 ::
 
-    python TransitLeastSquares.py test_data.csv
+    python transitleastsquares.py test_data.csv
 
 
 Maximum example:
 ::
 
-    python TransitLeastSquares.py test_data.csv --config=tls_config.cfg --output=results.csv
+    python transitleastsquares.py test_data.csv --config=tls_config.cfg --output=results.csv
 
 
 .. note::
