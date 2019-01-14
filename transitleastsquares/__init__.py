@@ -30,7 +30,7 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.13 (09 January 2019)"
+    "Transit Least Squares TLS 1.0.14 (14 January 2019)"
 )
 numpy.set_printoptions(threshold=numpy.nan)
 resources_dir = path.join(path.dirname(__file__))
@@ -1721,6 +1721,8 @@ class transitleastsquares(object):
             [len(transit_times)]
         )
         transit_depths = numpy.zeros([len(transit_times)])
+        transit_depths_uncertainties = numpy.zeros([len(transit_times)])
+
         snr_per_transit = numpy.zeros([len(transit_times)])
         snr_pink_per_transit = numpy.zeros(
             [len(transit_times)]
@@ -1757,6 +1759,7 @@ class transitleastsquares(object):
                 self.y[idx_intransit]
             )
             transit_depths[i] = mean_flux
+            transit_depths_uncertainties[i] = numpy.std(self.y[idx_intransit]) / numpy.sqrt(intransit_points)
             per_transit_count[i] = intransit_points
             # Check if transit odd/even to collect the flux for the mean calculations
             if i % 2 == 0:  # even
@@ -1882,6 +1885,7 @@ class transitleastsquares(object):
             (depth_mean_even, depth_mean_even_std),
             (depth_mean_odd, depth_mean_odd_std),
             transit_depths,
+            transit_depths_uncertainties,
             rp_rs,
             snr,
             snr_per_transit,
@@ -1929,6 +1933,7 @@ class transitleastsquaresresults(dict):
                     "depth_mean_even",
                     "depth_mean_odd",
                     "transit_depths",
+                    "transit_depths_uncertainties",
                     "rp_rs",
                     "snr",
                     "snr_per_transit",
