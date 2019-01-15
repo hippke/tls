@@ -3,8 +3,20 @@ Changelog
 
 This describes changes to TLS.
 
+The versioning scheme is: major.minor.revision
+
+:major: Will be increased when the API (the interface) changes in an incompatible way. Will be documented in this changelog.
+:minor: Will be increased when adding functionality in a backwards-compatible manner. Will be documented in this changelog.
+:revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
+
+
+Version 1.0.14. (planned)
+------------------------------
+:: Added to the return values: ``results.transit_depths_uncertainties``
+
+
 
 Version 1.0 (01 January 2018)
 ------------------------------
 
-Initial release for the paper.
+Initial release.
