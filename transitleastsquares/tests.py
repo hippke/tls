@@ -52,8 +52,25 @@ if __name__ == '__main__':
     numpy.testing.assert_equal(len(periods), 1716)
     print('Test passed: period_grid')
 
+    periods = period_grid(
+            R_star=0.1,  # R_sun
+            M_star=1,  # M_sun
+            time_span=1000,  # days
+            period_min=0,
+            period_max=999,
+            oversampling_factor=3)
+    numpy.testing.assert_equal(len(periods), 4308558)
+    print('Test passed: period_grid')
+
 
     # Duration grid
+    periods = period_grid(
+            R_star=1,  # R_sun
+            M_star=1,  # M_sun
+            time_span=20,  # days
+            period_min=0,
+            period_max=999,
+            oversampling_factor=3)
     durations = get_duration_grid(periods, log_step=1.05, shortest=2)
     numpy.testing.assert_almost_equal(max(durations), 0.12)
     numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)

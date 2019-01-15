@@ -714,6 +714,11 @@ def period_grid(
     )
 
     number_of_periods = numpy.size(periods[selected_index])
+
+    if number_of_periods > 10**6:
+        text = "period_grid generates a very large grid (" + str(number_of_periods) + "). Recommend to check physical plausibility for stellar mass, radius, and time series duration."
+        warnings.warn(text)
+
     if number_of_periods < MINIMUM_GRID_SIZE:
         if time_span < 5 * SECONDS_PER_DAY:
             time_span = 5 * SECONDS_PER_DAY
