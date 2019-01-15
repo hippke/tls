@@ -187,6 +187,11 @@ returns a period grid with 32172 values:
     TLS calls this function automatically to derive its period grid. Calling this function separately can be useful to employ a classical BLS search, e.g., using the astroPy BLS function.
 
 
+.. note::
+    To avoid generating an infinitely large period_grid, parameters are auto-enforced to the ranges ``0.1 < R_star < 10000`` and ``0.01 < M_star < 1000``. Some combinations of mostly implausible values, such as ``R_star=1`` with ``M_star=5`` yield empty period grids. If the grid size is less than 100 values, the function returns the default grid ``R_star=M_star=1``. Very short time series (less than a few days of duration) default to a grid size with a span of 5 days.
+   
+
+
 
 
 Priors for stellar parameters

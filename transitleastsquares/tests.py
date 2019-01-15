@@ -16,6 +16,14 @@ if __name__ == '__main__':
     periods = period_grid(
             R_star=1,  # R_sun
             M_star=1,  # M_sun
+            time_span=0.1)  # days
+    numpy.testing.assert_almost_equal(max(periods), 2.4999999999999987)
+    numpy.testing.assert_almost_equal(min(periods), 0.6002621413799498)
+    numpy.testing.assert_equal(len(periods), 179)
+
+    periods = period_grid(
+            R_star=1,  # R_sun
+            M_star=1,  # M_sun
             time_span=20)  # days
     numpy.testing.assert_almost_equal(max(periods), 10)
     numpy.testing.assert_almost_equal(min(periods), 0.6009180713191087)
