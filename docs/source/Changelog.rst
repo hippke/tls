@@ -14,7 +14,7 @@ Version 1.0.14. (planned)
 ------------------------------
 
 :Added: To the return values: ``results.transit_depths_uncertainties``
-:Changed: period_grid limited to physically plausible values to avoid generating empty or extremely large grids
+:Changed: ``period_grid`` limited to physically plausible values to avoid generating empty or extremely large grids
 
 
 
