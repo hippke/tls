@@ -1,4 +1,4 @@
-# Contributing to this project
+# Contributing to TLS
 
 ## Using the issue tracker
 
