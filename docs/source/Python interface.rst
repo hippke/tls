@@ -1,7 +1,7 @@
 Python Interface
 ================
 
-This describes the Python interface to TLS..
+This describes the Python interface to TLS.
 
 
 Define data for a search
