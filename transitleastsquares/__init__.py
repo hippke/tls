@@ -650,8 +650,32 @@ def period_grid(
     """Returns array of optimal sampling periods for transit search in light curves
        Following Ofir (2014, A&A, 561, A138)"""
 
+    # Some cases yield empty period grids. Example: R_star=5, M_star=1
+    # Then: Warn and return the default grid
+    MINIMUM_GRID_SIZE = 100
+
+    if R_star < 0.1:
+        text = "Warning: R_star was set to 0.1 for period_grid (was unphysical: " + str(R_star) + ")"
+        warnings.warn(text)
+        R_star = 0.1
+
+    if R_star > 10000:
+        text = "Warning: R_star was set to 10000 for period_grid (was unphysical: " + str(R_star) + ")"
+        warnings.warn(text)
+        R_star = 10000
+
+    if M_star < 0.01:
+        text = "Warning: M_star was set to 0.01 for period_grid (was unphysical: " + str(M_star) + ")"
+        warnings.warn(text)
+        R_star = 0.01
+
+    if M_star > 1000:
+        text = "Warning: M_star was set to 1000 for period_grid (was unphysical: " + str(M_star) + ")"
+        warnings.warn(text)
+        R_star = 1000
+
     R_star = R_star * R_sun
-    M_star = M_sun * M_star
+    M_star = M_star * M_sun
     time_span = time_span * SECONDS_PER_DAY  # seconds
 
     # boundary conditions
@@ -689,10 +713,12 @@ def period_grid(
         )
     )
 
-    if numpy.size(periods[selected_index]) == 0:
-        raise ValueError("Empty period array")
-
-    return periods[selected_index]  # periods in [days]
+    number_of_periods = numpy.size(periods[selected_index])
+    if number_of_periods < MINIMUM_GRID_SIZE:
+        warnings.warn("period_grid defaults to R_star=1 and M_star=1 as given density yielded grid with too few values")
+        return period_grid(R_star=1, M_star=1, time_span=time_span/SECONDS_PER_DAY)
+    else:
+        return periods[selected_index]  # periods in [days]
 
 
 class transitleastsquares(object):
