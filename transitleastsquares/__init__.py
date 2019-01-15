@@ -577,6 +577,29 @@ def running_mean(data, width_signal):
     ) / float(width_signal)
 
 
+def running_mean_equal_length(data, width_signal):
+    """Returns the running mean in a given window"""
+    cumsum = numpy.cumsum(numpy.insert(data, 0, 0))
+    med = (
+        cumsum[width_signal:] - cumsum[:-width_signal]
+    ) / float(width_signal)
+
+    # Append the first/last value at the beginning/end to match the length of
+    # data and returned median
+    first_values = med[0]
+    last_values = med[-1]
+    missing_values = len(data) - len(med)
+    values_front = int(missing_values * 0.5)
+    values_end = missing_values - values_front
+    med = numpy.append(
+        numpy.full(values_front, first_values), med
+    )
+    med = numpy.append(
+        med, numpy.full(values_end, last_values)
+    )
+    return med
+
+
 def running_median(data, kernel):
     """Returns sliding median of width 'kernel' and same length as data """
     idx = (

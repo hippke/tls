@@ -11,8 +11,27 @@ if __name__ == '__main__':
     numpy.testing.assert_equal(FAP(SDE=2), numpy.nan)
     numpy.testing.assert_equal(FAP(SDE=7), 0.009443778)
     numpy.testing.assert_equal(FAP(SDE=99), 8.0032e-05)
+    print('Test passed: FAP table')
 
-    # Period grid
+    periods = period_grid(
+            R_star=1,  # R_sun
+            M_star=1,  # M_sun
+            time_span=20)  # days
+    numpy.testing.assert_almost_equal(max(periods), 10)
+    numpy.testing.assert_almost_equal(min(periods), 0.6009180713191087)
+    numpy.testing.assert_equal(len(periods), 1145)
+
+    periods = period_grid(
+            R_star=5,  # R_sun
+            M_star=1,  # M_sun
+            time_span=20,  # days
+            period_min=0,
+            period_max=999,
+            oversampling_factor=3)
+    numpy.testing.assert_almost_equal(max(periods), 10)
+    numpy.testing.assert_almost_equal(min(periods), 0.6009180713191087)
+    numpy.testing.assert_equal(len(periods), 1145)
+
     periods = period_grid(
             R_star=1,  # R_sun
             M_star=1,  # M_sun
@@ -23,13 +42,15 @@ if __name__ == '__main__':
     numpy.testing.assert_almost_equal(max(periods), 10)
     numpy.testing.assert_almost_equal(min(periods), 0.60155759)
     numpy.testing.assert_equal(len(periods), 1716)
+    print('Test passed: period_grid')
+
 
     # Duration grid
     durations = get_duration_grid(periods, log_step=1.05, shortest=2)
     numpy.testing.assert_almost_equal(max(durations), 0.12)
     numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)
     numpy.testing.assert_equal(len(durations), 49)
-
+    print('Test passed: get_duration_grid')
 
     # 266980320
     # 279741377
