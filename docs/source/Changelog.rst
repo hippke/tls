@@ -13,7 +13,7 @@ The versioning scheme is: major.minor.revision
 Version 1.0.14. (planned)
 ------------------------------
 
-: Added to the return values: ``results.transit_depths_uncertainties``
+:Added to the return values: ``results.transit_depths_uncertainties``
 
 
 
