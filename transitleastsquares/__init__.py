@@ -715,6 +715,8 @@ def period_grid(
 
     number_of_periods = numpy.size(periods[selected_index])
     if number_of_periods < MINIMUM_GRID_SIZE:
+        if time_span < 5 * SECONDS_PER_DAY:
+            time_span = 5 * SECONDS_PER_DAY
         warnings.warn("period_grid defaults to R_star=1 and M_star=1 as given density yielded grid with too few values")
         return period_grid(R_star=1, M_star=1, time_span=time_span/SECONDS_PER_DAY)
     else:
