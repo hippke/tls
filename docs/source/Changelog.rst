@@ -17,8 +17,6 @@ Version 1.0.14. (planned)
 :Changed: ``period_grid`` limited to physically plausible values to avoid generating empty or extremely large grids
 
 
-
-
 Version 1.0 (01 January 2018)
 ------------------------------
 
