@@ -12,7 +12,7 @@ We present a new method to detect planetary transits from time-series photometry
 ![image](https://raw.githubusercontent.com/hippke/tls/master/docs/source/frontpage_rescaled.png)
 
 ## Installation
-The stable version can be installed via pip: `pip install tls-package`
+The stable version can be installed via pip: `pip install transitleastsquares`
 
 Dependencies:
 Python 3, 
