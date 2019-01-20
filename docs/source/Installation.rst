@@ -3,7 +3,7 @@ Installation
 
 TLS can be installed conveniently using pip::
 
-    pip install tls-package
+    pip install transitleastsquares
 
 The latest version can be pulled from github::
 
