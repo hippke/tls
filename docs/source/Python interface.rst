@@ -117,7 +117,7 @@ Additional transit statistics based on the ``power`` spectrum:
 :snr: *(float)* Signal-to-noise ratio. Definition: :math:`{\rm SNR} = \frac{d}{\sigma_o}n^{1/2}` with :math:`d` as the mean transit depth,  :math:`\sigma` as the standard deviation of the out-of-transit points, and :math:`n` as the number of intransit points (`Pont et al. 2006 <https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract>`_)
 :snr_per_transit: *(array)* Signal-to-noise ratio per individual transit
 :snr_pink_per_transit: *(array)* Signal-to-pink-noise ratio per individual transit as defined in `Pont et al. (2006) <https://ui.adsabs.harvard.edu/#abs/2006MNRAS.373..231P/abstract>`_
-:odd_even_mismatch: *(float)* Significance (in standard deviations) between odd and even transit depths. Example: A value of 5 represents a :math:`5\,\sigma` confidence that the odd and even depths if different depths
+:odd_even_mismatch: *(float)* Significance (in standard deviations) between odd and even transit depths. Example: A value of 5 represents a :math:`5\,\sigma` confidence that the odd and even depths have different depths
 :transit_times: *(array)* The mid-transit time for each transit within the time series
 :per_transit_count: *(array)* Number of data points during each unique transit
 :transit_count: *(int)* The number of transits
