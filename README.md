@@ -39,7 +39,7 @@ Here is a short animation of a real search for planets in Kepler K2 data. For mo
 ![image](https://raw.githubusercontent.com/hippke/tls/master/docs/source/animation.gif)
 
 ## Attribution
-Please cite [Hippke & Heller (2019, A&A in revision)](https://ui.adsabs.harvard.edu/#abs/2019arXiv190102015H/abstract) if you find this code useful in your research. The BibTeX entry for the paper is:
+Please cite [Hippke & Heller (2019, A&A accepted)](https://ui.adsabs.harvard.edu/#abs/2019arXiv190102015H/abstract) if you find this code useful in your research. The BibTeX entry for the paper is:
 
 ```
 @ARTICLE{2019arXiv190102015H,
