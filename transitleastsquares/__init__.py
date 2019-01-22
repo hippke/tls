@@ -32,7 +32,7 @@ from urllib.parse import quote as urlencode
 TLS_VERSION = (
     "Transit Least Squares TLS 1.0.14 (14 January 2019)"
 )
-numpy.set_printoptions(threshold=numpy.nan)
+#numpy.set_printoptions(threshold=numpy.nan)
 resources_dir = path.join(path.dirname(__file__))
 
 # astrophysical constants
