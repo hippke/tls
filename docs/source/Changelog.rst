@@ -10,7 +10,7 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
-Version 1.0.14. (planned)
+Version 1.0.14. (24 January 2019)
 ------------------------------
 
 :Added: Automatically run ``cleaned_array`` before performing a search
