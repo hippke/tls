@@ -16,7 +16,6 @@ import json
 import multiprocessing
 import numba
 import numpy
-import time
 import scipy.interpolate
 import sys
 import warnings
@@ -30,9 +29,8 @@ from urllib.parse import quote as urlencode
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.14 (14 January 2019)"
+    "Transit Least Squares TLS 1.0.14 (24 January 2019)"
 )
-#numpy.set_printoptions(threshold=numpy.nan)
 resources_dir = path.join(path.dirname(__file__))
 
 # astrophysical constants
@@ -739,12 +737,18 @@ class transitleastsquares(object):
     def _validate_inputs(self, t, y, dy):
         """Check the consistency of the inputs"""
 
+        # Clean array
+        if dy is None:
+            t, y = cleaned_array(t, y)
+        else:
+            t, y, dy = cleaned_array(t, y, dy)
+
         duration = max(t) - min(t)
         if duration <= 0:
             raise ValueError("Time duration must positive")
         if (
             numpy.size(y) < 3 or numpy.size(t) < 3
-        ):  # or numpy.size(dy) < 3:
+        ):
             raise ValueError("Too few values in data set")
         if numpy.mean(y) > 1.01 or numpy.mean(y) < 0.99:
             warnings.warn(
@@ -1193,6 +1197,9 @@ class transitleastsquares(object):
             "duration_grid_step", DURATION_GRID_STEP
         )
 
+        self.use_threads = kwargs.get(
+            "use_threads", multiprocessing.cpu_count())
+
         self.per = kwargs.get("per", 13.4)
         self.rp = kwargs.get("rp", (1.42 * R_earth) / R_sun)
         self.a = kwargs.get("a", 23.1)
@@ -1323,6 +1330,11 @@ class transitleastsquares(object):
                 "n_transits_min must be an integer value >= 1"
             )
 
+        if not isinstance(self.use_threads, int) or self.use_threads < 1:
+            raise ValueError(
+                "use_threads must be an integer value >= 1"
+            )
+
         # Assert 0 < T0_fit_margin < 0.1
         if self.T0_fit_margin < 0:
             self.T0_fit_margin = 0
@@ -1381,13 +1393,11 @@ class transitleastsquares(object):
             + str(round(min(periods), 3))
             + " to "
             + str(round(max(periods), 3))
-            + " days, using all "
-            + str(multiprocessing.cpu_count())
+            + " days, using "
+            + str(self.use_threads)
             + " CPU threads"
         )
-        p = multiprocessing.Pool(
-            processes=multiprocessing.cpu_count()
-        )
+        p = multiprocessing.Pool(processes=self.use_threads)
         params = partial(
             self._search_period,
             t=self.t,
@@ -1406,7 +1416,6 @@ class transitleastsquares(object):
         pbar = tqdm(
             total=numpy.size(periods),
             smoothing=0.3,
-            #mininterval=1,
             bar_format=bar_format,
         )
 
@@ -1457,7 +1466,7 @@ class transitleastsquares(object):
             test_statistic_residuals
         ):
             raise ValueError(
-                'No transit were fitted. Try smaller "transit_depth_min"'
+                'No transit were fit. Try smaller "transit_depth_min"'
             )
 
         # Power spectra variants
