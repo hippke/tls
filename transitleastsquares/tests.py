@@ -1,12 +1,27 @@
 import numpy
 import batman
 from transitleastsquares import transitleastsquares, catalog_info, period_grid, \
-    get_duration_grid, FAP
+    get_duration_grid, FAP, cleaned_array
 
 
 if __name__ == '__main__':
+    error = False
     numpy.random.seed(seed=0)  # reproducibility
     print('Starting tests. This should take less than one minute...')
+
+    # Clean array test
+    dirty_array = numpy.ones(10, dtype=object)
+    time_array = numpy.linspace(1, 10, 10)
+    dy_array = numpy.ones(10, dtype=object)
+    dirty_array[1] = None
+    dirty_array[2] = numpy.inf
+    dirty_array[3] = -numpy.inf
+    dirty_array[4] = numpy.nan
+    dirty_array[5] = -99
+
+    t, y, dy = cleaned_array(time_array, dirty_array, dy_array)
+    numpy.testing.assert_equal(len(t), 5)
+    numpy.testing.assert_equal(numpy.sum(t), 35)
 
     numpy.testing.assert_equal(FAP(SDE=2), numpy.nan)
     numpy.testing.assert_equal(FAP(SDE=7), 0.009443778)
@@ -81,6 +96,7 @@ if __name__ == '__main__':
     # 279741377
     # 394137592
     # 261136679
+    
     try:
         (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(TIC_ID=261136679)
         numpy.testing.assert_equal((a, b), (0.4224, 0.3037))
@@ -105,6 +121,7 @@ if __name__ == '__main__':
     numpy.testing.assert_equal(mass, 0.509)
     numpy.testing.assert_equal(radius, 0.498)
     print('Test passed: KIC catalog pull from MAST using kplr')
+    
 
     # Create test data
     start = 48
@@ -132,6 +149,7 @@ if __name__ == '__main__':
     stdev = 10**-6 * ppm
     noise = numpy.random.normal(0, stdev, int(samples))
     y = original_flux + noise
+    y[1] = numpy.nan
     model = transitleastsquares(t, y)
     results = model.power(
         period_min=360,
@@ -144,17 +162,16 @@ if __name__ == '__main__':
     numpy.testing.assert_equal(len(results.transit_times), 3)
 
     numpy.testing.assert_almost_equal(results.period, 365.2582192473641, decimal=5)
-    numpy.testing.assert_almost_equal(results.transit_times[0], 68.00197123958793, decimal=5)
+    numpy.testing.assert_almost_equal(results.transit_times[0], 68.00349264912924, decimal=5)
     numpy.testing.assert_almost_equal(results.depth, 0.999897160189092, decimal=5)
-    numpy.testing.assert_almost_equal(results.duration, 0.5908701024202706, decimal=5)
+    numpy.testing.assert_almost_equal(results.duration, 0.5908251624976649, decimal=5)
     numpy.testing.assert_almost_equal(min(results.chi2red), 0.6719167401148216, decimal=5)
     numpy.testing.assert_almost_equal(results.SDE, 5.691301613227594, decimal=5)
-    numpy.testing.assert_almost_equal(results.snr, 105.53669779138568, decimal=5)
-    numpy.testing.assert_almost_equal(results.odd_even_mismatch, 0.005767912763555982, decimal=5)
-    numpy.testing.assert_almost_equal(results.snr_per_transit[0], 47.52343719198146, decimal=5)
-    numpy.testing.assert_almost_equal(results.snr_pink_per_transit[0], 53.37882224182496, decimal=5)
+    numpy.testing.assert_almost_equal(results.snr, 107.99702838651578, decimal=5)
+    numpy.testing.assert_almost_equal(results.odd_even_mismatch, 0.29083256866622437, decimal=5)
+    numpy.testing.assert_almost_equal(results.snr_per_transit[0], 47.523747079309665, decimal=5)
+    numpy.testing.assert_almost_equal(results.snr_pink_per_transit[0], 53.381329606230615, decimal=5)
     numpy.testing.assert_almost_equal(results.rp_rs, 0.009119851811944274, decimal=5)
-
 
     if not error:
         print('All tests completed successfully.')
