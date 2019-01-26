@@ -10,6 +10,14 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 1.0.15 (planned)
+------------------------------
+:Changed: If no transits fits were performed during a search, a flat SDE-ogram and SDE=0 are returned, and a warning is raised. Previous behavior was to raise an exception and quit. This can happen if ``transit_depth_min`` is set to a large value (e.g., 1000 ppm) and the light curve is flat (e.g., Kepler-quality with good detrending and no transits), so that the threshold causes to transit fits to be performed.
+:Changed: A bug in the command-line version was fixed which caused the search to quit under certain circumstances.
+:Changed: Only useful warnings are printed to the user console. Internal processing issues (e.g., NaN values) are now hidden.
+:Changed: Catalog information (e.g., from the Kepler K2 EPIC catalog) which includes missing values now returns ``NaN`` values. Previously, ``--`` was returned. The ``NaN`` values must still be evaluated by the user before feeding them into a TLS model.
+
+
 Version 1.0.14. (24 January 2019)
 ------------------------------
 
