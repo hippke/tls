@@ -20,28 +20,30 @@ from tqdm import tqdm
 
 # TLS parts
 import transitleastsquares.tls_constants as tls_constants
-from transitleastsquares.stats import FAP as FAP
-from transitleastsquares.stats import rp_rs_from_depth as rp_rs_from_depth
-from transitleastsquares.stats import pink_noise as pink_noise
-from transitleastsquares.catalog import catalog_info as catalog_info
-from transitleastsquares.helpers import resample as resample
-from transitleastsquares.helpers import cleaned_array as cleaned_array
-from transitleastsquares.helpers import transit_mask as transit_mask
-from transitleastsquares.helpers import running_median as running_median
-from transitleastsquares.helpers import running_mean_equal_length as running_mean_equal_length
-from transitleastsquares.helpers import running_mean as running_mean
-from transitleastsquares.helpers import impact_to_inclination as impact_to_inclination
-from transitleastsquares.grid import T14 as T14
-from transitleastsquares.grid import duration_grid as duration_grid
-from transitleastsquares.grid import period_grid as period_grid
-from transitleastsquares.core import get_edge_effect_correction as get_edge_effect_correction
-from transitleastsquares.core import get_lowest_residuals_in_this_duration as get_lowest_residuals_in_this_duration
-from transitleastsquares.core import out_of_transit_residuals as out_of_transit_residuals
-from transitleastsquares.core import fold as fold
-from transitleastsquares.core import foldfast as foldfast
-from transitleastsquares.transit import reference_transit as reference_transit
-from transitleastsquares.transit import fractional_transit as fractional_transit
-from transitleastsquares.transit import get_cache as get_cache
+from transitleastsquares.stats import FAP, rp_rs_from_depth, pink_noise
+from transitleastsquares.catalog import catalog_info
+from transitleastsquares.helpers import (
+    resample,
+    cleaned_array,
+    transit_mask,
+    running_median,
+    running_mean_equal_length,
+    running_mean
+    )
+from transitleastsquares.helpers import impact_to_inclination
+from transitleastsquares.grid import (
+    T14,
+    duration_grid,
+    period_grid
+    )
+from transitleastsquares.core import (
+    get_edge_effect_correction,
+    get_lowest_residuals_in_this_duration,
+    out_of_transit_residuals,
+    fold,
+    foldfast
+    )
+from transitleastsquares.transit import reference_transit, fractional_transit, get_cache
 
 numpy.warnings.filterwarnings('ignore')
 
