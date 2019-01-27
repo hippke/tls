@@ -1,5 +1,5 @@
 import numba
-import tls_constants
+import transitleastsquares.tls_constants as tls_constants
 import numpy
 from numpy import pi, sqrt, arccos, degrees, floor, ceil
 import warnings

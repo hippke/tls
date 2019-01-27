@@ -1,6 +1,6 @@
 import numpy
 from os import path
-import tls_constants
+import transitleastsquares.tls_constants as tls_constants
 
 
 def FAP(SDE):

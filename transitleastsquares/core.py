@@ -1,6 +1,6 @@
 import numpy
 import numba
-import tls_constants
+import transitleastsquares.tls_constants as tls_constants
 
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)

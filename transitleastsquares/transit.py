@@ -1,7 +1,7 @@
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
 import scipy.interpolate
 import numpy
-import tls_constants
+import transitleastsquares.tls_constants as tls_constants
 
 
 def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):

@@ -255,7 +255,7 @@ produces these results:
 
 .. note::
 
-   Missing catalog entries will raise a ValueError. We recommend to catch this exception with a try..except clause, and proceed with default values.
+   Missing catalog entries will be returned as NaN values. These have to be treated on the user side.
 
 
 

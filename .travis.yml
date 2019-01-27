@@ -2,10 +2,8 @@ language: python
 python:
   - "3.5"
   - "3.6"
-  - "3.7-dev"  # 3.7 development branch
-# command to install dependencies
+  - "3.7-dev"
 install:
   - pip install numpy numba batman-package scipy tqdm argparse astroquery
-# command to run tests
 script:
   - python tests.py
