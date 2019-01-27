@@ -1,3 +1,4 @@
- .directory
- .ipynb_checkpoints
- *.directory
+.directory
+.ipynb_checkpoints
+*.directory
+*.ipynb_checkpoints
