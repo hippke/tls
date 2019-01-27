@@ -8,4 +8,4 @@ install:
   - pip install numpy numba batman-package scipy tqdm argparse astroquery
 # command to run tests
 script:
-  - python transitleastsquares/tests.py
+  - python tests.py
