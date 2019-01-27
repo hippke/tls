@@ -5,7 +5,7 @@ python:
   - "3.7-dev"  # 3.7 development branch
 # command to install dependencies
 install:
-  - pip install numpy numba batman-package scipy tqdm argparse kplr astroquery
+  - pip install numpy numba batman-package scipy tqdm argparse astroquery
 # command to run tests
 script:
-  - python tests.py
+  - python transitleastsquares/tests.py

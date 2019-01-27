@@ -16,6 +16,7 @@ Version 1.0.15 (planned)
 :Changed: A bug in the command-line version was fixed which caused the search to quit under certain circumstances.
 :Changed: Only useful warnings are printed to the user console. Internal processing issues (e.g., NaN values) are now hidden.
 :Changed: Catalog information (e.g., from the Kepler K2 EPIC catalog) which includes missing values now returns ``NaN`` values. Previously, ``--`` was returned. The ``NaN`` values must still be evaluated by the user before feeding them into a TLS model.
+:Changed: Catalog information is now entirely pulled using AstroQuery, from Vizier (Kepler K1, K2) and MAST. Dependency to package ``kplr`` has been dropped. This increases reliability as the MAST API was unstable in the past.
 
 
 Version 1.0.14. (24 January 2019)

@@ -19,11 +19,11 @@ To get the latest version, use
 ```
 git clone https://github.com/hippke/tls
 cd tls
-python3 setup.py install
+python setup.py install
 ```
 
 Dependencies:
-Python 3, 
+Python 3,
 [SciPy](https://www.scipy.org/),
 [NumPy](http://www.numpy.org/),
 [numba](http://numba.pydata.org/),
@@ -31,8 +31,7 @@ Python 3,
 [tqdm](https://github.com/tqdm/tqdm),
 optional:
 [argparse](https://docs.python.org/3/library/argparse.html) (for the command line version),
-[kplr](https://github.com/dfm/kplr) (for LD and stellar density priors from Kepler K1),
-[astroquery](https://astroquery.readthedocs.io/en/latest/) (for LD and stellar density priors from Kepler K2).
+[astroquery](https://astroquery.readthedocs.io/en/latest/) (for LD and stellar density priors from Kepler K1, K2, and TESS).
 
 ## Getting started
 Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).

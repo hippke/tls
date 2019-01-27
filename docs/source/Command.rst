@@ -25,7 +25,7 @@ Maximum example:
 
 .. note::
 
-   In the current TLS version, custom transit shapes can not be defined with the command line interface. Use the Python interface instead.
+   In the current TLS version, custom transit shapes can not be defined with the command line interface. If you have a use case for more complex searches using the command line interface, please `open an issue on Github <https://github.com/hippke/tls/issues/new/choose>`_ and I will add it to the next version. As of now, I am not sure if anybody will use this functionality.
 
 
 Config file

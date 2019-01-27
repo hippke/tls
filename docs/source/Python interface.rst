@@ -18,7 +18,7 @@ Define data for a search
    TLS works best with a constant cadence. Variations in the cadence generally have a negligible impact on detection efficiency, but may result in incorrect transit duration estimates. Small variations, e.g. from the barycentering of the Kepler satellite, can usually be neglected.
 
 .. note::
-   Gaps in the data during a transit may decrease detection efficiency. The effect becomes negligible for a large number of transits (e.g., 20), but may be relevant in case of a few (e.g., 3) transits. Then, sorting the data points in phase space may result in an asymmetric transit shape, reducing detection efficiency when using normal (symmetric) transit shape templates. 
+   Gaps in the data during a transit may decrease detection efficiency. The effect becomes negligible for a large number of transits (e.g., 20), but may be relevant in case of a few (e.g., 3) transits. Then, sorting the data points in phase space may result in an asymmetric transit shape, reducing detection efficiency when using normal (symmetric) transit shape templates.
 
 .. note::
    The time series must be **in units of days**. This is not a chicanery, but a necessity based on the physical model which is used to reduce the parameter space. The unit *day* is a logic choice as orbital periods are typically given in *days*. The Kepler mission also used this unit.
@@ -46,11 +46,11 @@ Parameters used for the period search grid and the transit duration search grid.
 .. note::
 
    A larger range of stellar radius and mass allows for a wider variety of transits to be found at the expense of computational effort
- 
 
 
-Physical parameters to create a 
-`Mandel & Agol (2002) <https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract>`_ transit model using a subset of the 
+
+Physical parameters to create a
+`Mandel & Agol (2002) <https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract>`_ transit model using a subset of the
 `batman module <https://www.cfa.harvard.edu/~lkreidberg/batman/>`_  and syntax (`Kreidberg 2015 <https://ui.adsabs.harvard.edu/#abs/2015PASP..127.1161K/abstract>`_). Available defaults are described below.
 
 :per: *(float)* Orbital period (in units of days). Default: X.
@@ -92,7 +92,7 @@ The TLS spectra:
 :power: *(array)* The power spectrum per period as defined in the TLS paper. We recommend to use this spectrum to assess transit signals. It is the median-smoothed ``power_raw`` spectrum.
 :power_raw: *(array)* The raw power spectrum (without median smoothing) as defined in the TLS paper
 :SR: *(array)* Signal residue similar to the BLS SR
-:chi2: *(array)* Minimum chi-squared (:math:`\chi^2`) per period 
+:chi2: *(array)* Minimum chi-squared (:math:`\chi^2`) per period
 :chi2red: *(array)* Minimum chi-squared per degree of freedom (:math:`\chi^2_{\nu}=\chi^2/\nu`) per period, where  :math:`\nu=n-m` with :math:`n` as the number of observations, and :math:`m=4` as the number of fitted parameters (period, T0, transit duration, transit depth).
 
 The TLS statistics:
@@ -122,7 +122,7 @@ Additional transit statistics based on the ``power`` spectrum:
 :transit_times: *(array)* The mid-transit time for each transit within the time series
 :per_transit_count: *(array)* Number of data points during each unique transit
 :transit_count: *(int)* The number of transits
-:distinct_transit_count: *(int)* The number of transits with intransit data points 
+:distinct_transit_count: *(int)* The number of transits with intransit data points
 :empty_transit_count: *(int)* The number of transits with no intransit data points
 :FAP:  *(float)* The false alarm probability for the SDE assuming white noise. Returns NaN for FAP>0.1.
 
@@ -156,14 +156,14 @@ with
 
 .. math:: A=\frac{(2\pi)^{2/3}}{\pi }\frac{R}{(GM)^{1/3}}\frac{1}{S \times OS}
 
-where :math:`M` and :math:`R` are the stellar mass and radius, :math:`G` is the gravitational constant, :math:`S` is the time span of the dataset and :math:`OS` is the oversampling parameter to ensure that the peak is not missed between frequency samples. The search edges can be found at the Roche limit, 
+where :math:`M` and :math:`R` are the stellar mass and radius, :math:`G` is the gravitational constant, :math:`S` is the time span of the dataset and :math:`OS` is the oversampling parameter to ensure that the peak is not missed between frequency samples. The search edges can be found at the Roche limit,
 
 .. math:: f_{\rm max}=\frac{1}{2 \pi} \sqrt{\frac{GM}{(3R)^3}}; f_{\rm min}=2/S
 
 .. function:: period_grid(parameters)
 
 :R_star: Stellar radius (in units of solar radii)
-:M_star: Stellar mass (in units of solar masses) 
+:M_star: Stellar mass (in units of solar masses)
 :time_span: Duration of time series (in units of days)
 :period_min:  Minimum trial period (in units of days). Optional.
 :period_max: Maximum trial period (in units of days). Optional.
@@ -190,7 +190,7 @@ returns a period grid with 32172 values:
 
 .. note::
     To avoid generating an infinitely large period_grid, parameters are auto-enforced to the ranges ``0.1 < R_star < 10000`` and ``0.01 < M_star < 1000``. Some combinations of mostly implausible values, such as ``R_star=1`` with ``M_star=5`` yield empty period grids. If the grid size is less than 100 values, the function returns the default grid ``R_star=M_star=1``. Very short time series (less than a few days of duration) default to a grid size with a span of 5 days.
-   
+
 
 
 
@@ -204,7 +204,7 @@ This function provides priors for stellar mass, radius, and limb darkening for s
 
 :EPIC_ID: *(int)* The EPIC catalog ID (K2, Ecliptic Plane Input Catalog)
 :TIC_ID: *(int)* The TIC catalog ID (TESS Input Catalog)
-:KOI_ID: *(str)* The Kepler Object of Interest ID (Kepler K1 Input Catalog), e.g. '952.01'
+:KIC_ID: *(int)* The Kepler Input Catalog ID (Kepler K1 Input Catalog)
 
 Returns
 
@@ -221,13 +221,13 @@ Returns
    The matching between the stellar parameter table and the limb darkening table is performed by first finding the nearest :math:`T_{\rm eff}`, and subsequently the nearest :math:`{\rm logg}`.
 
 .. note::
-    **Data sources:** 
+    **Data sources:**
 
-    K1 data and priors are pulled using `kplr <http://dfm.io/kplr/>`_.
+    K1 data are pulled from the catalog for Revised Stellar Properties of Kepler Targets (`Mathur et al. 2017 <https://ui.adsabs.harvard.edu/?#abs/2017ApJS..229...30M>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract>`_. Data are pulled from Vizier using AstroQuery and matched to limb darkening values saved locally in a CSV file within the TLS package.
 
-    K2 data are collated from the K2 Ecliptic Plane Input Catalog (`Huber et al. 2016 <https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract>`_. Data are pulled from local CSV files within the TLS package.
+    K2 data are collated from the K2 Ecliptic Plane Input Catalog (`Huber et al. 2016 <https://ui.adsabs.harvard.edu/#abs/2016ApJS..224....2H/abstract>`_) with limb darkening coefficients from `Claret et al. (2012, 2013) <https://ui.adsabs.harvard.edu/#abs/2012A%26A...546A..14C/abstract>`_. Data are pulled from Vizier using AstroQuery and matched to limb darkening values saved locally in a CSV file within the TLS package.
 
-    TESS data are collated from the TESS Input Catalog (`TIC, Stassun et al. 2018 <http://adsabs.harvard.edu/abs/2017arXiv170600495S>`_) with limb darkening coefficients from `Claret et al. (2017) <https://ui.adsabs.harvard.edu/?#abs/2017A%26A...600A..30C>`_. Due to the large size of the catalog, data are not saved locally. TIC data are pulled from `MAST <https://archive.stsci.edu/tess/>`_ and matched to limb darkening values saved locally in a CSV file within the TLS package.
+    TESS data are collated from the TESS Input Catalog (`TIC, Stassun et al. 2018 <http://adsabs.harvard.edu/abs/2017arXiv170600495S>`_) with limb darkening coefficients from `Claret et al. (2017) <https://ui.adsabs.harvard.edu/?#abs/2017A%26A...600A..30C>`_. TIC data are pulled from `MAST <https://archive.stsci.edu/tess/>`_ and matched to limb darkening values saved locally in a CSV file within the TLS package.
 
 
 .. warning::
@@ -268,13 +268,13 @@ Can be used to plot in-transit points in a different color, or to cleanse the da
 .. function:: transit_mask(t, period, duration, T0)
 
 :t: *(array)* Time series of the data (in units of days)
-:period: *(float)* Transit period e.g. from results: ``period`` 
+:period: *(float)* Transit period e.g. from results: ``period``
 :duration: *(float)* Transit duration e.g. from results: ``duration``
 :T0: *(float)* Mid-transit of first transit e.g. from results: ``T0``
 
 Returns
 
-:intransit: *(numpy array mask)* A numpy array mask (of True/False values) for each data point in the time series. ``True`` values are in-transit. 
+:intransit: *(numpy array mask)* A numpy array mask (of True/False values) for each data point in the time series. ``True`` values are in-transit.
 
 
 Example usage:
@@ -319,13 +319,13 @@ Example usage:
     dirty_array[5] = -99
     print(time_array)
     print(dirty_array)
-    
+
     >>> [ 1.  2.  3.  4.  5.  6.  7.  8.  9. 10.]
     >>> [1 None inf -inf nan -99 1 1 1 1]
-    
+
     t, y, dy = cleaned_array(time_array, dirty_array, dy_array)
     print(t)
-    print(y) 
+    print(y)
     >>> [ 1.  7.  8.  9. 10.]
     >>> [1. 1. 1. 1. 1.]
 
