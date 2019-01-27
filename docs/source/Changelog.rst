@@ -10,7 +10,7 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
-Version 1.0.15 (planned)
+Version 1.0.15 (27 January 2019)
 ------------------------------
 :Changed: If no transits fits were performed during a search, a flat SDE-ogram and SDE=0 are returned, and a warning is raised. Previous behavior was to raise an exception and quit. This can happen if ``transit_depth_min`` is set to a large value (e.g., 1000 ppm) and the light curve is flat (e.g., Kepler-quality with good detrending and no transits), so that the threshold causes no transit fits to be performed.
 :Changed: A bug in the command-line version was fixed which caused the search to quit under certain circumstances.
