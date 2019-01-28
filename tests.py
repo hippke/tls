@@ -110,6 +110,7 @@ if __name__ == "__main__":
     # 394137592
     # 261136679
 
+    """
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
         TIC_ID=279741377
     )
@@ -159,7 +160,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(radius_min, 2.304)
 
     print("Test passed: KIC catalog pull from Vizier using astroquery")
-
+    """
 
     # Create test data
     start = 48
@@ -196,8 +197,12 @@ if __name__ == "__main__":
         period_max=370,
         transit_depth_min=10 * 10 ** -6,
         oversampling_factor=5,
-        duration_grid_step=1.02,
+        duration_grid_step=1.02
+
     )
+
+    print(results.chi2)
+    print('chi2_min', results.chi2_min)
 
     numpy.testing.assert_equal(results.per_transit_count[0], 7)
     numpy.testing.assert_equal(len(results.transit_times), 3)
@@ -223,6 +228,63 @@ if __name__ == "__main__":
         results.snr_pink_per_transit[0], 53.381329606230615, decimal=5
     )
     numpy.testing.assert_almost_equal(results.rp_rs, 0.009119851811944274, decimal=5)
+
+    print("Test passed: Synthetic data")
+
+        numpy.random.seed(seed=0)  # reproducibility
+    print("Starting tests...")
+
+    # Create test data
+    start = 48
+    days = 365.25 * 3
+    samples_per_day = 12  # 48
+    samples = int(days * samples_per_day)  # 48
+    t = numpy.linspace(start, start + days, samples)
+    print('samples', samples)
+
+    # Use batman to create transits
+    ma = batman.TransitParams()
+    ma.t0 = (
+        start + 20
+    )  # time of inferior conjunction; first transit is X days after start
+    ma.per = 365.25  # orbital period
+    ma.rp = 6371 / 696342  # 6371 planet radius (in units of stellar radii)
+    ma.a = 217  # semi-major axis (in units of stellar radii)
+    ma.inc = 90  # orbital inclination (in degrees)
+    ma.ecc = 0  # eccentricity
+    ma.w = 90  # longitude of periastron (in degrees)
+    ma.u = [0.5]  # limb darkening coefficients
+    ma.limb_dark = "linear"  # limb darkening model
+    m = batman.TransitModel(ma, t)  # initializes model
+    original_flux = m.light_curve(ma)  # calculates light curve
+
+    # Create noise and merge with flux
+    ppm = 5
+    stdev = 10 ** -6 * ppm
+    noise = numpy.random.normal(0, stdev, int(samples))
+    y = original_flux + noise
+
+    # Inject excess noise near the end of the time series.
+    # When searching without uncertainties, the SDE is 4.827
+    # When searching with uncertainties, the SDE is larger, 5.254. Test passed!
+    noise = numpy.random.normal(0, 10*stdev, 3149)
+    y[10000:] = y[10000:] + noise
+
+    dy = numpy.full(len(y),stdev)
+    dy[10000:] = 10*stdev
+
+    model = transitleastsquares(t, y, dy)
+    results = model.power(
+        period_min=360,
+        period_max=370,
+        oversampling_factor=3,
+        duration_grid_step=1.05,
+        T0_fit_margin=0.2
+    )
+    print('SDE', results.SDE)
+    numpy.testing.assert_almost_equal(results.SDE, 5.254817340391126, decimal=5)
+    print("Test passed: Synthetic data with uncertainties")
+
 
     # Testing transit shapes
     t, y = loadfile("transitleastsquares/EPIC206154641.csv")
