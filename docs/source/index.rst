@@ -13,4 +13,4 @@ The documentation for:
    FAQ
    Submit an issue <https://github.com/hippke/tls/issues>
    Source at Github <https://github.com/hippke/tls>
-   Read the paper <http://>
+   Read the paper <https://arxiv.org/abs/1901.02015>
