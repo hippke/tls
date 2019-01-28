@@ -21,7 +21,6 @@ setup(name='transitleastsquares',
       },
       install_requires=[
           'numpy',
-          'scipy',
           'numba',
           'tqdm',
           'batman-package',
