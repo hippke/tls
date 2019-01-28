@@ -1,7 +1,8 @@
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
-import scipy.interpolate
+#import scipy.interpolate
 import numpy
 import transitleastsquares.tls_constants as tls_constants
+from transitleastsquares.interpolation import interp1d
 
 
 def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
@@ -30,9 +31,19 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     intransit_time = t[idx_first : -idx_first + 1]
 
     # Downsample (bin) to target sample size
+    """
     f = scipy.interpolate.interp1d(intransit_time, intransit_flux, assume_sorted=True)
     xnew = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
     downsampled_intransit_flux = f(xnew)
+    """
+    # Interpolate to shorter interval - new method without scipy
+    #reference_time = numpy.linspace(-0.5, 0.5, samples)
+    #occupied_samples = int((duration / maxwidth) * samples)
+    x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
+    f = interp1d(x_new, intransit_time)
+    downsampled_intransit_flux = f(intransit_flux)
+
+
 
     # Rescale to height [0..1]
     rescaled = (numpy.min(downsampled_intransit_flux) - downsampled_intransit_flux) / (
@@ -59,7 +70,7 @@ def fractional_transit(
 ):
     """Returns a scaled reference transit with fractional width and depth"""
 
-    reference_time = numpy.linspace(-0.5, 0.5, samples)
+    
 
     if cached_reference_transit is None:
         reference_flux = reference_transit(
@@ -77,14 +88,25 @@ def fractional_transit(
         reference_flux = cached_reference_transit
 
     # Interpolate to shorter interval
+    """
+    reference_time = numpy.linspace(-0.5, 0.5, samples)
     f = scipy.interpolate.interp1d(reference_time, reference_flux, assume_sorted=True)
     occupied_samples = int((duration / maxwidth) * samples)
-    ynew = f(numpy.linspace(-0.5, 0.5, occupied_samples))
+    y_new = f(numpy.linspace(-0.5, 0.5, occupied_samples))
+    """
+
+    # Interpolate to shorter interval - new method without scipy
+    reference_time = numpy.linspace(-0.5, 0.5, samples)
+    occupied_samples = int((duration / maxwidth) * samples)
+    x_new = numpy.linspace(-0.5, 0.5, occupied_samples)
+    f = interp1d(x_new, reference_time)
+    y_new = f(reference_flux)
+    
 
     # Patch ends with ones ("1")
     missing_samples = samples - occupied_samples
     emtpy_segment = numpy.ones(int(missing_samples * 0.5))
-    result = numpy.append(emtpy_segment, ynew)
+    result = numpy.append(emtpy_segment, y_new)
     result = numpy.append(result, emtpy_segment)
     if numpy.size(result) < samples:  # If odd number of samples
         result = numpy.append(result, numpy.ones(1))
