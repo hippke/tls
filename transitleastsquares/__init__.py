@@ -64,6 +64,9 @@ class transitleastsquares(object):
         else:
             t, y, dy = cleaned_array(t, y, dy)
 
+        # Normalize dy to act as weights in least squares calculatio
+        dy = dy / numpy.mean(dy)
+
         duration = max(t) - min(t)
         if duration <= 0:
             raise ValueError("Time duration must positive")
