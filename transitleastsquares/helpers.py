@@ -4,10 +4,20 @@ from numpy import pi, sqrt, arccos, degrees, floor, ceil
 
 
 def resample(time, flux, factor):
+    """
+    import scipy
     f = scipy.interpolate.interp1d(time, flux, assume_sorted=True)
     time_grid = int(len(flux) / factor)
     time_resampled = numpy.linspace(min(time), max(time), time_grid)
     flux_resampled = f(time_resampled)
+    """
+
+    # New method without scipy
+    time_grid = int(len(flux) / factor)
+    time_resampled = numpy.linspace(min(time), max(time), time_grid)
+    f = interp1d(time_resampled, time)
+    flux_resampled = f(flux)
+
     return time_resampled, flux_resampled
 
 
