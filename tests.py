@@ -201,9 +201,6 @@ if __name__ == "__main__":
 
     )
 
-    print(results.chi2)
-    print('chi2_min', results.chi2_min)
-
     numpy.testing.assert_equal(results.per_transit_count[0], 7)
     numpy.testing.assert_equal(len(results.transit_times), 3)
 
