@@ -14,6 +14,7 @@ Version 1.0.16 (planned)
 ------------------------------
 
 :Fixed: A bug which caused to return an empty SDE-ogram if very small uncertainties ``dy`` were provided.
+:Changed: Switched linear interpolation code of model shapes to a numba implementation. It is 2x faster, 20ms --> 10ms which is currently irrelevant if the shape is calculated only once per light curve, but will become relevant when the compensation for morphological light-curve distortions will be implemented. Then, the shapes will be re-calculated many times for a range of periods. Another advantage is that the dependency on scipy can now be removed. Scipy is still required for testing, however.
 
 
 Version 1.0.15 (27 January 2019)
