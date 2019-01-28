@@ -231,7 +231,7 @@ if __name__ == "__main__":
 
     print("Test passed: Synthetic data")
 
-        numpy.random.seed(seed=0)  # reproducibility
+    numpy.random.seed(seed=0)  # reproducibility
     print("Starting tests...")
 
     # Create test data
