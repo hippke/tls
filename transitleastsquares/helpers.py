@@ -1,6 +1,7 @@
 import numba
 import numpy
-from numpy import pi, sqrt, arccos, degrees, floor, ceil
+from numpy import arccos, degrees
+from transitleastsquares.interpolation import interp1d
 
 
 def resample(time, flux, factor):
