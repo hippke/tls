@@ -63,9 +63,8 @@ class transitleastsquares(object):
             t, y = cleaned_array(t, y)
         else:
             t, y, dy = cleaned_array(t, y, dy)
-
-        # Normalize dy to act as weights in least squares calculatio
-        dy = dy / numpy.mean(dy)
+            # Normalize dy to act as weights in least squares calculatio
+            dy = dy / numpy.mean(dy)
 
         duration = max(t) - min(t)
         if duration <= 0:
