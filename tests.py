@@ -16,6 +16,7 @@ from transitleastsquares import (
 def loadfile(filename):
     data = numpy.genfromtxt(
             filename,
+            delimiter=",",
             dtype="f8, f8",
             names=["t", "y"]
         )
