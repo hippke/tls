@@ -325,7 +325,7 @@ if __name__ == "__main__":
 
 
     # Testing transit shapes
-    t, y = loadfile("transitleastsquares/EPIC206154641.tsv")
+    t, y = loadfile("transitleastsquares/EPIC206154641.csv")
     trend = scipy.signal.medfilt(y, 25)
     y_filt = y / trend
 
@@ -367,7 +367,7 @@ if __name__ == "__main__":
     print("Test passed: Box-shaped")
 
     # Multi-run
-    t, y = loadfile("transitleastsquares/EPIC201367065.tsv")
+    t, y = loadfile("transitleastsquares/EPIC201367065.csv")
     trend = scipy.signal.medfilt(y, 25)
     y_filt = y / trend
 
