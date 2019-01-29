@@ -85,14 +85,14 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
     if (TIC_ID is not None) and (KIC_ID is not None):
         raise ValueError("Only one ID allowed")
 
-    try:
-        from astroquery.vizier import Vizier
-        print('Imported astroquery.vizier')
-        from astroquery.mast import Catalogs
-        print('Imported astroquery.mast')
-    except:
-        raise ImportError(
-            'Package astroquery required but failed to import'
+    #try:
+    from astroquery.vizier import Vizier
+    print('Imported astroquery.vizier')
+    from astroquery.mast import Catalogs
+    print('Imported astroquery.mast')
+    #except:
+    #    raise ImportError(
+    #        'Package astroquery required but failed to import'
         )
     
     # KOI CASE (Kepler K1)
