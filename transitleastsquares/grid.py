@@ -5,7 +5,7 @@ from numpy import pi, sqrt, arccos, degrees, floor, ceil
 import warnings
 
 
-#@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True)
 def T14(
     R_s, M_s, P, upper_limit=tls_constants.FRACTIONAL_TRANSIT_DURATION_MAX, small=False
 ):
@@ -31,9 +31,9 @@ def T14(
     return result
 
 
-def duration_grid(periods, shortest, log_step=1.1):
-    duration_max = T14(R_s=3.50, M_s=1.0, P=min(periods))
-    duration_min = T14(R_s=0.13, M_s=0.1, P=max(periods))
+def duration_grid(periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
+    duration_max = T14(R_s=tls_constants.R_STAR_MAX, M_s=tls_constants.M_STAR_MAX, P=min(periods))
+    duration_min = T14(R_s=tls_constants.R_STAR_MIN, M_s=tls_constants.M_STAR_MIN, P=max(periods))
     durations = [duration_min]
     current_depth = duration_min
     while current_depth * log_step < duration_max:
@@ -49,7 +49,7 @@ def period_grid(
     time_span,
     period_min=0,
     period_max=float("inf"),
-    oversampling_factor=2,
+    oversampling_factor=tls_constants.OVERSAMPLING_FACTOR,
     n_transits_min=tls_constants.N_TRANSITS_MIN,
 ):
     """Returns array of optimal sampling periods for transit search in light curves
