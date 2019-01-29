@@ -10,6 +10,11 @@ def catalog_info_KIC(KIC_ID):
         raise TypeError(
             'KIC_ID ID must be of type "int"'
         )
+    try:
+        from astroquery.vizier import Vizier
+    except:
+        raise ImportError('Package astroquery required but failed to import')
+
     columns = ["Teff", "log(g)", "Rad", "E_Rad", "e_Rad", "Mass", "E_Mass", "e_Mass"]
     catalog = "J/ApJS/229/30/catalog"
     result = Vizier(columns=columns).query_constraints(KIC=KIC_ID, catalog=catalog)[0].as_array()
@@ -27,6 +32,10 @@ def catalog_info_KIC(KIC_ID):
 def catalog_info_EPIC(EPIC_ID):
     """Takes EPIC_ID, returns stellar information from online catalog using Vizier"""
 
+    try:
+        from astroquery.vizier import Vizier
+    except:
+        raise ImportError('Package astroquery required but failed to import')
     if type(EPIC_ID) is not int:
         raise TypeError(
                 'EPIC_ID ID must be of type "int"'
@@ -55,6 +64,11 @@ def catalog_info_TIC(TIC_ID):
             raise TypeError(
                 'TIC_ID ID must be of type "int"'
             )
+    try:
+        from astroquery.mast import Catalogs
+    except:
+        raise ImportError('Package astroquery required but failed to import')
+
     result = Catalogs.query_criteria(catalog="Tic", ID=TIC_ID).as_array()
     Teff = result[0][64]
     logg = result[0][66]
@@ -85,16 +99,6 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
     if (TIC_ID is not None) and (KIC_ID is not None):
         raise ValueError("Only one ID allowed")
 
-    #try:
-    from astroquery.vizier import Vizier
-    print('Imported astroquery.vizier')
-    from astroquery.mast import Catalogs
-    print('Imported astroquery.mast')
-    #except:
-    #    raise ImportError(
-    #        'Package astroquery required but failed to import'
-        )
-    
     # KOI CASE (Kepler K1)
     if KIC_ID is not None:
         Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_KIC(KIC_ID)
