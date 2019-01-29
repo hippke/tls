@@ -8,7 +8,6 @@ def FAP(SDE):
     data = numpy.genfromtxt(
         path.join(tls_constants.resources_dir, "fap.csv"),
         dtype="f8, f8",
-        delimiter=",",
         names=["FAP", "SDE"],
     )
     return data["FAP"][numpy.argmax(data["SDE"] > SDE)]
@@ -71,3 +70,30 @@ def pink_noise(data, width):
     for i in range(datapoints):
         std += numpy.std(data[i : i + width]) / width ** 0.5
     return std / datapoints
+
+
+def period_uncertainty(periods, power):
+    # Determine estimate for uncertainty in period
+        # Method: Full width at half maximum
+    try:
+        # Upper limit
+        index_highest_power = numpy.argmax(power)
+        idx = index_highest_power
+        while True:
+            idx += 1
+            if power[idx] <= 0.5 * power[index_highest_power]:
+                idx_upper = idx
+                break
+        # Lower limit
+        idx = index_highest_power
+        while True:
+            idx -= 1
+            if power[idx] <= 0.5 * power[index_highest_power]:
+                idx_lower = idx
+                break
+        period_uncertainty = 0.5 * (
+            periods[idx_upper] - periods[idx_lower]
+        )
+    except:
+        period_uncertainty = float("inf")
+    return period_uncertainty
