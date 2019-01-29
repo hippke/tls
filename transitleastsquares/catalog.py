@@ -87,7 +87,9 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
 
     try:
         from astroquery.vizier import Vizier
+        print('Imported astroquery.vizier')
         from astroquery.mast import Catalogs
+        print('Imported astroquery.mast')
     except:
         raise ImportError(
             'Package astroquery required but failed to import'
