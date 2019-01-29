@@ -24,14 +24,14 @@ from transitleastsquares.stats import (
     FAP,
     rp_rs_from_depth,
     pink_noise,
-    period_uncertainty
+    period_uncertainty,
+    spectra
     )
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import (
     resample,
     cleaned_array,
     transit_mask,
-    running_median
     )
 from transitleastsquares.helpers import impact_to_inclination
 from transitleastsquares.grid import (
@@ -257,7 +257,6 @@ class transitleastsquares(object):
         # Result lists now (faster), convert to numpy array later
         test_statistic_periods = []
         test_statistic_residuals = []
-        test_statistic_rolls = []
         test_statistic_rows = []
         test_statistic_depths = []
 
@@ -337,12 +336,11 @@ class transitleastsquares(object):
             warnings.warn('No transit were fit. Try smaller "transit_depth_min"')
         else:
             no_transits_were_fit = False
-            #raise ValueError('No transit were fit. Try smaller "transit_depth_min"')
 
         # Power spectra variants
         chi2 = test_statistic_residuals
-        chi2red = test_statistic_residuals
-        chi2red = chi2red / (len(self.t) - 4)
+        degrees_of_freedom = 4
+        chi2red = test_statistic_residuals / (len(self.t) - degrees_of_freedom)
         chi2_min = numpy.min(chi2)
         chi2red_min = numpy.min(chi2red)
 
@@ -355,61 +353,10 @@ class transitleastsquares(object):
             SDE = 0
             SDE_raw = 0
         else:
-            SR = numpy.min(chi2) / chi2
-            SDE_raw = (1 - numpy.mean(SR)) / numpy.std(SR)
-
-            # Scale SDE_power from 0 to SDE_raw
-            power_raw = SR - numpy.mean(SR)  # shift down to the mean being zero
-            scale = SDE_raw / numpy.max(power_raw)  # scale factor to touch max=SDE_raw
-            power_raw = power_raw * scale
-
-            # Detrended SDE, named "power"
-            kernel = self.oversampling_factor * tls_constants.SDE_MEDIAN_KERNEL_SIZE
-            if kernel % 2 == 0:
-                kernel = kernel + 1
-            if len(power_raw) > 2 * kernel:
-                my_median = running_median(power_raw, kernel)
-                power = power_raw - my_median
-                # Re-normalize to range between median = 0 and peak = SDE
-                # shift down to the mean being zero
-                power = power - numpy.mean(power)
-                SDE = numpy.max(power / numpy.std(power))
-                # scale factor to touch max=SDE
-                scale = SDE / numpy.max(power)
-                power = power * scale
-            else:
-                power = power_raw
-                SDE = SDE_raw
-
+            SR, power_raw, power, SDE_raw, SDE = spectra(chi2, self.oversampling_factor)
             index_highest_power = numpy.argmax(power)
             period = test_statistic_periods[index_highest_power]
             depth = test_statistic_depths[index_highest_power]
-
-        """
-        # Determine estimate for uncertainty in period
-        # Method: Full width at half maximum
-        try:
-            # Upper limit
-            idx = index_highest_power
-            while True:
-                idx += 1
-                if power[idx] <= 0.5 * power[index_highest_power]:
-                    idx_upper = idx
-                    break
-            # Lower limit
-            idx = index_highest_power
-            while True:
-                idx -= 1
-                if power[idx] <= 0.5 * power[index_highest_power]:
-                    idx_lower = idx
-                    break
-            period_uncertainty = 0.5 * (
-                test_statistic_periods[idx_upper] - test_statistic_periods[idx_lower]
-            )
-        except:
-            period_uncertainty = float("inf")
-
-        """
 
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
