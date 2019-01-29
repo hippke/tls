@@ -119,7 +119,6 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(max(periods), 10)
     numpy.testing.assert_almost_equal(min(periods), 0.60155759)
     numpy.testing.assert_equal(len(periods), 1716)
-    print("Test passed: period_grid")
 
     periods = period_grid(
         R_star=0.1,  # R_sun
@@ -240,12 +239,11 @@ if __name__ == "__main__":
         transit_depth_min=10 * 10 ** -6,
         oversampling_factor=5,
         duration_grid_step=1.02
-
     )
-
+    
+    numpy.testing.assert_almost_equal(results.period_uncertainty, 0.216212529678387, decimal=5)
     numpy.testing.assert_equal(results.per_transit_count[0], 7)
     numpy.testing.assert_equal(len(results.transit_times), 3)
-
     numpy.testing.assert_almost_equal(results.period, 365.2582192473641, decimal=5)
     numpy.testing.assert_almost_equal(
         results.transit_times[0], 68.00349264912924, decimal=5
