@@ -2,6 +2,8 @@ import numpy
 from os import path
 import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.helpers import running_median
+from tqdm import tqdm
+from transitleastsquares.core import fold
 
 
 def FAP(SDE):
@@ -130,3 +132,71 @@ def spectra(chi2, oversampling_factor):
 
     return SR, power, power_raw, SDE_raw, SDE
 
+
+def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
+
+    #signal = lc_arr[best_row]  ### signal = lc_arr[best_row]
+    dur = len(signal)
+    scale = tls_constants.SIGNAL_DEPTH / (1 - depth)  ### depth
+    signal = 1 - ((1 - signal) / scale)
+    samples_per_period = numpy.size(y)  ### y
+
+    if T0_fit_margin == 0:
+        points = samples_per_period
+    else:
+        step_factor = T0_fit_margin * dur
+        points = int(samples_per_period / step_factor)
+    if points > samples_per_period:
+        points = samples_per_period
+
+    # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
+    T0_array = numpy.linspace(
+        start=numpy.min(t),    ### t
+        stop=numpy.min(t) + period,    ### period
+        num=points,  # samples_per_period
+    )
+
+    # Avoid showing progress bar when expected runtime is short
+    if points < tls_constants.PROGRESSBAR_THRESHOLD:
+        show_progress_info = False
+    else:
+        show_progress_info = True
+
+    residuals_lowest = float("inf")
+    T0 = 0
+
+    if show_progress_info:
+        print("Searching for best T0 for period", format(period, ".5f"), "days")
+        pbar2 = tqdm(total=numpy.size(T0_array))
+    signal_ootr = numpy.ones(len(y[dur:]))
+
+    # Future speed improvement possible: Add multiprocessing. Will be slower for
+    # short data and T0_FIT_MARGIN > 0.01, but faster for large data with dense
+    # sampling (T0_FIT_MARGIN=0)
+    for Tx in T0_array:
+        phases = fold(time=t, period=period, T0=Tx)
+        sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
+        phases = phases[sort_index]
+        flux = y[sort_index]
+        dy = dy[sort_index]
+
+        # Roll so that the signal starts at index 0
+        # Numpy roll is slow, so we replace it with less elegant concatenate
+        # flux = numpy.roll(flux, roll_cadences)
+        # dy = numpy.roll(dy, roll_cadences)
+        roll_cadences = int(dur / 2) + 1
+        flux = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
+        dy = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
+
+        residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
+        residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
+        residuals_total = residuals_intransit + residuals_ootr
+
+        if show_progress_info:
+            pbar2.update(1)
+        if residuals_total < residuals_lowest:
+            residuals_lowest = residuals_total
+            T0 = Tx
+    if show_progress_info:
+        pbar2.close()
+    return T0

@@ -25,7 +25,8 @@ from transitleastsquares.stats import (
     rp_rs_from_depth,
     pink_noise,
     period_uncertainty,
-    spectra
+    spectra,
+    final_T0_fit
     )
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import (
@@ -364,70 +365,15 @@ class transitleastsquares(object):
         if no_transits_were_fit:
             T0 = 0
         else:
-            signal = lc_arr[best_row]
-            dur = len(signal)
-            scale = tls_constants.SIGNAL_DEPTH / (1 - depth)
-            signal = 1 - ((1 - signal) / scale)
-            samples_per_period = numpy.size(self.y)
-
-            if self.T0_fit_margin == 0:
-                points = samples_per_period
-            else:
-                step_factor = self.T0_fit_margin * dur
-                points = int(samples_per_period / step_factor)
-            if points > samples_per_period:
-                points = samples_per_period
-
-            # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
-            T0_array = numpy.linspace(
-                start=numpy.min(self.t),
-                stop=numpy.min(self.t) + period,
-                num=points,  # samples_per_period
-            )
-
-            # Avoid showing progress bar when expected runtime is short
-            if points < tls_constants.PROGRESSBAR_THRESHOLD:
-                show_progress_info = False
-            else:
-                show_progress_info = True
-
-            residuals_lowest = float("inf")
-            T0 = 0
-
-            if show_progress_info:
-                print("Searching for best T0 for period", format(period, ".5f"), "days")
-                pbar2 = tqdm(total=numpy.size(T0_array))
-            signal_ootr = numpy.ones(len(self.y[dur:]))
-
-            # Future speed improvement possible: Add multiprocessing. Will be slower for
-            # short data and T0_FIT_MARGIN > 0.01, but faster for large data with dense
-            # sampling (T0_FIT_MARGIN=0)
-            for Tx in T0_array:
-                phases = fold(time=self.t, period=period, T0=Tx)
-                sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
-                phases = phases[sort_index]
-                flux = self.y[sort_index]
-                dy = self.dy[sort_index]
-
-                # Roll so that the signal starts at index 0
-                # Numpy roll is slow, so we replace it with less elegant concatenate
-                # flux = numpy.roll(flux, roll_cadences)
-                # dy = numpy.roll(dy, roll_cadences)
-                roll_cadences = int(dur / 2) + 1
-                flux = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
-                dy = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
-
-                residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
-                residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
-                residuals_total = residuals_intransit + residuals_ootr
-
-                if show_progress_info:
-                    pbar2.update(1)
-                if residuals_total < residuals_lowest:
-                    residuals_lowest = residuals_total
-                    T0 = Tx
-            if show_progress_info:
-                pbar2.close()
+            T0 = final_T0_fit(
+                signal=lc_arr[best_row],
+                depth=depth,
+                t=self.t,
+                y=self.y,
+                dy=self.dy,
+                period=period,
+                T0_fit_margin=self.T0_fit_margin
+                )
 
         # Calculate all mid-transit times
         if T0 < min(self.t):
