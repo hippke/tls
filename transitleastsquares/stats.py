@@ -8,6 +8,7 @@ def FAP(SDE):
     data = numpy.genfromtxt(
         path.join(tls_constants.resources_dir, "fap.csv"),
         dtype="f8, f8",
+        delimiter=",",
         names=["FAP", "SDE"],
     )
     return data["FAP"][numpy.argmax(data["SDE"] > SDE)]
