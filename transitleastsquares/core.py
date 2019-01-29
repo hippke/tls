@@ -64,9 +64,7 @@ def get_lowest_residuals_in_this_duration(
             for j in range(len(signal)):
                 sigi = (1 - signal[j]) * reverse_scale
                 intransit_residual += ((data[j] - (1 - sigi)) ** 2) * dy[j]
-
             current_stat = intransit_residual + ootr[i] - summed_edge_effect_correction
-
             if current_stat < summed_residual_in_rows:
                 summed_residual_in_rows = current_stat
                 best_row = chosen_transit_row
@@ -74,7 +72,7 @@ def get_lowest_residuals_in_this_duration(
 
     return summed_residual_in_rows, best_row, best_depth
 
-# ootr_efficient out_of_transit_residuals
+
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def out_of_transit_residuals(data, width_signal, dy):
     chi2 = numpy.zeros(len(data) - width_signal + 1)
