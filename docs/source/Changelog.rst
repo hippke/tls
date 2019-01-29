@@ -10,7 +10,7 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
-Version 1.0.16 (planned)
+Version 1.0.16 (29 January 2019)
 ------------------------------
 
 :Fixed: A bug which caused to return an empty SDE-ogram if very small uncertainties ``dy`` were provided.
