@@ -89,12 +89,12 @@ if __name__ == "__main__":
     periods = period_grid(R_star=1, M_star=1, time_span=0.1)  # R_sun  # M_sun  # days
     numpy.testing.assert_almost_equal(max(periods), 2.4999999999999987)
     numpy.testing.assert_almost_equal(min(periods), 0.6002621413799498)
-    numpy.testing.assert_equal(len(periods), 179)
+    numpy.testing.assert_equal(len(periods), 268)
 
     periods = period_grid(R_star=1, M_star=1, time_span=20)  # R_sun  # M_sun  # days
     numpy.testing.assert_almost_equal(max(periods), 10)
-    numpy.testing.assert_almost_equal(min(periods), 0.6009180713191087)
-    numpy.testing.assert_equal(len(periods), 1145)
+    numpy.testing.assert_almost_equal(min(periods), 0.6015575922909607)
+    numpy.testing.assert_equal(len(periods), 1716)
 
     periods = period_grid(
         R_star=5,  # R_sun
@@ -105,8 +105,8 @@ if __name__ == "__main__":
         oversampling_factor=3,
     )
     numpy.testing.assert_almost_equal(max(periods), 10)
-    numpy.testing.assert_almost_equal(min(periods), 0.6009180713191087)
-    numpy.testing.assert_equal(len(periods), 1145)
+    numpy.testing.assert_almost_equal(min(periods), 0.6015575922909607)
+    numpy.testing.assert_equal(len(periods), 1716)
 
     periods = period_grid(
         R_star=1,  # R_sun
@@ -145,7 +145,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(max(durations), 0.12)
     numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)
     numpy.testing.assert_equal(len(durations), 49)
-    print("Test passed: get_duration_grid")
+    print("Test passed: duration_grid")
 
     # 266980320
     # 279741377
