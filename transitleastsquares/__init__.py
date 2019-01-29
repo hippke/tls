@@ -20,28 +20,31 @@ from tqdm import tqdm
 
 # TLS parts
 import transitleastsquares.tls_constants as tls_constants
-from transitleastsquares.stats import FAP, rp_rs_from_depth, pink_noise
+from transitleastsquares.stats import (
+    FAP,
+    rp_rs_from_depth,
+    pink_noise,
+    period_uncertainty
+    )
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import (
     resample,
     cleaned_array,
     transit_mask,
-    running_median,
-    running_mean_equal_length,
-    running_mean
+    running_median
     )
 from transitleastsquares.helpers import impact_to_inclination
 from transitleastsquares.grid import (
-    T14,
     duration_grid,
     period_grid
     )
 from transitleastsquares.core import (
-    get_edge_effect_correction,
-    get_lowest_residuals_in_this_duration,
+    edge_effect_correction,
+    lowest_residuals_in_this_duration,
     out_of_transit_residuals,
     fold,
-    foldfast
+    foldfast,
+    search_period
     )
 from transitleastsquares.transit import reference_transit, fractional_transit, get_cache
 
@@ -92,110 +95,7 @@ class transitleastsquares(object):
 
         return t, y, dy
 
-    def _search_period(
-        self,
-        period,
-        t,
-        y,
-        dy,
-        transit_depth_min,
-        R_star_min,
-        R_star_max,
-        M_star_min,
-        M_star_max,
-        lc_arr,
-        lc_cache_overview,
-        T0_fit_margin,
-    ):
-        """Core routine to search the flux data set 'injected' over all 'periods'"""
-
-        # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
-        durations = numpy.unique(lc_cache_overview["width_in_samples"])
-        maxwidth_in_samples = int(max(durations))  # * numpy.size(y))
-        if maxwidth_in_samples % 2 != 0:
-            maxwidth_in_samples = maxwidth_in_samples + 1
-
-        # Phase fold
-        phases = foldfast(t, period)
-        sort_index = numpy.argsort(phases, kind="mergesort")  # 8% faster than Quicksort
-        phases = phases[sort_index]
-        flux = y[sort_index]
-        dy = dy[sort_index]
-
-        # faster to multiply than divide
-        # SQUARE THESE HERE ALREADY?
-        patched_dy = numpy.append(dy, dy[:maxwidth_in_samples])
-        inverse_squared_patched_dy = 1 / patched_dy ** 2
-
-        # Due to phase folding, the signal could start near the end of the data
-        # and continue at the beginning. To avoid (slow) rolling,
-        # we patch the beginning again to the end of the data
-        patched_data = numpy.append(flux, flux[:maxwidth_in_samples])
-
-        # Edge effect correction (numba speedup 40x)
-        edge_effect_correction = get_edge_effect_correction(
-            flux, patched_data, dy, inverse_squared_patched_dy
-        )
-        # Strangely, this second part doesn't work with numba
-        summed_edge_effect_correction = numpy.sum(edge_effect_correction)
-
-        # Set "best of" counters to max, in order to find smaller residuals
-        smallest_residuals_in_period = float("inf")
-        summed_residual_in_rows = float("inf")
-
-        # Make unique to avoid duplicates in dense grids
-        duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
-        duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
-
-        # Fractional transit duration can be longer than this.
-        # Example: Data length 11 days, 2 transits at 0.5 days and 10.5 days
-        length = max(t) - min(t)
-        no_of_transits_naive = length / period
-        no_of_transits_worst = no_of_transits_naive + 1
-        correction_factor = no_of_transits_worst / no_of_transits_naive
-
-        # Minimum can be (x-times) 1 cadence: grazing
-        duration_min_in_samples = int(numpy.floor(duration_min * len(y)))  # 1
-        duration_max_in_samples = int(numpy.ceil(duration_max * len(y) * correction_factor))
-        durations = durations[durations >= duration_min_in_samples]
-        durations = durations[durations <= duration_max_in_samples]
-
-        skipped_all = True
-        best_row = 0  # shortest and shallowest transit
-        best_depth = 0
-
-        for duration in durations:
-            ootr = out_of_transit_residuals(patched_data, duration, inverse_squared_patched_dy)
-            mean = 1 - running_mean(patched_data, duration)
-
-            # Get the row with matching duration
-            chosen_transit_row = 0
-            while lc_cache_overview["width_in_samples"][chosen_transit_row] != duration:
-                chosen_transit_row += 1
-
-            overshoot = lc_cache_overview["overshoot"][chosen_transit_row]
-
-            this_residual, this_row, this_depth = get_lowest_residuals_in_this_duration(
-                mean=mean,
-                transit_depth_min=transit_depth_min,
-                patched_data_arr=patched_data,
-                duration=duration,
-                signal=lc_arr[chosen_transit_row],
-                inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
-                overshoot=overshoot,
-                ootr=ootr,
-                summed_edge_effect_correction=summed_edge_effect_correction,
-                chosen_transit_row=chosen_transit_row,
-                datapoints=len(flux),
-                T0_fit_margin=T0_fit_margin,
-            )
-
-            if this_residual < summed_residual_in_rows:
-                summed_residual_in_rows = this_residual
-                best_row = chosen_transit_row
-                best_depth = this_depth
-
-        return [period, summed_residual_in_rows, best_row, best_depth]
+    
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
@@ -385,7 +285,7 @@ class transitleastsquares(object):
 
         p = multiprocessing.Pool(processes=self.use_threads)
         params = partial(
-            self._search_period,
+            search_period,
             t=self.t,
             y=self.y,
             dy=self.dy,
@@ -454,7 +354,6 @@ class transitleastsquares(object):
             SR = 0
             SDE = 0
             SDE_raw = 0
-
         else:
             SR = numpy.min(chi2) / chi2
             SDE_raw = (1 - numpy.mean(SR)) / numpy.std(SR)
@@ -486,7 +385,7 @@ class transitleastsquares(object):
             period = test_statistic_periods[index_highest_power]
             depth = test_statistic_depths[index_highest_power]
 
-
+        """
         # Determine estimate for uncertainty in period
         # Method: Full width at half maximum
         try:
@@ -510,13 +409,13 @@ class transitleastsquares(object):
         except:
             period_uncertainty = float("inf")
 
+        """
+
         # Now we know the best period, width and duration. But T0 was not preserved
         # due to speed optimizations. Thus, iterate over T0s using the given parameters
         # Fold to all T0s so that the transit is expected at phase = 0
         if no_transits_were_fit:
             T0 = 0
-
-
         else:
             signal = lc_arr[best_row]
             dur = len(signal)
@@ -746,7 +645,7 @@ class transitleastsquares(object):
         # Estimate SNR and pink SNR
         # Second run because now the out of transit points are known
         std = numpy.std(flux_ootr)
-        for i in range(len(transit_times)):  # REFACTOR for mid_transit in transit_times
+        for i in range(len(transit_times)):
             mid_transit = transit_times[i]
             tmin = mid_transit - 0.5 * transit_duration_in_days
             tmax = mid_transit + 0.5 * transit_duration_in_days
@@ -810,7 +709,7 @@ class transitleastsquares(object):
             chi2_min,
             chi2red_min,
             period,
-            period_uncertainty,
+            period_uncertainty(test_statistic_periods, power),
             T0,
             duration,
             depth,
