@@ -4,7 +4,7 @@ python:
   - "3.6"
   - "3.7-dev"
 install:
-  - pip install numpy numba batman-package scipy tqdm argparse astroquery
+  - pip install scipy
 script:
   - python setup.py install
   - cd transitleastsquares
