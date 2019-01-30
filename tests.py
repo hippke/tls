@@ -201,8 +201,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(radius_min, 2.304)
 
     print("Test passed: KIC catalog pull from Vizier using astroquery")
-    
-
+        
     # Create test data
     start = 48
     days = 365.25 * 3
@@ -254,20 +253,101 @@ if __name__ == "__main__":
         min(results.chi2red), 0.6719167401148216, decimal=5
     )
     numpy.testing.assert_almost_equal(results.SDE, 5.691301613227594, decimal=5)
-    numpy.testing.assert_almost_equal(results.snr, 107.99702838651578, decimal=5)
     numpy.testing.assert_almost_equal(
         results.odd_even_mismatch, 0.29083256866622437, decimal=5
     )
-    numpy.testing.assert_almost_equal(
-        results.snr_per_transit[0], 47.523747079309665, decimal=5
-    )
-    numpy.testing.assert_almost_equal(
-        results.snr_pink_per_transit[0], 53.381329606230615, decimal=5
-    )
     numpy.testing.assert_almost_equal(results.rp_rs, 0.009119851811944274, decimal=5)
 
-    print("Test passed: Synthetic data")
+    # Full light curve model
+    numpy.testing.assert_almost_equal(
+        max(results.model_lightcurve_time), 1143.7472155961277, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.model_lightcurve_time), 48.0059010663453, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.model_lightcurve_time), 595.877471821318, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.model_lightcurve_time), 39166430.34534341, decimal=5)
 
+    numpy.testing.assert_almost_equal(
+        max(results.model_lightcurve_model), 1, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.model_lightcurve_model), 0.999897160189092, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.model_lightcurve_model), 0.9999998641488729, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.model_lightcurve_model), 65728.99107064126, decimal=5)
+
+    transit_times_expected = [68.003492, 433.261711, 798.519931]
+    numpy.testing.assert_almost_equal(
+        results.transit_times, transit_times_expected, decimal=5)
+    numpy.testing.assert_almost_equal(results.duration, 0.590825, decimal=5)
+
+    numpy.testing.assert_almost_equal(
+        max(results.model_folded_phase), 1.0000380285975052, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.model_folded_phase), 3.8028597505324e-05, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.model_folded_phase), 0.5000380285975052, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.model_folded_phase), 6574.499999999999, decimal=5)
+
+    numpy.testing.assert_almost_equal(
+        max(results.model_folded_model), 1, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.model_folded_model), 0.999897160189092, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.model_folded_model), 0.9999998679702978, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.model_folded_model), 13147.998264073476, decimal=5)
+
+    numpy.testing.assert_almost_equal(
+        max(results.folded_phase), 0.9999608485845858, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.folded_phase), 1.44015016259047e-05, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.folded_phase), 0.500000089528271, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.folded_phase), 6574.001177117707, decimal=5)
+
+    numpy.testing.assert_almost_equal(
+        max(results.folded_y), 1.000019008301075, decimal=5)
+    numpy.testing.assert_almost_equal(
+        min(results.folded_y), 0.9998860842491378, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.mean(results.folded_y), 0.9999997920032417, decimal=5)
+    numpy.testing.assert_almost_equal(
+        numpy.sum(results.folded_y), 13147.997265, decimal=5)
+
+    numpy.testing.assert_almost_equal(
+        results.depth_mean_even, (0.999915, 6.785539e-06), decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.depth_mean_odd, (0.999920, 1.209993e-05), decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.depth_mean, (0.999917, 6.086923e-06), decimal=5)
+    
+    numpy.testing.assert_almost_equal(
+        results.transit_depths, [0.99991085, 0.99992095, 0.99992007], decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.transit_depths_uncertainties, [4.19177855e-06, 1.20999330e-05, 1.26699399e-05], decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.odd_even_mismatch, 0.29083256866622437, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.per_transit_count, [7., 7., 7.], decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.transit_count, 3, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.distinct_transit_count, 3, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.empty_transit_count, 0, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.snr_per_transit, [38.92162, 34.51048, 34.89514], decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.snr, 62.542764907612785, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results.snr_pink_per_transit, [52.24377, 46.32278, 46.8391], decimal=5)
+
+    print("Test passed: Synthetic data")
+    
     numpy.random.seed(seed=0)  # reproducibility
     print("Starting tests...")
 
@@ -459,3 +539,4 @@ if __name__ == "__main__":
     print("Test passed: transit_depth_min=1000*10**-6, where no transit is fit")
 
     print("All tests completed")
+    
