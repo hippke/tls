@@ -6,6 +6,7 @@ python:
 install:
   - pip install numpy numba batman-package scipy tqdm argparse astroquery
 script:
+  - python setup.py install
   - cd transitleastsquares
   - ls
   - python tests.py
