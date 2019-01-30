@@ -134,8 +134,11 @@ def spectra(chi2, oversampling_factor):
 
 
 def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
+    """ After the search, we know the best period, width and duration.
+        But T0 was not preserved due to speed optimizations. 
+        Thus, iterate over T0s using the given parameters
+        Fold to all T0s so that the transit is expected at phase = 0"""
 
-    #signal = lc_arr[best_row]  ### signal = lc_arr[best_row]
     dur = len(signal)
     scale = tls_constants.SIGNAL_DEPTH / (1 - depth)  ### depth
     signal = 1 - ((1 - signal) / scale)
@@ -200,3 +203,143 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
     if show_progress_info:
         pbar2.close()
     return T0
+
+
+def model_lightcurve(transit_times, period, t, model_transit_single):
+    """Creates the model light curve for the full unfolded dataset"""
+
+    # Append one more transit after and before end of nominal time series
+    # to fully cover beginning and end with out of transit calculations
+    earlier_tt = transit_times[0] - period
+    extended_transit_times = numpy.append(earlier_tt, transit_times)
+    next_tt = transit_times[-1] + period
+    extended_transit_times = numpy.append(extended_transit_times, next_tt)
+    full_x_array = numpy.array([])
+    full_y_array = numpy.array([])
+    rounds = len(extended_transit_times)
+    internal_samples = (int(len(t) / len(transit_times))) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
+
+    # Append all periods
+    for i in range(rounds):
+        xmin = extended_transit_times[i] - period / 2
+        xmax = extended_transit_times[i] + period / 2
+        x_array = numpy.linspace(xmin, xmax, internal_samples)
+        full_x_array = numpy.append(full_x_array, x_array)
+        full_y_array = numpy.append(full_y_array, model_transit_single)
+
+    # Determine start and end of relevant time series, and crop it
+    start_cadence = numpy.argmax(full_x_array > min(t))
+    stop_cadence = numpy.argmax(full_x_array > max(t))
+    full_x_array = full_x_array[start_cadence:stop_cadence]
+    full_y_array = full_y_array[start_cadence:stop_cadence]
+    model_lightcurve_model = full_y_array
+    model_lightcurve_time = full_x_array
+
+    return model_lightcurve_model, model_lightcurve_time
+
+
+def all_transit_times(T0, t, period):
+    """Return all mid-transit times within t"""
+
+    if T0 < min(t):
+        transit_times = [T0 + period]
+    else:
+        transit_times = [T0]
+    previous_transit_time = transit_times[0]
+    transit_number = 0
+    while True:
+        transit_number = transit_number + 1
+        next_transit_time = previous_transit_time + period
+        if next_transit_time < (numpy.min(t) + (numpy.max(t) - numpy.min(t))):
+            transit_times.append(next_transit_time)
+            previous_transit_time = next_transit_time
+        else:
+            break
+    return transit_times
+
+
+def calculate_transit_duration_in_days(t, period, transit_times, duration):
+    """Return estimate for transit duration in days"""
+
+    # Difference between (time series duration / period) and epochs
+    transit_duration_in_days_raw = duration * calculate_stretch(t, period, transit_times) * period
+
+    # Correct the duration for gaps in the data
+    transit_duration_in_days = transit_duration_in_days_raw * calculate_fill_factor(t)
+
+    return transit_duration_in_days
+
+
+def calculate_stretch(t, period, transit_times):
+    """Return difference between (time series duration / period) and epochs
+        Example: 
+        - Time series duration = 100 days
+        - Period = 40 days
+        - Epochs = 2 at t0s = [30, 70] days
+        ==> stretch = (100 / 40) / 2 = 1.25"""
+
+    duration_timeseries = (numpy.max(t) - numpy.min(t)) / period
+    epochs = len(transit_times)
+    stretch = duration_timeseries / epochs
+    return stretch
+
+
+def calculate_fill_factor(t):
+    """Return the fraction of existing cadences, assuming constant cadences"""
+
+    average_cadence = numpy.median(numpy.diff(t))
+    span = max(t) - min(t)
+    theoretical_cadences = span / average_cadence
+    fill_factor = (len(t) - 1) / theoretical_cadences
+    return fill_factor
+
+
+def intransit_stats(t, y, transit_times, transit_duration_in_days):
+    """Return all intransit odd and even flux points"""
+
+    all_flux_intransit_odd = numpy.array([])
+    all_flux_intransit_even = numpy.array([])
+    all_flux_intransit = numpy.array([])
+    all_idx_intransit = numpy.array([])
+    per_transit_count = numpy.zeros([len(transit_times)])
+    transit_depths = numpy.zeros([len(transit_times)])
+    transit_depths_uncertainties = numpy.zeros([len(transit_times)])
+
+    for i in range(len(transit_times)):
+        mid_transit = transit_times[i]
+        tmin = mid_transit - 0.5 * transit_duration_in_days
+        tmax = mid_transit + 0.5 * transit_duration_in_days
+        idx_intransit = numpy.where(numpy.logical_and(t > tmin, t < tmax))
+        all_idx_intransit = numpy.append(all_idx_intransit, idx_intransit)
+        flux_intransit = y[idx_intransit]
+        all_flux_intransit = numpy.append(all_flux_intransit, flux_intransit)
+        mean_flux = numpy.mean(y[idx_intransit])
+        intransit_points = numpy.size(y[idx_intransit])
+        transit_depths[i] = mean_flux
+        transit_depths_uncertainties[i] = numpy.std(
+            y[idx_intransit]
+        ) / numpy.sqrt(intransit_points)
+        per_transit_count[i] = intransit_points
+
+        # Check if transit odd/even to collect the flux for the mean calculations
+        if i % 2 == 0:  # even
+            all_flux_intransit_even = numpy.append(
+                all_flux_intransit_even, flux_intransit
+            )
+        else:    # odd
+            all_flux_intransit_odd = numpy.append(
+                all_flux_intransit_odd, flux_intransit
+            )
+
+        depth_mean_odd = numpy.mean(all_flux_intransit_odd)
+        depth_mean_even = numpy.mean(all_flux_intransit_even)
+        depth_mean_odd_std = numpy.std(all_flux_intransit_odd) / numpy.sum(
+            len(all_flux_intransit_odd)
+        ) ** (0.5)
+        depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(
+            len(all_flux_intransit_even)
+        ) ** (0.5)
+
+    return depth_mean_odd, depth_mean_even, depth_mean_odd_std, depth_mean_even_std, \
+        all_flux_intransit_odd, all_flux_intransit_even, per_transit_count, \
+        transit_depths, transit_depths_uncertainties
