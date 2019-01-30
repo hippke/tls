@@ -7,3 +7,4 @@ install:
   - pip install numpy numba batman-package scipy tqdm argparse astroquery
 script:
   - python tests.py
+  - ls
