@@ -357,7 +357,6 @@ if __name__ == "__main__":
     samples_per_day = 12  # 48
     samples = int(days * samples_per_day)  # 48
     t = numpy.linspace(start, start + days, samples)
-    print('samples', samples)
 
     # Use batman to create transits
     ma = batman.TransitParams()
@@ -398,13 +397,12 @@ if __name__ == "__main__":
         duration_grid_step=1.05,
         T0_fit_margin=0.2
     )
-    print('SDE', results.SDE)
     numpy.testing.assert_almost_equal(results.SDE, 5.254817340391126, decimal=5)
     print("Test passed: Synthetic data with uncertainties")
 
 
     # Testing transit shapes
-    t, y = loadfile("transitleastsquares/EPIC206154641.csv")
+    t, y = loadfile("EPIC206154641.csv")
     trend = scipy.signal.medfilt(y, 25)
     y_filt = y / trend
 
@@ -446,7 +444,7 @@ if __name__ == "__main__":
     print("Test passed: Box-shaped")
 
     # Multi-run
-    t, y = loadfile("transitleastsquares/EPIC201367065.csv")
+    t, y = loadfile("EPIC201367065.csv")
     trend = scipy.signal.medfilt(y, 25)
     y_filt = y / trend
 
@@ -472,9 +470,6 @@ if __name__ == "__main__":
         results_second_run.rp_rs, 0.025852178872027086, decimal=5
     )
     print("Test passed: Multi-planet")
-
-
-
 
     # Test for transit_depth_min=1000*10**-6, where no transit is found
 
