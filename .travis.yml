@@ -2,12 +2,10 @@ language: python
 python:
   - "3.5"
   - "3.6"
-  - "3.7-dev"
+  - "3.7"
 install:
   - pip install scipy
 script:
   - python setup.py install
-  - cd transitleastsquares
-  - ls
-  - python tests.py
-  - ls
+  - cd transitleastsquares/tests
+  - bash run_tests.sh

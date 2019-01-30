@@ -6,7 +6,7 @@ with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='transitleastsquares',
-      version='1.0.16',
+      version='1.0.17',
       description='An optimized transit-fitting algorithm to search for periodic transits of small planets',
       long_description=long_description,
       long_description_content_type='text/markdown',
@@ -20,11 +20,11 @@ setup(name='transitleastsquares',
       '': ['*.csv']
       },
       install_requires=[
+          'astroquery',
           'numpy',
           'numba',
           'tqdm',
           'batman-package',
-          'argparse',
-          'astroquery'
+          'argparse'
       ]
 )
