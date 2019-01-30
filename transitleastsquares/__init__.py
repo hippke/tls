@@ -26,7 +26,13 @@ from transitleastsquares.stats import (
     pink_noise,
     period_uncertainty,
     spectra,
-    final_T0_fit
+    final_T0_fit,
+    model_lightcurve,
+    all_transit_times,
+    calculate_transit_duration_in_days,
+    calculate_stretch,
+    calculate_fill_factor,
+    intransit_stats
     )
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import (
@@ -359,9 +365,6 @@ class transitleastsquares(object):
             period = test_statistic_periods[index_highest_power]
             depth = test_statistic_depths[index_highest_power]
 
-        # Now we know the best period, width and duration. But T0 was not preserved
-        # due to speed optimizations. Thus, iterate over T0s using the given parameters
-        # Fold to all T0s so that the transit is expected at phase = 0
         if no_transits_were_fit:
             T0 = 0
         else:
@@ -375,49 +378,20 @@ class transitleastsquares(object):
                 T0_fit_margin=self.T0_fit_margin
                 )
 
-        # Calculate all mid-transit times
-        if T0 < min(self.t):
-            transit_times = [T0 + period]
-        else:
-            transit_times = [T0]
-        previous_transit_time = transit_times[0]
-        transit_number = 0
-        while True:
-            transit_number = transit_number + 1
-            next_transit_time = previous_transit_time + period
-            if next_transit_time < (
-                numpy.min(self.t) + (numpy.max(self.t) - numpy.min(self.t))
-            ):
-                transit_times.append(next_transit_time)
-                previous_transit_time = next_transit_time
-            else:
-                break
+        transit_times = all_transit_times(T0, self.t, period)
 
-        # Calculate transit duration in days
-        duration_timeseries = (numpy.max(self.t) - numpy.min(self.t)) / period
-        epochs = len(transit_times)
-        stretch = duration_timeseries / epochs
-        transit_duration_in_days = duration * stretch * period
-
-        # Correct duration for gaps in the data:
-        average_cadence = numpy.median(numpy.diff(self.t))
-        span = max(self.t) - min(self.t)
-        theoretical_cadences = span / average_cadence
-        fill_factor = (len(self.t) - 1) / theoretical_cadences
-        transit_duration_in_days = transit_duration_in_days * fill_factor
-
+        transit_duration_in_days =  calculate_transit_duration_in_days(
+            self.t,
+            period,
+            transit_times,
+            duration
+            )
 
         phases = fold(self.t, period, T0=T0 + period / 2)
         sort_index = numpy.argsort(phases)
         folded_phase = phases[sort_index]
         folded_y = self.y[sort_index]
         folded_dy = self.dy[sort_index]
-
-        # Folded model / model curve
-        # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
-        # so we need to roll the model to match the model so that its mid-transit
-        # is at phase=0.5
-        fill_half = 1 - ((1 - fill_factor) * 0.5)
 
         # Model phase, shifted by half a cadence so that mid-transit is at phase=0.5
         model_folded_phase = numpy.linspace(
@@ -426,7 +400,16 @@ class transitleastsquares(object):
             numpy.size(phases),
         )
 
-        # Model flux
+        # Folded model / model curve
+        # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
+        # so we need to roll the model to match the model so that its mid-transit
+        # is at phase=0.5
+        fill_factor = calculate_fill_factor(self.t)
+        fill_half = 1 - ((1 - fill_factor) * 0.5)
+
+        stretch = calculate_stretch(self.t, period, transit_times)
+
+        # Folded model flux
         if no_transits_were_fit:
             model_folded_model = numpy.ones(len(model_folded_phase))
         else:
@@ -434,7 +417,7 @@ class transitleastsquares(object):
                 duration=duration * maxwidth_in_samples * fill_half,
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
-                samples=int(len(self.t / epochs)),
+                samples=int(len(self.t / len(transit_times))),
                 per=self.per,
                 rp=self.rp,
                 a=self.a,
@@ -445,25 +428,13 @@ class transitleastsquares(object):
                 limb_dark=self.limb_dark,
             )
 
-        # Light curve model
-        oversample = tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
-        internal_samples = (int(len(self.y) / len(transit_times))) * oversample
-
-        # Append one more transit after and before end of nominal time series
-        # to fully cover beginning and end with out of transit calculations
-        earlier_tt = transit_times[0] - period
-        extended_transit_times = numpy.append(earlier_tt, transit_times)
-        next_tt = transit_times[-1] + period
-        extended_transit_times = numpy.append(extended_transit_times, next_tt)
-        full_x_array = numpy.array([])
-        full_y_array = numpy.array([])
-        rounds = len(extended_transit_times)
-
-        # The model for one period
+        # Full unfolded light curve model
+        internal_samples = (int(len(self.y) / len(transit_times))) * \
+            tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
         if no_transits_were_fit:
-            y_array = numpy.ones(internal_samples)
+            model_transit_single = numpy.ones(internal_samples)
         else:
-            y_array = fractional_transit(
+            model_transit_single = fractional_transit(
                 duration=(duration * maxwidth_in_samples),
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
@@ -477,61 +448,28 @@ class transitleastsquares(object):
                 u=self.u,
                 limb_dark=self.limb_dark,
             )
+        model_lightcurve_model, model_lightcurve_time = model_lightcurve(
+            transit_times,
+            period,
+            self.t,
+            model_transit_single
+            )
 
-        # Append all periods
-        for i in range(rounds):
-            xmin = extended_transit_times[i] - period / 2
-            xmax = extended_transit_times[i] + period / 2
-            x_array = numpy.linspace(xmin, xmax, internal_samples)
-            full_x_array = numpy.append(full_x_array, x_array)
-            full_y_array = numpy.append(full_y_array, y_array)
-
-        # Determine start and end of relevant time series, and crop it
-        start_cadence = numpy.argmax(full_x_array > min(self.t))
-        stop_cadence = numpy.argmax(full_x_array > max(self.t))
-        full_x_array = full_x_array[start_cadence:stop_cadence]
-        full_y_array = full_y_array[start_cadence:stop_cadence]
-        model_lightcurve_model = full_y_array
-        model_lightcurve_time = full_x_array
-
-        # Get transit depth, standard deviation and SNR per transit
-        per_transit_count = numpy.zeros([len(transit_times)])
-        transit_depths = numpy.zeros([len(transit_times)])
-        transit_depths_uncertainties = numpy.zeros([len(transit_times)])
-
+        depth_mean_odd, \
+        depth_mean_even, \
+        depth_mean_odd_std, \
+        depth_mean_even_std, \
+        all_flux_intransit_odd, \
+        all_flux_intransit_even, \
+        per_transit_count,\
+        transit_depths, \
+        transit_depths_uncertainties = intransit_stats(
+                self.t, self.y, transit_times, transit_duration_in_days)
+        
         snr_per_transit = numpy.zeros([len(transit_times)])
         snr_pink_per_transit = numpy.zeros([len(transit_times)])
         all_flux_intransit = numpy.array([])
         all_idx_intransit = numpy.array([])
-
-        # Depth mean odd and even
-        all_flux_intransit_odd = numpy.array([])
-        all_flux_intransit_even = numpy.array([])
-
-        for i in range(len(transit_times)):
-            mid_transit = transit_times[i]
-            tmin = mid_transit - 0.5 * transit_duration_in_days
-            tmax = mid_transit + 0.5 * transit_duration_in_days
-            idx_intransit = numpy.where(numpy.logical_and(self.t > tmin, self.t < tmax))
-            all_idx_intransit = numpy.append(all_idx_intransit, idx_intransit)
-            flux_intransit = self.y[idx_intransit]
-            all_flux_intransit = numpy.append(all_flux_intransit, flux_intransit)
-            mean_flux = numpy.mean(self.y[idx_intransit])
-            intransit_points = numpy.size(self.y[idx_intransit])
-            transit_depths[i] = mean_flux
-            transit_depths_uncertainties[i] = numpy.std(
-                self.y[idx_intransit]
-            ) / numpy.sqrt(intransit_points)
-            per_transit_count[i] = intransit_points
-            # Check if transit odd/even to collect the flux for the mean calculations
-            if i % 2 == 0:  # even
-                all_flux_intransit_even = numpy.append(
-                    all_flux_intransit_even, flux_intransit
-                )
-            else:
-                all_flux_intransit_odd = numpy.append(
-                    all_flux_intransit_odd, flux_intransit
-                )
 
         flux_ootr = numpy.delete(self.y, all_idx_intransit.astype(int))
 
