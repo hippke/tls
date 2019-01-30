@@ -24,10 +24,9 @@ python setup.py install
 
 Dependencies:
 Python 3,
-[SciPy](https://www.scipy.org/),
 [NumPy](http://www.numpy.org/),
 [numba](http://numba.pydata.org/),
-[batman](https://www.cfa.harvard.edu/~lkreidberg/batman/),
+[batman-package](https://www.cfa.harvard.edu/~lkreidberg/batman/),
 [tqdm](https://github.com/tqdm/tqdm),
 optional:
 [argparse](https://docs.python.org/3/library/argparse.html) (for the command line version),
