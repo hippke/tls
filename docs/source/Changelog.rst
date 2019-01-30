@@ -10,7 +10,7 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
-Version 1.0.17 (30 January 2019)
+Version 1.0.17 (planned)
 --------------------------------
 
 :Fixed: A bug in the calculation of the SNR statistic (post-fit statistics)
