@@ -3,6 +3,7 @@ from transitleastsquares import catalog_info
 
 if __name__ == "__main__":
     print("Starting test: catalog_data...")
+   
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
         TIC_ID=279741377
     )
@@ -48,6 +49,17 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(radius, 3.128)
     numpy.testing.assert_almost_equal(radius_max, 0.987)
     numpy.testing.assert_almost_equal(radius_min, 2.304)
+
+    (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
+        KIC_ID=12557548
+    )
+    numpy.testing.assert_almost_equal((a, b), (0.701, 0.0462))
+    numpy.testing.assert_almost_equal(mass, 0.6666, decimal=3)
+    numpy.testing.assert_almost_equal(mass_max, 0.067, decimal=3)
+    numpy.testing.assert_almost_equal(mass_min, 0.055, decimal=3)
+    numpy.testing.assert_almost_equal(radius, 0.660, decimal=3)
+    numpy.testing.assert_almost_equal(radius_max, 0.054, decimal=3)
+    numpy.testing.assert_almost_equal(radius_min, 0.054, decimal=3)
     print("Test passed: KIC catalog pull from Vizier using astroquery")
     print('All tests passed')
     
