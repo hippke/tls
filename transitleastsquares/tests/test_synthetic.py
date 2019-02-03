@@ -50,6 +50,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(
         results.transit_times[0], 68.00349264912924, decimal=5
     )
+
     numpy.testing.assert_almost_equal(results.depth, 0.999897160189092, decimal=5)
     numpy.testing.assert_almost_equal(results.duration, 0.5908251624976649, decimal=5)
     numpy.testing.assert_almost_equal(
