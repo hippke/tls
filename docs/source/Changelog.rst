@@ -14,7 +14,7 @@ Version 1.0.17 (planned)
 --------------------------------
 
 :Fixed: A bug in the calculation of the SNR statistic (post-fit statistics)
-:Changed: Added warnings for the user, e.g. in case inputs are dubious
+:Added: Warnings for the user, e.g. in case inputs are dubious
 
 
 Version 1.0.16 (29 January 2019)
