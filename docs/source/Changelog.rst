@@ -14,7 +14,10 @@ Version 1.0.17 (planned)
 --------------------------------
 
 :Fixed: A bug in the calculation of the SNR statistic (post-fit statistics)
-:Added: Warnings for the user, e.g. in case inputs are dubious
+:Changed: Major code refactoring into functions with idempotency and functional purity
+:Added: extensive test suite
+:Added: warnings for the user, e.g. in case inputs are dubious. Numpy warnings are now a bug (if any left) and no longer hidden.
+:Added: improved command line interface (now has its own command). Added all recent new functionality to the command line interface (all except custom transit shapes)
 
 
 Version 1.0.16 (29 January 2019)
