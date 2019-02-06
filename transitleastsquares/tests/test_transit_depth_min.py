@@ -46,12 +46,12 @@ if __name__ == "__main__":
         T0_fit_margin=0.1
     )
 
-    numpy.testing.assert_equal(results.transit_times, [numpy.nan])
+    numpy.testing.assert_equal(results.transit_times, numpy.nan)
     numpy.testing.assert_equal(results.period, numpy.nan)
     numpy.testing.assert_equal(results.depth, 1)
     numpy.testing.assert_equal(results.duration, numpy.nan)
     numpy.testing.assert_equal(results.snr, numpy.nan)
-    numpy.testing.assert_equal(results.snr_pink_per_transit, [numpy.nan])
+    numpy.testing.assert_equal(results.snr_pink_per_transit, numpy.nan)
     numpy.testing.assert_equal(results.odd_even_mismatch, numpy.nan)
     numpy.testing.assert_equal(results.SDE, 0)
     numpy.testing.assert_equal(results.SDE_raw, 0)
@@ -66,4 +66,3 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(max(results.chi2), 13148.0)
     numpy.testing.assert_almost_equal(max(results.chi2red), 1.0003043213633598)
     print("Test passed: transit_depth_min=1000*10**-6, where no transit is fit")
-    

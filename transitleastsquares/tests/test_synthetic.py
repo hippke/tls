@@ -43,7 +43,11 @@ if __name__ == "__main__":
         oversampling_factor=5,
         duration_grid_step=1.02
     )
-    #numpy.testing.assert_almost_equal(results.period_uncertainty, 0.216212529678387, decimal=5)
+
+    numpy.testing.assert_almost_equal(results.chi2_min, 8831.654060613922, decimal=5)
+    numpy.testing.assert_almost_equal(results.chi2red_min, 0.6719152511118321, decimal=5)
+
+    numpy.testing.assert_almost_equal(results.period_uncertainty, 0.216212529678387, decimal=5)
     numpy.testing.assert_equal(results.per_transit_count[0], 7)
     numpy.testing.assert_equal(len(results.transit_times), 3)
     numpy.testing.assert_almost_equal(results.period, 365.2582192473641, decimal=5)
