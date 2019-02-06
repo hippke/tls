@@ -64,5 +64,5 @@ Output
 ------------------------
 
 After a successful TLS run, 2 files are generated:
-* ``lightcurve filename + _statistics.csv`` which contains the statistics
-* ``lightcurve filename + _power.csv`` which contains the SDE-ogram
+:statistics:  ``lightcurve filename + _statistics.csv``
+:SDE-ogram: ``lightcurve filename + _power.csv``
