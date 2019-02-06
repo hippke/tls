@@ -13,6 +13,7 @@ from transitleastsquares.main import transitleastsquares
 from transitleastsquares.helpers import cleaned_array, resample, transit_mask
 from transitleastsquares.grid import duration_grid, period_grid
 from transitleastsquares.stats import FAP
+from transitleastsquares.catalog import catalog_info
 #from transitleastsquares.command_line import command_line
 
 

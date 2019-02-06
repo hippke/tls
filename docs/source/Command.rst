@@ -1,7 +1,7 @@
 Command line interface
 =========================
 
-This describes the command line interface to TLS.
+This describes the command line interface to TLS. After installation, you can call it from the command line.
 
 Usage
 ------------------------
@@ -9,23 +9,23 @@ Usage
 Syntax:
 ::
 
-    transitleastsquares.py [-h] [-o OUTPUT] [-c CONFIG] lightcurve
+    transitleastsquares [-h] [-o OUTPUT] [-c CONFIG] lightcurve
 
 Minimum example:
 ::
 
-    python transitleastsquares.py test_data.csv
+    transitleastsquares test_data.csv
 
 
 Maximum example:
 ::
 
-    python transitleastsquares.py test_data.csv --config=tls_config.cfg --output=results.csv
+    transitleastsquares test_data.csv --config=tls_config.cfg --output=results.csv
 
 
 .. note::
 
-   In the current TLS version, custom transit shapes can not be defined with the command line interface. If you have a use case for more complex searches using the command line interface, please `open an issue on Github <https://github.com/hippke/tls/issues/new/choose>`_ and I will add it to the next version. As of now, I am not sure if anybody will use this functionality.
+   In the current TLS version, custom transit shapes can not be defined with the command line interface. If you have a use case for more complex searches using the command line interface, please `open an issue on Github <https://github.com/hippke/tls/issues/new/choose>`_ and I will add it to the next version.
 
 
 Config file
@@ -37,14 +37,14 @@ Syntax:
 
     [Grid]
     R_star = 1
-    R_star_min = 0.13
-    R_star_max = 3.5
+    R_star_min = 0.8
+    R_star_max = 1.2
     M_star = 1
-    M_star_min = 0.1
-    M_star_max = 1
+    M_star_min = 0.8
+    M_star_max = 1.2
     period_min = 0
     period_max = 1e10
-    n_transits_min = 2
+    n_transits_min = 3
 
     [Template]
     transit_template = default
@@ -52,12 +52,17 @@ Syntax:
     [Speed]
     duration_grid_step = 1.1
     transit_depth_min = 10e-6
-    oversampling_factor = 3
+    oversampling_factor = 2
     T0_fit_margin = 0.01
+    use_threads = 4
+
+    [File]
+    delimiter = ,
 
 
 Output
 ------------------------
 
-The output file contains the :ref:`return values <returnvalues>`. One item per line: First the dictionary key, a space as delimiter, then the value(s). Arrays are in the format ``[0, 1, ..., 5]``.
-
+After a successful TLS run, 2 files are generated:
+* ``lightcurve filename + _statistics.csv`` which contains the statistics
+* ``lightcurve filename + _power.csv`` which contains the SDE-ogram
