@@ -1,5 +1,5 @@
 class transitleastsquaresresults(dict):
-    """The results of a TransitLeastSquares search"""
+    """The results of a transitleastsquares search"""
 
     def __init__(self, *args):
         super(transitleastsquaresresults, self).__init__(

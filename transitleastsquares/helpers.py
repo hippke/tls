@@ -5,14 +5,6 @@ from transitleastsquares.interpolation import interp1d
 
 
 def resample(time, flux, factor):
-    """
-    import scipy
-    f = scipy.interpolate.interp1d(time, flux, assume_sorted=True)
-    time_grid = int(len(flux) / factor)
-    time_resampled = numpy.linspace(min(time), max(time), time_grid)
-    flux_resampled = f(time_resampled)
-    """
-
     # New method without scipy
     time_grid = int(len(flux) / factor)
     time_resampled = numpy.linspace(min(time), max(time), time_grid)
@@ -57,8 +49,8 @@ def cleaned_array(t, y, dy=None):
         return clean_t, clean_y, clean_dy
 
 
-#@numba.jit(fastmath=True, parallel=False, nopython=True)
 def transit_mask(t, period, duration, T0):
+    # Works with numba, but is not faster
     mask = numpy.abs((t - T0 + 0.5 * period) % period - 0.5 * period) < 0.5 * duration
     return mask
 

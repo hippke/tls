@@ -16,8 +16,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     ma.per = per  # orbital period, use Earth as a reference
     ma.rp = rp  # planet radius (in units of stellar radii)
     ma.a = a  # semi-major axis (in units of stellar radii)
-    # orbital inclination (in degrees)
-    ma.inc = inc
+    ma.inc = inc  # orbital inclination (in degrees)
     ma.ecc = ecc  # eccentricity
     ma.w = w  # longitude of periastron (in degrees)
     ma.u = u  # limb darkening coefficients
@@ -31,19 +30,9 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     intransit_time = t[idx_first : -idx_first + 1]
 
     # Downsample (bin) to target sample size
-    """
-    f = scipy.interpolate.interp1d(intransit_time, intransit_flux, assume_sorted=True)
-    xnew = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
-    downsampled_intransit_flux = f(xnew)
-    """
-    # Interpolate to shorter interval - new method without scipy
-    #reference_time = numpy.linspace(-0.5, 0.5, samples)
-    #occupied_samples = int((duration / maxwidth) * samples)
     x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
     f = interp1d(x_new, intransit_time)
     downsampled_intransit_flux = f(intransit_flux)
-
-
 
     # Rescale to height [0..1]
     rescaled = (numpy.min(downsampled_intransit_flux) - downsampled_intransit_flux) / (
@@ -70,8 +59,6 @@ def fractional_transit(
 ):
     """Returns a scaled reference transit with fractional width and depth"""
 
-    
-
     if cached_reference_transit is None:
         reference_flux = reference_transit(
             samples=samples,
@@ -86,14 +73,6 @@ def fractional_transit(
         )
     else:
         reference_flux = cached_reference_transit
-
-    # Interpolate to shorter interval
-    """
-    reference_time = numpy.linspace(-0.5, 0.5, samples)
-    f = scipy.interpolate.interp1d(reference_time, reference_flux, assume_sorted=True)
-    occupied_samples = int((duration / maxwidth) * samples)
-    y_new = f(numpy.linspace(-0.5, 0.5, occupied_samples))
-    """
 
     # Interpolate to shorter interval - new method without scipy
     reference_time = numpy.linspace(-0.5, 0.5, samples)
@@ -169,12 +148,11 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_d
         signal = scaled_transit[first_sample:last_sample]
         lc_arr.append(signal)
 
-        # Overshoot: Fraction of transit bottom and mean flux
+        # Fraction of transit bottom and mean flux
         overshoot = numpy.mean(signal) / numpy.min(signal)
 
         # Later, we multiply the inverse fraction ==> convert to inverse percentage
         lc_cache_overview["overshoot"][row] = 1 / (2 - overshoot)
-
         row += +1
 
     lc_arr = numpy.array(lc_arr)

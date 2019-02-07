@@ -1,7 +1,6 @@
 from os import path
 import multiprocessing
 import numpy
-#numpy.warnings.filterwarnings('ignore')
 import sys
 import warnings
 import configparser
@@ -89,12 +88,6 @@ class transitleastsquares(object):
             limb_dark=self.limb_dark,
         )
 
-        # Result lists now (faster), convert to numpy array later
-        test_statistic_periods = []
-        test_statistic_residuals = []
-        test_statistic_rows = []
-        test_statistic_depths = []
-
         print(
             "Searching "
             + str(len(self.y))
@@ -143,6 +136,14 @@ class transitleastsquares(object):
             periods = numpy.random.permutation(periods)
         else:
             raise ValueError("Unknown PERIODS_SEARCH_ORDER")
+
+        # Result lists now (faster), convert to numpy array later
+        test_statistic_periods = []
+        test_statistic_residuals = []
+        test_statistic_rows = []
+        test_statistic_depths = []
+
+        # Run multi-core search
         for data in p.imap_unordered(params, periods):
             test_statistic_periods.append(data[0])
             test_statistic_residuals.append(data[1])

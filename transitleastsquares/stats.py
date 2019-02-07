@@ -140,9 +140,9 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
         Fold to all T0s so that the transit is expected at phase = 0"""
 
     dur = len(signal)
-    scale = tls_constants.SIGNAL_DEPTH / (1 - depth)  ### depth
+    scale = tls_constants.SIGNAL_DEPTH / (1 - depth)
     signal = 1 - ((1 - signal) / scale)
-    samples_per_period = numpy.size(y)  ### y
+    samples_per_period = numpy.size(y)
 
     if T0_fit_margin == 0:
         points = samples_per_period
@@ -154,9 +154,9 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
 
     # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
     T0_array = numpy.linspace(
-        start=numpy.min(t),    ### t
-        stop=numpy.min(t) + period,    ### period
-        num=points,  # samples_per_period
+        start=numpy.min(t),
+        stop=numpy.min(t) + period,
+        num=points,
     )
 
     # Avoid showing progress bar when expected runtime is short

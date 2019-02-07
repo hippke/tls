@@ -1,5 +1,6 @@
 from transitleastsquares import transitleastsquares
 from transitleastsquares.helpers import cleaned_array
+import transitleastsquares.tls_constants as tls_constants
 import numpy
 import os
 try:
@@ -13,6 +14,7 @@ def main():
     pass
 
 
+print(tls_constants.TLS_VERSION)
 parser = argparse.ArgumentParser()
 parser.add_argument("lightcurve", help="path to lightcurve file")
 parser.add_argument("-o", "--output", help="path to output directory")

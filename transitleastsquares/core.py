@@ -46,7 +46,7 @@ def lowest_residuals_in_this_duration(
     best_row = 0
     best_depth = 0
 
-    xth_point = 1
+    xth_point = 1  # How many cadences the template shifts forward in each step
     if T0_fit_margin > 0 and duration > T0_fit_margin:
         T0_fit_margin = 1 / T0_fit_margin
         xth_point = int(duration / T0_fit_margin)
@@ -90,7 +90,6 @@ def out_of_transit_residuals(data, width_signal, dy):
         ]
         chi2[i] = chi2[i - 1] + add_visible_left - remove_invisible_right
     return chi2
-
 
 
 def search_period(

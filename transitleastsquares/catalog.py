@@ -7,9 +7,7 @@ def catalog_info_KIC(KIC_ID):
     """Takes KIC_ID, returns stellar information from online catalog using Vizier"""
 
     if type(KIC_ID) is not int:
-        raise TypeError(
-            'KIC_ID ID must be of type "int"'
-        )
+        raise TypeError('KIC_ID ID must be of type "int"')
     try:
         from astroquery.vizier import Vizier
     except:
@@ -37,9 +35,7 @@ def catalog_info_EPIC(EPIC_ID):
     except:
         raise ImportError('Package astroquery required but failed to import')
     if type(EPIC_ID) is not int:
-        raise TypeError(
-                'EPIC_ID ID must be of type "int"'
-            )
+        raise TypeError('EPIC_ID ID must be of type "int"')
     if (EPIC_ID < 201000001) or (EPIC_ID > 251813738):
         raise TypeError(
             "EPIC_ID ID must be in range 201000001 to 251813738"
@@ -146,12 +142,32 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
     a = relevant_lds["a"][idx_nearest]
     b = relevant_lds["b"][idx_nearest]
 
+    mass = numpy.array(mass)
+    mass_min = numpy.array(mass_min)
+    mass_max = numpy.array(mass_max)
+    radius = numpy.array(radius)
+    radius_min = numpy.array(radius_min)
+    radius_max = numpy.array(radius_max)
+
+    if mass == 0.0:
+        mass = numpy.nan
+    if mass_min == 0.0:
+        mass_min = numpy.nan
+    if mass_max == 0.0:
+        mass_max = numpy.nan
+    if radius == 0.0:
+        radius = numpy.nan
+    if radius_min == 0.0:
+        radius_min = numpy.nan
+    if radius_max == 0.0:
+        radius_max = numpy.nan
+
     return (
         (a, b),
-        float(mass),
-        float(mass_min),
-        float(mass_max),
-        float(radius),
-        float(radius_min),
-        float(radius_max),
+        mass,
+        mass_min,
+        mass_max,
+        radius,
+        radius_min,
+        radius_max,
     )
