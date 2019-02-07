@@ -27,7 +27,7 @@ cd tls
 python setup.py install
 ```
 
-If the command `python` does not point to Python 3 on your machine, you can try to replace the last line with `python3 setup.py install`. If you don't have git on your machine, you can find installation instructions [here](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
+If the command `python` does not point to Python 3 on your machine, you can try to replace the last line with `python3 setup.py install`. If you don't have `git` on your machine, you can find installation instructions [here](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git).
 
 
 Dependencies:
@@ -39,6 +39,9 @@ Python 3,
 optional:
 [argparse](https://docs.python.org/3/library/argparse.html) (for the command line version),
 [astroquery](https://astroquery.readthedocs.io/en/latest/) (for LD and stellar density priors from Kepler K1, K2, and TESS).
+
+If you have trouble installing, please [open an issue](https://github.com/hippke/tls/issues).
+
 
 ## Getting started
 Here is a short animation of a real search for planets in Kepler K2 data. For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).
