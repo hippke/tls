@@ -10,14 +10,14 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
-Version 1.0.17 (planned)
+Version 1.0.17 (07 February 2019)
 --------------------------------
 
 :Fixed: A bug in the calculation of the SNR statistic (post-fit statistics)
 :Changed: Major code refactoring
-:Added: extensive test suite
-:Added: warnings for the user, e.g. in case inputs are dubious. Numpy warnings are now a bug (if any left) and no longer hidden.
-:Added: improved command line interface (now has its own command). Added all recent new functionality to the command line interface (all except custom transit shapes)
+:Added: Extensive test suite
+:Added: Warnings for the user, e.g. in case inputs are dubious. Numpy warnings are now a bug (if any left) and no longer hidden.
+:Added: Improved command line interface (now has its own command). Added all recent new functionality to the command line interface (all except custom transit shapes)
 
 
 Version 1.0.16 (29 January 2019)

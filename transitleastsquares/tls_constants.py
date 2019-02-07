@@ -3,7 +3,7 @@ from os import path
 
 """Magic constants"""
 TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.17 (06 February 2019)"
+    "Transit Least Squares TLS 1.0.17 (07 February 2019)"
 )
 resources_dir = path.join(path.dirname(__file__))
 
