@@ -5,7 +5,7 @@ TLS can be installed conveniently using pip::
 
     pip install transitleastsquares
 
-If you have multiple versions of Python and pip on your machine, make sure to use pip3. Try:
+If you have multiple versions of Python and pip on your machine, make sure to use pip3. Try::
 
     pip3 install transitleastsquares
 
