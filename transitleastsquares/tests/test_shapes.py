@@ -1,5 +1,4 @@
 import numpy
-import batman
 import scipy
 import scipy.signal
 from transitleastsquares import transitleastsquares
@@ -33,7 +32,10 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(
         min(results_grazing.chi2red), 0.06683059525866272, decimal=5
     )
-    numpy.testing.assert_almost_equal(results_grazing.SDE, 64.59390167350149, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results_grazing.SDE,
+        64.59390167350149,
+        decimal=5)
     numpy.testing.assert_almost_equal(
         results_grazing.rp_rs, 0.0848188816853949, decimal=5
     )
@@ -49,9 +51,15 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(
         min(results_box.chi2red), 0.12358085916803863, decimal=5
     )
-    numpy.testing.assert_almost_equal(results_box.SDE, 56.748626429853424, decimal=5)
-    numpy.testing.assert_almost_equal(results_box.rp_rs, 0.0861904513547099, decimal=5)
+    numpy.testing.assert_almost_equal(
+        results_box.SDE,
+        56.748626429853424,
+        decimal=5
+        )
+    numpy.testing.assert_almost_equal(
+        results_box.rp_rs,
+        0.0861904513547099,
+        decimal=5)
 
     print("Test passed: Box-shaped")
     print('All tests passed')
-    

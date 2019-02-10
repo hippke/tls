@@ -3,7 +3,7 @@ from transitleastsquares import cleaned_array
 
 if __name__ == "__main__":
     print("Starting test: cleaned_array...", end='')
-    
+
     dirty_array = numpy.ones(10, dtype=object)
     time_array = numpy.linspace(1, 10, 10)
     dy_array = numpy.ones(10, dtype=object)
@@ -17,4 +17,3 @@ if __name__ == "__main__":
     numpy.testing.assert_equal(len(t), 5)
     numpy.testing.assert_equal(numpy.sum(t), 35)
     print('passed')
-    

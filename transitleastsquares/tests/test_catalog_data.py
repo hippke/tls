@@ -3,7 +3,7 @@ from transitleastsquares import catalog_info
 
 if __name__ == "__main__":
     print("Starting test: catalog_data...")
-   
+
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
         TIC_ID=279741377
     )
@@ -62,4 +62,3 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(radius_min, 0.054, decimal=3)
     print("Test passed: KIC catalog pull from Vizier using astroquery")
     print('All tests passed')
-    

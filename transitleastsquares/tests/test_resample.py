@@ -3,7 +3,7 @@ from transitleastsquares import resample
 
 if __name__ == "__main__":
     print("Starting test resample...", end='')
-    
+
     # Resampling
     testtime = numpy.linspace(0, 1, 1000)
     testflux = numpy.linspace(0.99, 1.01, 1000)
@@ -43,4 +43,3 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(max(b), 1.01)
     numpy.testing.assert_almost_equal(numpy.mean(b), 1)
     print('passed')
-    

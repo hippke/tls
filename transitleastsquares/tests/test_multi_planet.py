@@ -1,8 +1,11 @@
 import numpy
-import batman
 import scipy
 import scipy.signal
-from transitleastsquares import transitleastsquares, transit_mask, cleaned_array
+from transitleastsquares import (
+    transitleastsquares,
+    transit_mask,
+    cleaned_array
+    )
 
 
 def loadfile(filename):
@@ -25,7 +28,12 @@ if __name__ == "__main__":
     results = model.power()
 
     # Mask of the first planet
-    intransit = transit_mask(t, results.period, 2 * results.duration, results.T0)
+    intransit = transit_mask(
+        t,
+        results.period,
+        2 * results.duration,
+        results.T0
+        )
     y_second_run = y_filt[~intransit]
     t_second_run = t[~intransit]
     t_second_run, y_second_run = cleaned_array(t_second_run, y_second_run)
@@ -44,4 +52,3 @@ if __name__ == "__main__":
     )
 
     print('Passed')
-    

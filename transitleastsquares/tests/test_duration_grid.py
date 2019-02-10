@@ -16,4 +16,3 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)
     numpy.testing.assert_equal(len(durations), 49)
     print('passed')
-    
