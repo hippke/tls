@@ -10,6 +10,13 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 1.0.18 (10 February 2019)
+--------------------------------
+
+:Fixed: A bug in the calculation statistics which caused TLS to stall in some cases
+
+
+
 Version 1.0.17 (07 February 2019)
 --------------------------------
 
