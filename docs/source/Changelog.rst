@@ -13,7 +13,7 @@ The versioning scheme is: major.minor.revision
 Version 1.0.18 (10 February 2019)
 --------------------------------
 
-:Fixed: A bug in the calculation statistics which caused TLS to stall in some cases
+:Fixed: A bug in the calculation of statistics which caused TLS to stall in some cases
 
 
 
