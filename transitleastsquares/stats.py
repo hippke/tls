@@ -307,6 +307,12 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
     transit_depths_uncertainties = numpy.zeros([len(transit_times)])
 
     for i in range(len(transit_times)):
+
+        depth_mean_odd = numpy.nan
+        depth_mean_even = numpy.nan
+        depth_mean_odd_std = numpy.nan
+        depth_mean_even_std = numpy.nan
+
         mid_transit = transit_times[i]
         tmin = mid_transit - 0.5 * transit_duration_in_days
         tmax = mid_transit + 0.5 * transit_duration_in_days
@@ -332,11 +338,6 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
         per_transit_count[i] = intransit_points
 
         # Check if transit odd/even to collect the flux for the mean calculations
-        depth_mean_odd = numpy.nan
-        depth_mean_even = numpy.nan
-        depth_mean_odd_std = numpy.nan
-        depth_mean_even_std = numpy.nan
-
         if i % 2 == 0:  # even
             all_flux_intransit_even = numpy.append(
                 all_flux_intransit_even, flux_intransit
@@ -355,8 +356,7 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
             depth_mean_even = numpy.mean(all_flux_intransit_even)
             depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(
             len(all_flux_intransit_even)
-                ) ** (0.5)
-            
+                ) ** (0.5)            
 
     return depth_mean_odd, depth_mean_even, depth_mean_odd_std, depth_mean_even_std, \
         all_flux_intransit_odd, all_flux_intransit_even, per_transit_count, \
