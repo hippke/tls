@@ -1,4 +1,6 @@
 .directory
 .ipynb_checkpoints
+.vscode
 *.directory
 *.ipynb_checkpoints
+*.vscode
