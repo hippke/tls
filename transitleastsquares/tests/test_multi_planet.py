@@ -26,6 +26,12 @@ if __name__ == "__main__":
 
     model = transitleastsquares(t, y_filt)
     results = model.power()
+    
+    numpy.testing.assert_almost_equal(max(results.power), 45.934646920004326, decimal=5)
+    numpy.testing.assert_almost_equal(max(results.power_raw), 44.00867236551441, decimal=5)
+    numpy.testing.assert_almost_equal(min(results.power), -0.620153987656165, decimal=5)
+    numpy.testing.assert_almost_equal(min(results.power_raw), -0.29015390864908414, decimal=5)
+    print('Detrending of power spectrum from power_raw passed')
 
     # Mask of the first planet
     intransit = transit_mask(
