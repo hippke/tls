@@ -50,3 +50,30 @@ In the right panel, the only change is ``transit_depth_min=200*10**-6``. That is
 
 .. |pic2| image:: faq_2.png
    :width: 45%
+
+
+
+How fast is TLS?
+----------------
+
+Very fast! It can search an entire unbinned Kepler K2 lightcurve (90 days, 4000 datapoints) for the best-fit limb-darkened transit model in a few seconds on a typical laptop computer.
+
+In a typical K2 light curve (e.g., EPIC 201367065), TLS (default configuration) performs :math:`3\times10^8` light curve evaluations in the :math:`\chi^2` sense, over 8500 trial periods, each including a transit and the out-of-transit part of the light curve. 
+
+A single phase-folded light curve evaluation calculates the squared residuals of the best-fit limb-darkened model light curve to the data points. It pulls the out-of-transit residuals from a cache (if re-usable from previous models) or calculates and caches them. In the end, it returns the :math:`\chi^2` of this model to the main routine. One such individual model comparison consumes (on average) 230 ns of wall-clock time on one core of an Intel Core i5-6300U at 2.4 GHz.
+
+The average number of in-transit points (in the phase-folded view), i.e. the transit duration in cadences, is 138 (in this example). Considering the out-of-transit points, almost $10^{13}$ squared-residuals-calculations would be required. Through careful evaluation of which out-of-transit points have previously been calculated and can be re-used, ~96% of these repetitive calculations can be avoided.
+
+In Kepler K2 light curves, on average ~53% of the total compute time is required for phase-folding and sorting. Sorting is set to use numpy's `MergeSort` algorithm which is implemented in the C language. This is slightly faster than the more commonly used `QuickSort`, because phase-folded data is already partially sorted.
+
+But: TLS is written in Python and JIT-compiled with numba. How much faster would a pure C or Fortran implementation be? Not much faster, if faster at all. The innermost numba-loop which calculates the residuals in the :math:`\chi^2` sense has been measured with a throughput of 12.2 GFLOPs on a single core on an Intel Core i5-6300U at 2.4 GHz. The manufacturer spec-sheet gives a maximum of 16.9 GFLOPs per core at this clock speed, i.e. TLS pulls 72% of the theoretical maximum. The remaining fraction is very difficult to pull, as it includes a relevant amount of I/O in the form of array shifts. It may be possible to shave off a few percent using hand-optimized assembly, but certainly not more than of order 10%.
+
+
+Edge effect jitter correction
+-----------------------------
+
+TLS fully compensates for the BLS edge effect jitter effect, which we discovered and described in our paper ([Hippke & Heller 2019, appendix B](https://arxiv.org/pdf/1901.02015.pdf))
+
+The original BLS implementation did not account for transit events occurring to be divided between the first and the last bin of the folded light curve. This was noted by Peter R. McCullough in 2002, and an updated version of BLS was made (`ee-bls.f`) to account for this edge effect. The patch is commonly realized by extending the phase array through appending the first bin once again at the end, so that a split transit is stitched together, and present once in full length. The disadvantage of this approach has apparently been ignored: The test statistic is affected by a small amount of additional noise. Depending on the trial period, a transit signal (if present) is sometimes partly located in the first and the second bin. The lower (in-transit) flux values from the first bin are appended at the end of the data, resulting in a change of the ratio between out-of-transit and in-transit flux.
+
+There are phase-folded periods with one, two, or more than two bins which contain the in-transit flux. This causes a variation (over periods) of the summed noise floor, resulting in additional jitter in the test statistic. For typical Kepler light curves, the reduction in detection efficiency is comparable to a reduction in transit depth of ~0.1-1 %. TLS corrects this effect by subtracting the difference of the summed residuals between the patched and the non-patched phased data. A visualization of this effect on the statistic is shown in our paper (Fig. B.1) and in an `iPython tutorial <https://github.com/hippke/tls/blob/master/tutorials/08%20Edge%20effect%20jitter%20correction.ipynb>`_ , using synthetic data. In real data, the effect is usually overpowered by noise, and was thus ignored, but is nonetheless present.
