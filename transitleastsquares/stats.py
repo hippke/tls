@@ -130,7 +130,7 @@ def spectra(chi2, oversampling_factor):
         power = power_raw
         SDE = SDE_raw
 
-    return SR, power, power_raw, SDE_raw, SDE
+    return SR, power_raw, power, SDE_raw, SDE
 
 
 def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
