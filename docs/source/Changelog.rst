@@ -10,6 +10,13 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+
+Version 1.0.20 (11 February 2019)
+--------------------------------
+
+:Fixed: A bug which	erroneously interchanged `power` and `power_raw`
+
+
 Version 1.0.19 (10 February 2019)
 --------------------------------
 
