@@ -13,7 +13,7 @@ The versioning scheme is: major.minor.revision
 Version 1.0.21 (planned)
 --------------------------------
 
-:Fixed: A bug in `cleaned_array` which caused an error in case invalid `dy` values were supplied. Relevant for TESS FITS files. These should now run including uncertainties.
+:Fixed: A bug in ``cleaned_array`` which caused an error in case invalid ``dy`` values were supplied. Relevant for TESS FITS files. These should now run including uncertainties.
 
 
 Version 1.0.20 (11 February 2019)
