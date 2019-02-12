@@ -227,6 +227,9 @@ class transitleastsquares(object):
             empty_transit_count = numpy.nan
             distinct_transit_count = numpy.nan
             duration = numpy.nan
+            in_transit_count = numpy.nan
+            after_transit_count = numpy.nan
+            before_transit_count = numpy.nan
         else:
             SR, power_raw, power, SDE_raw, SDE = spectra(chi2, self.oversampling_factor)
             index_highest_power = numpy.argmax(power)
