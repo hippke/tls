@@ -1,12 +1,13 @@
-# Update manually for each new release
-TLS_VERSIONING = '1.0.21'      
-TLS_DATE = '12 February 2019'
-
+from os import path
+import configparser
 
 """Magic constants"""
-from os import path
-TLS_VERSION = "Transit Least Squares TLS " + TLS_VERSIONING + " (" + TLS_DATE + ")"
 resources_dir = path.join(path.dirname(__file__))
+config = configparser.ConfigParser()
+config.read(path.join(path.abspath(path.dirname(__file__)), "version.cfg"))
+TLS_VERSIONING = config["TLS"]["Version"]
+TLS_DATE = config["TLS"]["Date"]
+TLS_VERSION = "Transit Least Squares TLS " + TLS_VERSIONING + " (" + TLS_DATE + ")"
 
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
