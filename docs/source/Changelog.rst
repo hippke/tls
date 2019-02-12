@@ -14,6 +14,7 @@ Version 1.0.21 (planned)
 --------------------------------
 
 :Fixed: A bug in ``cleaned_array`` which caused an error in case invalid ``dy`` values were supplied. Relevant for TESS FITS files. These should now run including uncertainties.
+:Added: New statistics: ``before_transit_count``, ``in_transit_count``, ``after_transit_count`` yield the number of data points in a bin of length transit duration before, in and after the phase-folded transit.
 
 
 Version 1.0.20 (11 February 2019)

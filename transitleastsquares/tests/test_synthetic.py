@@ -44,6 +44,10 @@ if __name__ == "__main__":
         duration_grid_step=1.02
     )
 
+    numpy.testing.assert_equal(results.in_transit_count, 21)
+    numpy.testing.assert_equal(results.after_transit_count, 21)
+    numpy.testing.assert_equal(results.before_transit_count, 22)
+
     numpy.testing.assert_almost_equal(results.chi2_min, 8831.654060613922, decimal=5)
     numpy.testing.assert_almost_equal(results.chi2red_min, 0.6719152511118321, decimal=5)
 

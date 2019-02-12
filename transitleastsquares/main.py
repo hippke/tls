@@ -22,7 +22,8 @@ from transitleastsquares.stats import (
     calculate_stretch,
     calculate_fill_factor,
     intransit_stats,
-    snr_stats
+    snr_stats,
+    count_stats
     )
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import (
@@ -353,6 +354,13 @@ class transitleastsquares(object):
                 depth_mean_even = numpy.nan
                 depth_mean_even_std = numpy.nan
 
+            in_transit_count, after_transit_count, before_transit_count = count_stats(
+                self.t,
+                self.y,
+                transit_times,
+                transit_duration_in_days
+                )
+
             # Odd even mismatch in standard deviations
             odd_even_difference = abs(depth_mean_odd - depth_mean_even)
             odd_even_std_sum = depth_mean_odd_std + depth_mean_even_std
@@ -399,6 +407,9 @@ class transitleastsquares(object):
             distinct_transit_count,
             empty_transit_count,
             FAP(SDE),
+            in_transit_count,
+            after_transit_count,
+            before_transit_count,
             test_statistic_periods,
             power,
             power_raw,
@@ -411,5 +422,5 @@ class transitleastsquares(object):
             folded_y,
             folded_dy,
             folded_phase,
-            model_folded_model,
+            model_folded_model
         )

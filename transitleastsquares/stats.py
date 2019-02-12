@@ -295,6 +295,45 @@ def calculate_fill_factor(t):
     return fill_factor
 
 
+
+
+def count_stats(t, y, transit_times, transit_duration_in_days):
+    """Return:
+    * in_transit_count:     Number of data points in transit (phase-folded)
+    * after_transit_count:  Number of data points in a bin of transit duration, 
+                            after transit (phase-folded)
+    * before_transit_count: Number of data points in a bin of transit duration, 
+                            before transit (phase-folded)
+    """
+    in_transit_count = 0
+    after_transit_count = 0
+    before_transit_count = 0
+
+    for mid_transit in transit_times:
+        T0 = mid_transit - 1.5 * transit_duration_in_days  # start of 1 transit dur before ingress
+        T1 = mid_transit - 0.5 * transit_duration_in_days  # start of ingress
+        T4 = mid_transit + 0.5 * transit_duration_in_days  # end of egress
+        T5 = mid_transit + 1.5 * transit_duration_in_days  # end of egress + 1 transit dur
+
+        if T0 > min(t) and T5 < max(t):  # inside time
+            idx_intransit = numpy.where(numpy.logical_and(t > T1, t < T4))
+            idx_before_transit = numpy.where(numpy.logical_and(t > T0, t < T1))
+            idx_after_transit = numpy.where(numpy.logical_and(t > T4, t < T5))
+            points_in_this_in_transit = len(y[idx_intransit])
+            points_in_this_before_transit = len(y[idx_before_transit])
+            points_in_this_after_transit = len(y[idx_after_transit])
+
+            in_transit_count += points_in_this_in_transit
+            before_transit_count += points_in_this_before_transit
+            after_transit_count += points_in_this_after_transit
+
+    return in_transit_count, after_transit_count, before_transit_count
+
+
+
+
+
+
 def intransit_stats(t, y, transit_times, transit_duration_in_days):
     """Return all intransit odd and even flux points"""
 
