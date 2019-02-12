@@ -10,6 +10,11 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 1.0.21 (planned)
+--------------------------------
+
+:Fixed: A bug in `cleaned_array` which caused an error in case invalid `dy` values were supplied. Relevant for TESS FITS files. These should now run including uncertainties.
+
 
 Version 1.0.20 (11 February 2019)
 --------------------------------
