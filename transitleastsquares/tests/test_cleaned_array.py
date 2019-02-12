@@ -12,8 +12,11 @@ if __name__ == "__main__":
     dirty_array[3] = -numpy.inf
     dirty_array[4] = numpy.nan
     dirty_array[5] = -99
+    time_array[8] = numpy.nan
+    dy_array[9] = numpy.inf
 
     t, y, dy = cleaned_array(time_array, dirty_array, dy_array)
-    numpy.testing.assert_equal(len(t), 5)
-    numpy.testing.assert_equal(numpy.sum(t), 35)
+    numpy.testing.assert_equal(t, [1, 7, 8])
+    numpy.testing.assert_equal(y, [1, 1, 1])
+    numpy.testing.assert_equal(dy, [1, 1, 1])
     print('passed')
