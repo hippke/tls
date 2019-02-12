@@ -1,10 +1,11 @@
-from os import path
+# Update manually for each new release
+TLS_VERSIONING = '1.0.21'      
+TLS_DATE = '12 February 2019'
 
 
 """Magic constants"""
-TLS_VERSION = (
-    "Transit Least Squares TLS 1.0.21 (12 February 2019)"
-)
+from os import path
+TLS_VERSION = "Transit Least Squares TLS " + TLS_VERSIONING + " (" + TLS_DATE + ")"
 resources_dir = path.join(path.dirname(__file__))
 
 # astrophysical constants

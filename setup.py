@@ -1,12 +1,14 @@
 from setuptools import setup
 from os import path
+import transitleastsquares.tls_constants as tls_constants
+
 
 this_directory = path.abspath(path.dirname(__file__))
 with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name='transitleastsquares',
-      version='1.0.21',
+      version=tls_constants.TLS_VERSIONING,
       description='An optimized transit-fitting algorithm to search for periodic transits of small planets',
       long_description=long_description,
       long_description_content_type='text/markdown',
