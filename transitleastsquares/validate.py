@@ -46,13 +46,13 @@ def validate_inputs(t, y, dy):
 def validate_args(self, kwargs):
 
     # Warn user if unknown parameters
-    keywords = ['transit_depth_min', 'oversampling_factor', 'period_min']
     for key, value in kwargs.items():
         if key not in tls_constants.VALID_PARAMETERS:
             text = 'Ignoring unknown parameter: ' + str(key)
             warnings.warn(text)
 
     """Validate **kwargs and set to defaults where missing"""
+    self.show_progress_bar = kwargs.get("show_progress_bar", True)
     self.transit_depth_min = kwargs.get(
         "transit_depth_min", tls_constants.TRANSIT_DEPTH_MIN
     )
