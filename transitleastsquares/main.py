@@ -126,8 +126,9 @@ class transitleastsquares(object):
             lc_cache_overview=lc_cache_overview,
             T0_fit_margin=self.T0_fit_margin,
         )
-        bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
-        pbar = tqdm(total=numpy.size(periods), smoothing=0.3, bar_format=bar_format)
+        if self.show_progress_bar:
+            bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
+            pbar = tqdm(total=numpy.size(periods), smoothing=0.3, bar_format=bar_format)
 
         if tls_constants.PERIODS_SEARCH_ORDER == "ascending":
             periods = reversed(periods)
@@ -150,9 +151,11 @@ class transitleastsquares(object):
             test_statistic_residuals.append(data[1])
             test_statistic_rows.append(data[2])
             test_statistic_depths.append(data[3])
-            pbar.update(1)
+            if self.show_progress_bar:
+                pbar.update(1)
         p.close()
-        pbar.close()
+        if self.show_progress_bar:
+            pbar.close()
 
         # imap_unordered delivers results in unsorted order ==> sort
         test_statistic_periods = numpy.array(test_statistic_periods)
@@ -242,7 +245,8 @@ class transitleastsquares(object):
                 y=self.y,
                 dy=self.dy,
                 period=period,
-                T0_fit_margin=self.T0_fit_margin
+                T0_fit_margin=self.T0_fit_margin,
+                show_progress_bar=self.show_progress_bar
                 )
             transit_times = all_transit_times(T0, self.t, period)
 
