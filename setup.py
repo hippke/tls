@@ -1,16 +1,27 @@
+import sys
 from setuptools import setup
 from os import path
-import configparser
 
 this_directory = path.abspath(path.dirname(__file__))
 
+# Pull TLS version from "config.cfg"
+if sys.version_info[0] < 3:
+    from ConfigParser import ConfigParser
+else:
+    from configparser import ConfigParser
 config = configparser.ConfigParser()
 config.read(path.join(this_directory, "transitleastsquares", "version.cfg"))
 TLS_VERSION = config["TLS"]["Version"]
 
-with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
-    long_description = f.read()
+# If Python3: Add "README.md" to setup. 
+# Useful for PyPI (pip install transitleastsquares). Irrelevant for users using Python2
+if sys.version_info[0] < 3:
+    with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
+        long_description = f.read()
+else:
+    long_description = ' '
 
+    
 setup(name='transitleastsquares',
       version=TLS_VERSION,
       description='An optimized transit-fitting algorithm to search for periodic transits of small planets',
