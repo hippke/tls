@@ -1,3 +1,4 @@
+import sys
 from os import path
 if sys.version_info[0] < 3:
     from ConfigParser import ConfigParser
