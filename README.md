@@ -7,7 +7,6 @@
 [![Image](https://img.shields.io/badge/tutorials-%E2%9C%93-blue.svg)](https://github.com/hippke/tls/tree/master/tutorials)
 [![Image](https://img.shields.io/badge/arXiv-1901.02015-blue.svg)](https://arxiv.org/abs/1901.02015)
 [![Build Status](https://travis-ci.com/hippke/tls.svg?branch=master)](https://travis-ci.com/hippke/tls)
-[![Image](https://img.shields.io/twitter/follow/hippke.svg?label=Follow&style=social)](https://twitter.com/hippke)
 
 
 ## Motivation
