@@ -109,3 +109,30 @@ PROGRESSBAR_THRESHOLD = 5000
 # Some cases yield empty period grids. Example: R_star=5, M_star=1
 # Then: Warn and return the default grid
 MINIMUM_PERIOD_GRID_SIZE = 100
+
+# Warn the user if unknown **kwargs are given as parameters
+VALID_PARAMETERS = [
+    "R_star", 
+    "R_star_min", 
+    "R_star_max", 
+    "M_star", 
+    "M_star_min", 
+    "M_star_max", 
+    "period_min", 
+    "period_max", 
+    "n_transits_min", 
+    "per", 
+    "rp", 
+    "a", 
+    "inc", 
+    "b", 
+    "ecc", 
+    "w", 
+    "u", 
+    "limb_dark", 
+    "duration_grid_step", 
+    "transit_depth_min", 
+    "oversampling_factor", 
+    "T0_fit_margin", 
+    "use_threads"
+    ]
