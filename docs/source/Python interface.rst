@@ -74,12 +74,18 @@ Parameters to balance detection efficiency and computational requirements:
 :transit_depth_min: *(float, default: 10 ppm)* Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest known transit is 11.9 ppm (Kepler-37b, `Barclay et al. 2013 <http://adsabs.harvard.edu/abs/2013Natur.494..452B>`_)
 :oversampling_factor: *(int, default: 3)* Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed.
 :T0_fit_margin: *(float, default: 0.01)* Acceptable error margin of the mid-transit time T0. Unit: fraction of the transit duration (0.01 is 1%). For small datasets (e.g., Kepler K2; generally: <10k datapoints), this can be set to 0 with minor speed penalty (seconds). Then, every single cadence is sampled. In data with many cadences, however, this can take very long and can have negligible benefits. As an example, consider a Kepler LC light curve of 60000 points, with a maximum fractional transit duration :math:`T_{14}/P=0.12`. The longest phase-folded transit signal to be tested is then 7200 points long. With Kepler noise, shifting this signal point-by-point is overkill. Shifting by 1% of the transit duration would result in shifts of 72 cadences for this specific signal.
-:use_threads: *(int)* Number of parallel threads to be used. A processor like the Intel Core i7-8700K has 6 cores and can run 12 threads in parallel using hyperthreading. Setting `use_threads=12` will cause a full load. If no parameter is given, TLS determines the number of available threads and uses the maximum available (in this case: 12).
-
 
 .. note::
 
    Higher ``oversampling_factor`` increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift. For a planet with a 365-day period orbiting a solar mass and radius star, this parity is reached for ``oversampling_factor=9`` at 30 min cadence (Kepler LC). Shorter periods have reduced oversampling benefits, as the cadence becomes a larger fraction of the period.
+   
+   
+Parameters to adjust the computational load and the user experience:
+
+:use_threads: *(int)* Number of parallel threads to be used. A processor like the Intel Core i7-8700K has 6 cores and can run 12 threads in parallel using hyperthreading. Setting ``use_threads=12`` will cause a full load. If no parameter is given, TLS determines the number of available threads and uses the maximum available (in this case: 12).
+:show_progress_bar: *(bool, default: True)* When set to ``False``, no progress bar (using ``tqdm``) will be shown
+
+
 
 
 Return values
