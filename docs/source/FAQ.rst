@@ -77,3 +77,18 @@ TLS fully compensates for the BLS edge effect jitter effect, which we discovered
 The original BLS implementation did not account for transit events occurring to be divided between the first and the last bin of the folded light curve. This was noted by Peter R. McCullough in 2002, and an updated version of BLS was made (`ee-bls.f`) to account for this edge effect. The patch is commonly realized by extending the phase array through appending the first bin once again at the end, so that a split transit is stitched together, and present once in full length. The disadvantage of this approach has apparently been ignored: The test statistic is affected by a small amount of additional noise. Depending on the trial period, a transit signal (if present) is sometimes partly located in the first and the second bin. The lower (in-transit) flux values from the first bin are appended at the end of the data, resulting in a change of the ratio between out-of-transit and in-transit flux.
 
 There are phase-folded periods with one, two, or more than two bins which contain the in-transit flux. This causes a variation (over periods) of the summed noise floor, resulting in additional jitter in the test statistic. For typical Kepler light curves, the reduction in detection efficiency is comparable to a reduction in transit depth of ~0.1-1 %. TLS corrects this effect by subtracting the difference of the summed residuals between the patched and the non-patched phased data. In real data, the effect is usually overpowered by noise, and was thus ignored, but is nonetheless present.
+
+
+
+Small period trial ranges
+-----------------------------
+
+TLS can be parametrized to search over a restricted period range using ``period_min`` and ``period_max``. TLS will then create an optimal period search grid in  ``[period_min, ..., period_max]``. If the range is very small, only a few periods would be tested. This works in the least-squares (:math:`\chi^2`) sense, i.e. it would detect the period with the smallest residuals for our transit model. With only a few period trials, however, no ``power`` spectrum can be created (sometimes called "SDE-ogram"). This is because ``power`` is normalized by its standard deviation, and a standard deviation of just a few (noisy) points is not meaningful. The most common detection criteria is the SDE, often required to be >9 for a signal to be considered interesting. As the SDE is located at the maximum of ``power``, it can not be calculated without it. Thus, a small number of period trials are problematic. A large number of periods result in a robuster estimate of the ``power`` noise floor, and this in a robuster estimate of the height of the peak, the SDE.
+
+TLS solves the issue of very small period ranges by requiring at least 100 trial periods, and extends the period range to its (large) defaults if the grid is too small based on the supplied parameters. Thus, if you set ``period_min=365.2`` and ``period_max=365.3``, TLS will probably default to a larger range (depending on your stellar mass, radius, and oversampling parameter). This is displayed at the start of each TLS run:
+
+``Searching 18113 data points, 4726 periods from 0.602 to 27.867 days``
+
+You can use this information to increase your period search range accordingly.
+
+
