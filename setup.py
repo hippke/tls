@@ -36,7 +36,7 @@ setup(name='transitleastsquares',
     package_data={'': ['*.csv', '*.cfg']},
     entry_points = {'console_scripts': ['transitleastsquares=transitleastsquares.command_line:main'],},
     install_requires=[
-        'astroquery>=0.3.9',
+        'astroquery',
         'numpy',
         'numba',
         'tqdm',
