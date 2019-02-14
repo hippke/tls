@@ -133,7 +133,7 @@ def spectra(chi2, oversampling_factor):
     return SR, power_raw, power, SDE_raw, SDE
 
 
-def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
+def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar):
     """ After the search, we know the best period, width and duration.
         But T0 was not preserved due to speed optimizations. 
         Thus, iterate over T0s using the given parameters
@@ -160,10 +160,10 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin):
     )
 
     # Avoid showing progress bar when expected runtime is short
-    if points < tls_constants.PROGRESSBAR_THRESHOLD:
-        show_progress_info = False
-    else:
+    if points > tls_constants.PROGRESSBAR_THRESHOLD and show_progress_bar:
         show_progress_info = True
+    else:
+        show_progress_info = False
 
     residuals_lowest = float("inf")
     T0 = 0
