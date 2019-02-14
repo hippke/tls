@@ -134,5 +134,6 @@ VALID_PARAMETERS = [
     "transit_depth_min", 
     "oversampling_factor", 
     "T0_fit_margin", 
-    "use_threads"
+    "use_threads",
+    "show_progress_bar"
     ]
