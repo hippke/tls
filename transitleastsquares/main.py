@@ -100,6 +100,13 @@ class transitleastsquares(object):
             + str(round(max(periods), 3))
             + " days"
         )
+
+        # Python 2 multiprocessing with "partial" doesn't work
+        # For now, only single-threading in Python 2 is supported
+        if sys.version_info[0] < 3:
+            self.use_threads = 1
+            warnings.warn('This TLS version supports no multithreading on Python 2')
+
         if self.use_threads == multiprocessing.cpu_count():
             print("Using all " + str(self.use_threads) + " CPU threads")
         else:
@@ -131,7 +138,7 @@ class transitleastsquares(object):
         test_statistic_depths = []
 
         if self.use_threads > 1:  # Run multi-core search
-            p = multiprocessing.Pool(processes=self.use_threads)
+            pool = multiprocessing.Pool(processes=self.use_threads)
             params = partial(
                 search_period,
                 t=self.t,
@@ -146,15 +153,14 @@ class transitleastsquares(object):
                 lc_cache_overview=lc_cache_overview,
                 T0_fit_margin=self.T0_fit_margin,
             )
-            for data in p.imap_unordered(params, periods):
+            for data in pool.imap_unordered(params, periods):
                 test_statistic_periods.append(data[0])
                 test_statistic_residuals.append(data[1])
                 test_statistic_rows.append(data[2])
                 test_statistic_depths.append(data[3])
                 if self.show_progress_bar:
                     pbar.update(1)
-            p.close()
-
+            pool.close()
         else:
             for period in periods:
                 data = search_period(
