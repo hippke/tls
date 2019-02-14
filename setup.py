@@ -36,7 +36,8 @@ setup(name='transitleastsquares',
     package_data={'': ['*.csv', '*.cfg']},
     entry_points = {'console_scripts': ['transitleastsquares=transitleastsquares.command_line:main'],},
     install_requires=[
-        'astroquery',
+        'astropy<3;python_version<"3"',  # astropy 3 doesn't install in Python 2, but is req for astroquery
+        'astroquery>=0.3.9',  # earlier has bug for "from astroquery.mast import Catalogs"
         'numpy',
         'numba',
         'tqdm',
