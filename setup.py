@@ -9,8 +9,7 @@ if sys.version_info[0] < 3:
     from ConfigParser import ConfigParser
 else:
     from configparser import ConfigParser
-config = configparser.ConfigParser()
-config.read(path.join(this_directory, "transitleastsquares", "version.cfg"))
+ConfigParser().read(path.join(this_directory, "transitleastsquares", "version.cfg"))
 TLS_VERSION = config["TLS"]["Version"]
 
 # If Python3: Add "README.md" to setup. 
