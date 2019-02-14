@@ -1,12 +1,12 @@
 ![Logo](https://raw.githubusercontent.com/hippke/tls/master/docs/source/logo.png)
 ### An optimized transit-fitting algorithm to search for periodic transits of small planets
 [![Image](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/hippke/tls/blob/master/LICENSE)
-[![Image](https://img.shields.io/badge/Python%20pip-3.5%2B-blue.svg)](https://pypi.org/project/transitleastsquares/)
+[![Image](https://img.shields.io/badge/Python-2.7%20%26%203.5%2B-blue.svg)](https://pypi.org/project/transitleastsquares/)
+[![Image](https://img.shields.io/badge/pip%20install-transitleastsquares-blue.svg)](https://pypi.org/project/transitleastsquares/)
 [![Image](https://img.shields.io/badge/documentation-%E2%9C%93-blue.svg)](https://transitleastsquares.readthedocs.io/en/latest/index.html)
 [![Image](https://img.shields.io/badge/tutorials-%E2%9C%93-blue.svg)](https://github.com/hippke/tls/tree/master/tutorials)
 [![Image](https://img.shields.io/badge/arXiv-1901.02015-blue.svg)](https://arxiv.org/abs/1901.02015)
 [![Build Status](https://travis-ci.com/hippke/tls.svg?branch=master)](https://travis-ci.com/hippke/tls)
-[![Image](https://img.shields.io/twitter/follow/hippke.svg?label=Follow&style=social)](https://twitter.com/hippke)
 
 
 ## Motivation
