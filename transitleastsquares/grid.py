@@ -1,3 +1,4 @@
+from __future__ import division, print_function
 import numba
 import transitleastsquares.tls_constants as tls_constants
 import numpy

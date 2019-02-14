@@ -1,5 +1,5 @@
+from __future__ import division, print_function
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
-#import scipy.interpolate
 import numpy
 import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.interpolation import interp1d

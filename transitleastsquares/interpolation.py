@@ -1,3 +1,4 @@
+from __future__ import division, print_function
 import numpy
 import numba
 from math import floor
@@ -15,7 +16,7 @@ def interpolation_search(x, z):
     imax = n - 1
     while imax - imin > 1:
         s = (z - x[imin]) / (x[imax] - x[imin])
-        j = imin + floor((imax - imin) * s)
+        j = int(imin + floor((imax - imin) * s))
         if z >= x[j + 1]:
             imin = j + 1
         elif z < x[j]:

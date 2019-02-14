@@ -1,9 +1,8 @@
+from __future__ import division, print_function
 import sys
 from os import path
-if sys.version_info[0] < 3:
-    from ConfigParser import ConfigParser
-else:
-    from configparser import ConfigParser
+from configparser import ConfigParser
+
 
 """Magic constants"""
 resources_dir = path.join(path.dirname(__file__))

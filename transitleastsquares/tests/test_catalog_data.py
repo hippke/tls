@@ -1,20 +1,9 @@
+from __future__ import division, print_function
 import numpy
 from transitleastsquares import catalog_info
 
 if __name__ == "__main__":
     print("Starting test: catalog_data...")
-
-    (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
-        TIC_ID=279741377
-    )
-    numpy.testing.assert_equal((a, b), (0.354, 0.2321))
-    numpy.testing.assert_equal(mass, 1.07496)
-    numpy.testing.assert_equal(mass_min, 0.129324)
-    numpy.testing.assert_equal(mass_max, 0.129324)
-    numpy.testing.assert_equal(radius, 2.87762)
-    numpy.testing.assert_equal(radius_min, 0.418964)
-    numpy.testing.assert_equal(radius_max, 0.418964)
-    print("Test passed: TESS Input Catalog (TIC) pull from Vizier using astroquery")
 
     (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
         EPIC_ID=204341806
@@ -61,4 +50,19 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(radius_max, 0.054, decimal=3)
     numpy.testing.assert_almost_equal(radius_min, 0.054, decimal=3)
     print("Test passed: KIC catalog pull from Vizier using astroquery")
+
+
+    (a, b), mass, mass_min, mass_max, radius, radius_min, radius_max = catalog_info(
+        TIC_ID=279741377
+    )
+    numpy.testing.assert_equal((a, b), (0.354, 0.2321))
+    numpy.testing.assert_equal(mass, 1.07496)
+    numpy.testing.assert_equal(mass_min, 0.129324)
+    numpy.testing.assert_equal(mass_max, 0.129324)
+    numpy.testing.assert_equal(radius, 2.87762)
+    numpy.testing.assert_equal(radius_min, 0.418964)
+    numpy.testing.assert_equal(radius_max, 0.418964)
+    print("Test passed: TESS Input Catalog (TIC) pull from Vizier using astroquery")
+
+    
     print('All tests passed')
