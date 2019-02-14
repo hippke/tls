@@ -111,21 +111,6 @@ class transitleastsquares(object):
                 + " CPU threads"
             )
 
-        p = multiprocessing.Pool(processes=self.use_threads)
-        params = partial(
-            search_period,
-            t=self.t,
-            y=self.y,
-            dy=self.dy,
-            transit_depth_min=self.transit_depth_min,
-            R_star_min=self.R_star_min,
-            R_star_max=self.R_star_max,
-            M_star_min=self.M_star_min,
-            M_star_max=self.M_star_max,
-            lc_arr=lc_arr,
-            lc_cache_overview=lc_cache_overview,
-            T0_fit_margin=self.T0_fit_margin,
-        )
         if self.show_progress_bar:
             bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"
             pbar = tqdm(total=numpy.size(periods), smoothing=0.3, bar_format=bar_format)
@@ -145,15 +130,54 @@ class transitleastsquares(object):
         test_statistic_rows = []
         test_statistic_depths = []
 
-        # Run multi-core search
-        for data in p.imap_unordered(params, periods):
-            test_statistic_periods.append(data[0])
-            test_statistic_residuals.append(data[1])
-            test_statistic_rows.append(data[2])
-            test_statistic_depths.append(data[3])
-            if self.show_progress_bar:
-                pbar.update(1)
-        p.close()
+        if self.use_threads > 1:  # Run multi-core search
+            p = multiprocessing.Pool(processes=self.use_threads)
+            params = partial(
+                search_period,
+                t=self.t,
+                y=self.y,
+                dy=self.dy,
+                transit_depth_min=self.transit_depth_min,
+                R_star_min=self.R_star_min,
+                R_star_max=self.R_star_max,
+                M_star_min=self.M_star_min,
+                M_star_max=self.M_star_max,
+                lc_arr=lc_arr,
+                lc_cache_overview=lc_cache_overview,
+                T0_fit_margin=self.T0_fit_margin,
+            )
+            for data in p.imap_unordered(params, periods):
+                test_statistic_periods.append(data[0])
+                test_statistic_residuals.append(data[1])
+                test_statistic_rows.append(data[2])
+                test_statistic_depths.append(data[3])
+                if self.show_progress_bar:
+                    pbar.update(1)
+            p.close()
+
+        else:
+            for period in periods:
+                data = search_period(
+                    period=period,
+                    t=self.t,
+                    y=self.y,
+                    dy=self.dy,
+                    transit_depth_min=self.transit_depth_min,
+                    R_star_min=self.R_star_min,
+                    R_star_max=self.R_star_max,
+                    M_star_min=self.M_star_min,
+                    M_star_max=self.M_star_max,
+                    lc_arr=lc_arr,
+                    lc_cache_overview=lc_cache_overview,
+                    T0_fit_margin=self.T0_fit_margin
+                    )
+                test_statistic_periods.append(data[0])
+                test_statistic_residuals.append(data[1])
+                test_statistic_rows.append(data[2])
+                test_statistic_depths.append(data[3])
+                if self.show_progress_bar:
+                    pbar.update(1)
+
         if self.show_progress_bar:
             pbar.close()
 
