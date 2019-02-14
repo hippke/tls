@@ -29,7 +29,7 @@ args = parser.parse_args()
 use_config_file = False
 if args.config is not None:
     try:
-        config = configparser.ConfigParser()
+        config = ConfigParser()
         config.read(args.config)
         R_star = float(config["Grid"]["R_star"])
         R_star_min = float(config["Grid"]["R_star_min"])

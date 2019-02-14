@@ -90,5 +90,3 @@ TLS solves the issue of very small period ranges by requiring at least 100 trial
 ``Searching 18113 data points, 4726 periods from 0.602 to 27.867 days``
 
 You can use this information to increase your period search range accordingly.
-
-

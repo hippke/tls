@@ -1,3 +1,4 @@
+import os
 import numpy
 import batman
 from transitleastsquares import transitleastsquares
@@ -43,10 +44,6 @@ if __name__ == "__main__":
         oversampling_factor=5,
         duration_grid_step=1.02
     )
-
-    numpy.testing.assert_equal(results.in_transit_count, 21)
-    numpy.testing.assert_equal(results.after_transit_count, 21)
-    numpy.testing.assert_equal(results.before_transit_count, 22)
 
     numpy.testing.assert_almost_equal(results.chi2_min, 8831.654060613922, decimal=5)
     numpy.testing.assert_almost_equal(results.chi2red_min, 0.6719152511118321, decimal=5)
@@ -136,7 +133,7 @@ if __name__ == "__main__":
         results.depth_mean_odd, (0.999920, 1.209993e-05), decimal=5)
     numpy.testing.assert_almost_equal(
         results.depth_mean, (0.999917, 6.086923e-06), decimal=5)
-    
+
     numpy.testing.assert_almost_equal(
         results.transit_depths, [0.99991085, 0.99992095, 0.99992007], decimal=5)
     numpy.testing.assert_almost_equal(
@@ -158,4 +155,3 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(
         results.snr_pink_per_transit, [52.24377, 46.32278, 46.8391], decimal=5)
     print('passed')
-    

@@ -7,7 +7,7 @@ else:
 
 """Magic constants"""
 resources_dir = path.join(path.dirname(__file__))
-config = configparser.ConfigParser()
+config = ConfigParser()
 config.read(path.join(path.abspath(path.dirname(__file__)), "version.cfg"))
 TLS_VERSIONING = config["TLS"]["Version"]
 TLS_DATE = config["TLS"]["Date"]
