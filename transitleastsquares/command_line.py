@@ -3,6 +3,7 @@ from transitleastsquares.helpers import cleaned_array
 import transitleastsquares.tls_constants as tls_constants
 import numpy
 import os
+import sys
 if sys.version_info[0] < 3:
     from ConfigParser import ConfigParser
 else:
