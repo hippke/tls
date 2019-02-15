@@ -44,15 +44,15 @@ class interp1d(object):
         (self._index, self._theta) = self._locate(x_new, x)
 
     @staticmethod
-    @numba.guvectorize('(i8[:],f8[:],f8[:],f8[:])', '(m),(m),(n)->(m)')
+    @numba.guvectorize("(i8[:],f8[:],f8[:],f8[:])", "(m),(m),(n)->(m)")
     def _linear(index, theta, y, y_new):
         for (j, (i, t)) in enumerate(zip(index, theta)):
-            y_new[j] = lerp(y[i:i + 2], t)
+            y_new[j] = lerp(y[i : i + 2], t)
 
     def __call__(self, y):
         return self._linear(self._index, self._theta, y)
 
-    @numba.guvectorize('(f8[:],f8[:],i8[:],f8[:])', '(),(n)->(),()')
+    @numba.guvectorize("(f8[:],f8[:],i8[:],f8[:])", "(),(n)->(),()")
     def _locate(x_new, x, index, theta):
         index[0] = i = interpolation_search(x, x_new[0])
         theta[0] = (x_new[0] - x[i]) / (x[i + 1] - x[i])

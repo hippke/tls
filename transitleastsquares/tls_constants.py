@@ -5,7 +5,13 @@ import transitleastsquares.version as tls_version
 
 """Magic constants"""
 resources_dir = path.join(path.dirname(__file__))
-TLS_VERSION = "Transit Least Squares TLS " + tls_version.TLS_VERSIONING + " (" + tls_version.TLS_DATE + ")"
+TLS_VERSION = (
+    "Transit Least Squares TLS "
+    + tls_version.TLS_VERSIONING
+    + " ("
+    + tls_version.TLS_DATE
+    + ")"
+)
 
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
@@ -47,7 +53,7 @@ DEFAULT_INC = 89.21
 # Grazing template
 GRAZING_B = 0.99
 
-# Box-shaped (steep trapezoid) template 
+# Box-shaped (steep trapezoid) template
 BOX_PERIOD = 29
 BOX_RP = 0.1
 BOX_A = 26.9
@@ -110,29 +116,29 @@ MINIMUM_PERIOD_GRID_SIZE = 100
 
 # Warn the user if unknown **kwargs are given as parameters
 VALID_PARAMETERS = [
-    "R_star", 
-    "R_star_min", 
-    "R_star_max", 
-    "M_star", 
-    "M_star_min", 
-    "M_star_max", 
-    "period_min", 
-    "period_max", 
-    "n_transits_min", 
-    "per", 
-    "rp", 
-    "a", 
-    "inc", 
-    "b", 
-    "ecc", 
-    "w", 
-    "u", 
-    "limb_dark", 
-    "duration_grid_step", 
-    "transit_depth_min", 
-    "oversampling_factor", 
-    "T0_fit_margin", 
+    "R_star",
+    "R_star_min",
+    "R_star_max",
+    "M_star",
+    "M_star_min",
+    "M_star_max",
+    "period_min",
+    "period_max",
+    "n_transits_min",
+    "per",
+    "rp",
+    "a",
+    "inc",
+    "b",
+    "ecc",
+    "w",
+    "u",
+    "limb_dark",
+    "duration_grid_step",
+    "transit_depth_min",
+    "oversampling_factor",
+    "T0_fit_margin",
     "use_threads",
     "show_progress_bar",
-    "transit_template"
-    ]
+    "transit_template",
+]

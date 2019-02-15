@@ -80,7 +80,6 @@ def fractional_transit(
     x_new = numpy.linspace(-0.5, 0.5, occupied_samples)
     f = interp1d(x_new, reference_time)
     y_new = f(reference_flux)
-    
 
     # Patch ends with ones ("1")
     missing_samples = samples - occupied_samples

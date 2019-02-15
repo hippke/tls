@@ -24,26 +24,20 @@ from transitleastsquares.stats import (
     calculate_fill_factor,
     intransit_stats,
     snr_stats,
-    count_stats
-    )
+    count_stats,
+)
 from transitleastsquares.catalog import catalog_info
-from transitleastsquares.helpers import (
-    resample,
-    transit_mask
-    )
+from transitleastsquares.helpers import resample, transit_mask
 from transitleastsquares.helpers import impact_to_inclination
-from transitleastsquares.grid import (
-    duration_grid,
-    period_grid
-    )
+from transitleastsquares.grid import duration_grid, period_grid
 from transitleastsquares.core import (
     edge_effect_correction,
     lowest_residuals_in_this_duration,
     out_of_transit_residuals,
     fold,
     foldfast,
-    search_period
-    )
+    search_period,
+)
 from transitleastsquares.transit import reference_transit, fractional_transit, get_cache
 from transitleastsquares.validate import validate_inputs, validate_args
 
@@ -106,7 +100,7 @@ class transitleastsquares(object):
         # For now, only single-threading in Python 2 is supported
         if sys.version_info[0] < 3:
             self.use_threads = 1
-            warnings.warn('This TLS version supports no multithreading on Python 2')
+            warnings.warn("This TLS version supports no multithreading on Python 2")
 
         if self.use_threads == multiprocessing.cpu_count():
             print("Using all " + str(self.use_threads) + " CPU threads")
@@ -176,8 +170,8 @@ class transitleastsquares(object):
                     M_star_max=self.M_star_max,
                     lc_arr=lc_arr,
                     lc_cache_overview=lc_cache_overview,
-                    T0_fit_margin=self.T0_fit_margin
-                    )
+                    T0_fit_margin=self.T0_fit_margin,
+                )
                 test_statistic_periods.append(data[0])
                 test_statistic_residuals.append(data[1])
                 test_statistic_rows.append(data[2])
@@ -225,7 +219,9 @@ class transitleastsquares(object):
             T0 = 0
             transit_times = numpy.nan
             transit_duration_in_days = numpy.nan
-            internal_samples = int(len(self.y)) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
+            internal_samples = (
+                int(len(self.y)) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
+            )
             folded_phase = numpy.nan
             folded_y = numpy.nan
             folded_dy = numpy.nan
@@ -277,16 +273,13 @@ class transitleastsquares(object):
                 dy=self.dy,
                 period=period,
                 T0_fit_margin=self.T0_fit_margin,
-                show_progress_bar=self.show_progress_bar
-                )
+                show_progress_bar=self.show_progress_bar,
+            )
             transit_times = all_transit_times(T0, self.t, period)
 
-            transit_duration_in_days =  calculate_transit_duration_in_days(
-                self.t,
-                period,
-                transit_times,
-                duration
-                )
+            transit_duration_in_days = calculate_transit_duration_in_days(
+                self.t, period, transit_times, duration
+            )
             phases = fold(self.t, period, T0=T0 + period / 2)
             sort_index = numpy.argsort(phases)
             folded_phase = phases[sort_index]
@@ -294,10 +287,10 @@ class transitleastsquares(object):
             folded_dy = self.dy[sort_index]
             # Model phase, shifted by half a cadence so that mid-transit is at phase=0.5
             model_folded_phase = numpy.linspace(
-                    0 + 1 / numpy.size(self.t) / 2,
-                    1 + 1 / numpy.size(self.t) / 2,
-                    numpy.size(self.t),
-                )
+                0 + 1 / numpy.size(self.t) / 2,
+                1 + 1 / numpy.size(self.t) / 2,
+                numpy.size(self.t),
+            )
             # Folded model / model curve
             # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
             # so we need to roll the model to match the model so that its mid-transit
@@ -305,8 +298,9 @@ class transitleastsquares(object):
             fill_factor = calculate_fill_factor(self.t)
             fill_half = 1 - ((1 - fill_factor) * 0.5)
             stretch = calculate_stretch(self.t, period, transit_times)
-            internal_samples = (int(len(self.y) / len(transit_times))) * \
-                tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE            
+            internal_samples = (
+                int(len(self.y) / len(transit_times))
+            ) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
 
             # Folded model flux
             model_folded_model = fractional_transit(
@@ -321,7 +315,7 @@ class transitleastsquares(object):
                 ecc=self.ecc,
                 w=self.w,
                 u=self.u,
-                limb_dark=self.limb_dark
+                limb_dark=self.limb_dark,
             )
             # Full unfolded light curve model
             model_transit_single = fractional_transit(
@@ -336,27 +330,17 @@ class transitleastsquares(object):
                 ecc=self.ecc,
                 w=self.w,
                 u=self.u,
-                limb_dark=self.limb_dark
+                limb_dark=self.limb_dark,
             )
             model_lightcurve_model, model_lightcurve_time = model_lightcurve(
-                transit_times,
-                period,
-                self.t,
-                model_transit_single
-                )
-            depth_mean_odd, \
-            depth_mean_even, \
-            depth_mean_odd_std, \
-            depth_mean_even_std, \
-            all_flux_intransit_odd, \
-            all_flux_intransit_even, \
-            per_transit_count,\
-            transit_depths, \
-            transit_depths_uncertainties = intransit_stats(
-                    self.t, self.y, transit_times, transit_duration_in_days)
+                transit_times, period, self.t, model_transit_single
+            )
+            depth_mean_odd, depth_mean_even, depth_mean_odd_std, depth_mean_even_std, all_flux_intransit_odd, all_flux_intransit_even, per_transit_count, transit_depths, transit_depths_uncertainties = intransit_stats(
+                self.t, self.y, transit_times, transit_duration_in_days
+            )
             all_flux_intransit = numpy.concatenate(
                 [all_flux_intransit_odd, all_flux_intransit_even]
-                )
+            )
             snr_per_transit, snr_pink_per_transit = snr_stats(
                 t=self.t,
                 y=self.y,
@@ -365,21 +349,24 @@ class transitleastsquares(object):
                 T0=T0,
                 transit_times=transit_times,
                 transit_duration_in_days=transit_duration_in_days,
-                per_transit_count=per_transit_count
-                )
-            intransit = transit_mask(self.t, period, 2*duration, T0)
+                per_transit_count=per_transit_count,
+            )
+            intransit = transit_mask(self.t, period, 2 * duration, T0)
             flux_ootr = self.y[~intransit]
             depth_mean = numpy.mean(all_flux_intransit)
             depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(
-                per_transit_count) ** (0.5)
+                per_transit_count
+            ) ** (0.5)
             snr = ((1 - depth_mean) / numpy.std(flux_ootr)) * len(
-                all_flux_intransit) ** (0.5)
+                all_flux_intransit
+            ) ** (0.5)
             rp_rs = rp_rs_from_depth(depth=1 - depth, law=self.limb_dark, params=self.u)
 
             if len(all_flux_intransit_odd) > 0:
                 depth_mean_odd = numpy.mean(all_flux_intransit_odd)
                 depth_mean_odd_std = numpy.std(all_flux_intransit_odd) / numpy.sum(
-                len(all_flux_intransit_odd)) ** (0.5)
+                    len(all_flux_intransit_odd)
+                ) ** (0.5)
             else:
                 depth_mean_odd = numpy.nan
                 depth_mean_odd_std = numpy.nan
@@ -387,17 +374,15 @@ class transitleastsquares(object):
             if len(all_flux_intransit_even) > 0:
                 depth_mean_even = numpy.mean(all_flux_intransit_even)
                 depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(
-                len(all_flux_intransit_even)) ** (0.5)
+                    len(all_flux_intransit_even)
+                ) ** (0.5)
             else:
                 depth_mean_even = numpy.nan
                 depth_mean_even_std = numpy.nan
 
             in_transit_count, after_transit_count, before_transit_count = count_stats(
-                self.t,
-                self.y,
-                transit_times,
-                transit_duration_in_days
-                )
+                self.t, self.y, transit_times, transit_duration_in_days
+            )
 
             # Odd even mismatch in standard deviations
             odd_even_difference = abs(depth_mean_odd - depth_mean_even)
@@ -460,5 +445,5 @@ class transitleastsquares(object):
             folded_y,
             folded_dy,
             folded_phase,
-            model_folded_model
+            model_folded_model,
         )

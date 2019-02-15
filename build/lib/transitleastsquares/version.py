@@ -1,2 +1,0 @@
-TLS_VERSIONING = "1.0.22"
-TLS_DATE = "15 February 2019"

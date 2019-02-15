@@ -23,11 +23,13 @@ def validate_inputs(t, y, dy):
     if numpy.size(y) < 3 or numpy.size(t) < 3:
         raise ValueError("Too few values in data set")
     if numpy.mean(y) > 1.01 or numpy.mean(y) < 0.99:
-        text = "Warning: The mean flux should be normalized to 1" \
-            + ", but it was found to be " \
+        text = (
+            "Warning: The mean flux should be normalized to 1"
+            + ", but it was found to be "
             + str(numpy.mean(y))
+        )
         warnings.warn(text)
-        
+
     if min(y) < 0:
         raise ValueError("Flux values must be positive")
     if max(y) >= float("inf"):
@@ -49,7 +51,7 @@ def validate_args(self, kwargs):
     # Warn user if unknown parameters
     for key, value in kwargs.items():
         if key not in tls_constants.VALID_PARAMETERS:
-            text = 'Ignoring unknown parameter: ' + str(key)
+            text = "Ignoring unknown parameter: " + str(key)
             warnings.warn(text)
 
     """Validate **kwargs and set to defaults where missing"""

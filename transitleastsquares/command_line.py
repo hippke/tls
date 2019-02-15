@@ -6,6 +6,7 @@ import numpy
 import os
 import sys
 from configparser import ConfigParser
+
 try:
     import argparse
 except:
@@ -57,13 +58,9 @@ else:
 
 # Load data
 if use_config_file:
-    data = numpy.genfromtxt(
-    args.lightcurve,
-    delimiter=args.delimiter)
+    data = numpy.genfromtxt(args.lightcurve, delimiter=args.delimiter)
 else:
-    data = numpy.genfromtxt(
-        args.lightcurve,
-        delimiter=',')
+    data = numpy.genfromtxt(args.lightcurve, delimiter=",")
 
 t = data[:, 0]
 y = data[:, 1]
@@ -92,7 +89,7 @@ if use_config_file:
         transit_depth_min=transit_depth_min,
         oversampling_factor=oversampling_factor,
         T0_fit_margin=T0_fit_margin,
-        use_threads=use_threads
+        use_threads=use_threads,
     )
 else:
     results = model.power()
@@ -102,22 +99,25 @@ else:
 
 # Determine path and file names of output files
 if args.output is None:
-    file_stats = args.lightcurve + '_statistics.csv'
-    file_power =  args.lightcurve + '_power.csv'
+    file_stats = args.lightcurve + "_statistics.csv"
+    file_power = args.lightcurve + "_power.csv"
 else:
-    file_stats = os.path.join(args.output, args.lightcurve + '_statistics.csv')
-    file_power = os.path.join(args.output, args.lightcurve + '_power.csv')
+    file_stats = os.path.join(args.output, args.lightcurve + "_statistics.csv")
+    file_power = os.path.join(args.output, args.lightcurve + "_power.csv")
 
 # Save
 try:
     numpy.savetxt(
         file_power,
-        numpy.column_stack([
-            list(dict(list(results.items())[25:26]).values())[0], 
-            list(dict(list(results.items())[26:27]).values())[0]]
-            ),
-        delimiter=',',
-        fmt='%1.6f')
+        numpy.column_stack(
+            [
+                list(dict(list(results.items())[25:26]).values())[0],
+                list(dict(list(results.items())[26:27]).values())[0],
+            ]
+        ),
+        delimiter=",",
+        fmt="%1.6f",
+    )
     print("SDE-ogram saved to", file_stats)
 
     statistics = dict(list(results.items())[0:25])

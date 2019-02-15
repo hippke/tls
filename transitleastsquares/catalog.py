@@ -12,11 +12,15 @@ def catalog_info_KIC(KIC_ID):
     try:
         from astroquery.vizier import Vizier
     except:
-        raise ImportError('Package astroquery required but failed to import')
+        raise ImportError("Package astroquery required but failed to import")
 
     columns = ["Teff", "log(g)", "Rad", "E_Rad", "e_Rad", "Mass", "E_Mass", "e_Mass"]
     catalog = "J/ApJS/229/30/catalog"
-    result = Vizier(columns=columns).query_constraints(KIC=KIC_ID, catalog=catalog)[0].as_array()
+    result = (
+        Vizier(columns=columns)
+        .query_constraints(KIC=KIC_ID, catalog=catalog)[0]
+        .as_array()
+    )
     Teff = result[0][0]
     logg = result[0][1]
     radius = result[0][2]
@@ -34,16 +38,18 @@ def catalog_info_EPIC(EPIC_ID):
     try:
         from astroquery.vizier import Vizier
     except:
-        raise ImportError('Package astroquery required but failed to import')
+        raise ImportError("Package astroquery required but failed to import")
     if type(EPIC_ID) is not int:
         raise TypeError('EPIC_ID ID must be of type "int"')
     if (EPIC_ID < 201000001) or (EPIC_ID > 251813738):
-        raise TypeError(
-            "EPIC_ID ID must be in range 201000001 to 251813738"
-        )
+        raise TypeError("EPIC_ID ID must be in range 201000001 to 251813738")
     columns = ["Teff", "logg", "Rad", "E_Rad", "e_Rad", "Mass", "E_Mass", "e_Mass"]
     catalog = "IV/34/epic"
-    result = Vizier(columns=columns).query_constraints(ID=EPIC_ID, catalog=catalog)[0].as_array()
+    result = (
+        Vizier(columns=columns)
+        .query_constraints(ID=EPIC_ID, catalog=catalog)[0]
+        .as_array()
+    )
     Teff = result[0][0]
     logg = result[0][1]
     radius = result[0][2]
@@ -58,13 +64,11 @@ def catalog_info_EPIC(EPIC_ID):
 def catalog_info_TIC(TIC_ID):
     """Takes TIC_ID, returns stellar information from online catalog using Vizier"""
     if type(TIC_ID) is not int:
-            raise TypeError(
-                'TIC_ID ID must be of type "int"'
-            )
+        raise TypeError('TIC_ID ID must be of type "int"')
     try:
         from astroquery.mast import Catalogs
     except:
-        raise ImportError('Package astroquery required but failed to import')
+        raise ImportError("Package astroquery required but failed to import")
 
     result = Catalogs.query_criteria(catalog="Tic", ID=TIC_ID).as_array()
     Teff = result[0][64]
@@ -76,7 +80,6 @@ def catalog_info_TIC(TIC_ID):
     mass_max = result[0][73]
     mass_min = result[0][73]
     return Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max
-    
 
 
 def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
@@ -98,15 +101,21 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
 
     # KOI CASE (Kepler K1)
     if KIC_ID is not None:
-        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_KIC(KIC_ID)
+        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_KIC(
+            KIC_ID
+        )
 
     # EPIC CASE (Kepler K2)
     if EPIC_ID is not None:
-        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_EPIC(EPIC_ID)
+        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_EPIC(
+            EPIC_ID
+        )
 
     # TESS CASE
     if TIC_ID is not None:
-        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_TIC(TIC_ID)
+        Teff, logg, radius, radius_min, radius_max, mass, mass_min, mass_max = catalog_info_TIC(
+            TIC_ID
+        )
         ld = numpy.genfromtxt(
             path.join(tls_constants.resources_dir, "ld_claret_tess.csv"),
             skip_header=1,
@@ -163,12 +172,4 @@ def catalog_info(EPIC_ID=None, TIC_ID=None, KIC_ID=None):
     if radius_max == 0.0:
         radius_max = numpy.nan
 
-    return (
-        (a, b),
-        mass,
-        mass_min,
-        mass_max,
-        radius,
-        radius_min,
-        radius_max,
-    )
+    return ((a, b), mass, mass_min, mass_max, radius, radius_min, radius_max)

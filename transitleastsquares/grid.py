@@ -33,8 +33,12 @@ def T14(
 
 
 def duration_grid(periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
-    duration_max = T14(R_s=tls_constants.R_STAR_MAX, M_s=tls_constants.M_STAR_MAX, P=min(periods))
-    duration_min = T14(R_s=tls_constants.R_STAR_MIN, M_s=tls_constants.M_STAR_MIN, P=max(periods))
+    duration_max = T14(
+        R_s=tls_constants.R_STAR_MAX, M_s=tls_constants.M_STAR_MAX, P=min(periods)
+    )
+    duration_min = T14(
+        R_s=tls_constants.R_STAR_MIN, M_s=tls_constants.M_STAR_MIN, P=max(periods)
+    )
     durations = [duration_min]
     current_depth = duration_min
     while current_depth * log_step < duration_max:
