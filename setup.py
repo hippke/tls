@@ -1,21 +1,12 @@
-import sys
 from setuptools import setup
-from os import path
+import transitleastsquares.version as tls_version
 
-this_directory = path.abspath(path.dirname(__file__))
-
-# Pull TLS version from "config.cfg"
-if sys.version_info[0] < 3:
-    TLS_VERSION = '1'
-else:
-    from configparser import ConfigParser
-    config = ConfigParser()
-    config.read(path.join(this_directory, "transitleastsquares", "version.cfg"))
-    TLS_VERSION = config["TLS"]["Version"]
 
 # If Python3: Add "README.md" to setup. 
 # Useful for PyPI (pip install transitleastsquares). Irrelevant for users using Python2
 try:
+    from os import path
+    this_directory = path.abspath(path.dirname(__file__))
     with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
 except:
@@ -23,7 +14,7 @@ except:
 
     
 setup(name='transitleastsquares',
-    version=TLS_VERSION,
+    version=tls_version.TLS_VERSIONING,
     description='An optimized transit-fitting algorithm to search for periodic transits of small planets',
     long_description=long_description,
     long_description_content_type='text/markdown',

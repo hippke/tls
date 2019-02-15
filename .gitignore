@@ -1,6 +1,8 @@
 .directory
 .ipynb_checkpoints
+.pyc
 .vscode
 *.directory
 *.ipynb_checkpoints
 *.vscode
+*.pyc

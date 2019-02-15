@@ -1,16 +1,11 @@
 from __future__ import division, print_function
 import sys
 from os import path
-from configparser import ConfigParser
-
+import transitleastsquares.version as tls_version
 
 """Magic constants"""
 resources_dir = path.join(path.dirname(__file__))
-config = ConfigParser()
-config.read(path.join(path.abspath(path.dirname(__file__)), "version.cfg"))
-TLS_VERSIONING = config["TLS"]["Version"]
-TLS_DATE = config["TLS"]["Date"]
-TLS_VERSION = "Transit Least Squares TLS " + TLS_VERSIONING + " (" + TLS_DATE + ")"
+TLS_VERSION = "Transit Least Squares TLS " + tls_version.TLS_VERSIONING + " (" + tls_version.TLS_DATE + ")"
 
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
