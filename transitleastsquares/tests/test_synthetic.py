@@ -7,6 +7,7 @@ from transitleastsquares import transitleastsquares
 
 if __name__ == "__main__":
     print("Starting test: synthetic...", end="")
+    import numpy; print(numpy.sum(1+1))
     numpy.random.seed(seed=0)  # reproducibility
     # Create test data
     start = 48
