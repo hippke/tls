@@ -4,7 +4,6 @@ import multiprocessing
 import numpy
 import sys
 import warnings
-import configparser
 from functools import partial
 from tqdm import tqdm
 
