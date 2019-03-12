@@ -49,22 +49,23 @@ Here is a short animation of a real search for planets in Kepler K2 data. For mo
 ![image](https://raw.githubusercontent.com/hippke/tls/master/docs/source/animation.gif)
 
 ## Attribution
-Please cite [Hippke & Heller (2019, A&A accepted)](https://ui.adsabs.harvard.edu/#abs/2019arXiv190102015H/abstract) if you find this code useful in your research. The BibTeX entry for the paper is:
+Please cite [Hippke & Heller (2019, A&A 623, A39)](https://ui.adsabs.harvard.edu/#abs/2019A&A...623A..39H/abstract) if you find this code useful in your research. The BibTeX entry for the paper is:
 
 ```
-@ARTICLE{2019arXiv190102015H,
+@ARTICLE{2019A&A...623A..39H,
        author = {{Hippke}, Michael and {Heller}, Ren{\'e}},
-        title = "{Transit Least Squares: An optimized transit detection algorithm to search for periodic transits of small planets}",
-      journal = {arXiv e-prints},
-     keywords = {Astrophysics - Earth and Planetary Astrophysics, Astrophysics - Instrumentation and Methods for Astrophysics},
-         year = 2019,
-        month = Jan,
-          eid = {arXiv:1901.02015},
-        pages = {arXiv:1901.02015},
+        title = "{Optimized transit detection algorithm to search for periodic transits of small planets}",
+      journal = {\aap},
+         year = "2019",
+        month = "Mar",
+       volume = {623},
+          eid = {A39},
+        pages = {A39},
+          doi = {10.1051/0004-6361/201834672},
 archivePrefix = {arXiv},
        eprint = {1901.02015},
  primaryClass = {astro-ph.EP},
-       adsurl = {https://ui.adsabs.harvard.edu/\#abs/2019arXiv190102015H},
+       adsurl = {https://ui.adsabs.harvard.edu/\#abs/2019A&A...623A..39H},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 ```
