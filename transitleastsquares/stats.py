@@ -426,6 +426,11 @@ def snr_stats(
     intransit = transit_mask(t, period, 2 * duration, T0)
     flux_ootr = y[~intransit]
 
+    try:
+        pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
+    except:
+        pinknoise = numpy.nan
+
     # Estimate SNR and pink SNR
     # Second run because now the out of transit points are known
     if len(flux_ootr) > 0:
@@ -448,7 +453,6 @@ def snr_stats(
 
         intransit_points = numpy.size(y[idx_intransit])
         try:
-            pinknoise = pink_noise(flux_ootr, int(numpy.mean(per_transit_count)))
             snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
             if intransit_points > 0 and not numpy.isnan(std):
                 std_binned = std / intransit_points ** 0.5

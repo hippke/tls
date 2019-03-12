@@ -10,6 +10,12 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 1.0.23 (12 March 2019)
+------------------------------------
+
+:Fixed: A bug in the post-detection statistics which caused a delay in large dataset (e.g., Kepler K1)
+
+
 Version 1.0.21 (14 February 2019)
 ------------------------------------
 
