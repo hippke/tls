@@ -22,4 +22,4 @@ If the command ``python`` does not point to Python 3 on your machine, you can tr
 Compatibility
 ------------------------
 
-TLS has been `tested to work <https://travis-ci.com/hippke/tls>`_ with Python 3.5, 3.6, 3.7. It fails on Python 2.7 due to the lack of proper multi-processing support (in particular, `multiple arguments <https://stackoverflow.com/questions/5442910/python-multiprocessing-pool-map-for-multiple-arguments>`_ are difficult to handle).
+TLS has been `tested to work <https://travis-ci.com/hippke/tls>`_ with Python 2.7, 3.5, 3.6, 3.7. It works on Python 2.7, but only in single-threaded mode.
