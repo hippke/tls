@@ -85,7 +85,7 @@ def period_grid(
             + ")"
         )
         warnings.warn(text)
-        R_star = 0.01
+        M_star = 0.01
 
     if M_star > 1000:
         text = (
@@ -94,7 +94,7 @@ def period_grid(
             + ")"
         )
         warnings.warn(text)
-        R_star = 1000
+        M_star = 1000
 
     R_star = R_star * tls_constants.R_sun
     M_star = M_star * tls_constants.M_sun
