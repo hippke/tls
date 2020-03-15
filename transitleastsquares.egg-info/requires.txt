@@ -1,0 +1,10 @@
+astroquery>=0.3.9
+numpy
+numba
+tqdm
+batman-package
+argparse
+configparser
+
+[:python_version < "3"]
+astropy<3
