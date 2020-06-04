@@ -59,12 +59,12 @@ if __name__ == "__main__":
             TIC_ID=279741377
         )
         numpy.testing.assert_equal((a, b), (0.354, 0.2321))
-        numpy.testing.assert_equal(mass, 1.07496)
-        numpy.testing.assert_equal(mass_min, 0.129324)
-        numpy.testing.assert_equal(mass_max, 0.129324)
-        numpy.testing.assert_equal(radius, 2.87762)
-        numpy.testing.assert_equal(radius_min, 0.418964)
-        numpy.testing.assert_equal(radius_max, 0.418964)
+        numpy.testing.assert_equal(mass, 1.12)
+        numpy.testing.assert_equal(mass_min, 0.148162)
+        numpy.testing.assert_equal(mass_max, 0.148162)
+        numpy.testing.assert_equal(radius, 3.08104)
+        numpy.testing.assert_equal(radius_min, 0.167789)
+        numpy.testing.assert_equal(radius_max, 0.167789)
         print("Test passed: TESS Input Catalog (TIC) pull from Vizier using astroquery")
 
         print("All tests passed")

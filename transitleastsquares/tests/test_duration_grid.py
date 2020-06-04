@@ -14,6 +14,6 @@ if __name__ == "__main__":
     )
     durations = duration_grid(periods, log_step=1.05, shortest=2)
     numpy.testing.assert_almost_equal(max(durations), 0.12)
-    numpy.testing.assert_almost_equal(min(durations), 0.011618569353576557)
-    numpy.testing.assert_equal(len(durations), 49)
+    numpy.testing.assert_almost_equal(min(durations), 0.004562690993268325)
+    numpy.testing.assert_equal(len(durations), 69)
     print("passed")

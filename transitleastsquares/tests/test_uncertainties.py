@@ -54,5 +54,5 @@ if __name__ == "__main__":
         duration_grid_step=1.05,
         T0_fit_margin=0.2,
     )
-    numpy.testing.assert_almost_equal(results.SDE, 5.254817340391126, decimal=5)
+    numpy.testing.assert_almost_equal(results.SDE, 5.292594615900944, decimal=5)
     print("passed")

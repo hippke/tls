@@ -19,13 +19,13 @@ if __name__ == "__main__":
     model = transitleastsquares(t, y_filt)
     results = model.power()
 
-    numpy.testing.assert_almost_equal(max(results.power), 45.934646920004326, decimal=5)
+    numpy.testing.assert_almost_equal(max(results.power), 45.49085809486116, decimal=3)
     numpy.testing.assert_almost_equal(
-        max(results.power_raw), 44.00867236551441, decimal=5
+        max(results.power_raw), 42.93056655774114, decimal=3
     )
-    numpy.testing.assert_almost_equal(min(results.power), -0.620153987656165, decimal=5)
+    numpy.testing.assert_almost_equal(min(results.power), -0.6175100139942546, decimal=3)
     numpy.testing.assert_almost_equal(
-        min(results.power_raw), -0.29015390864908414, decimal=5
+        min(results.power_raw), -0.3043720539933344, decimal=3
     )
     print("Detrending of power spectrum from power_raw passed")
 
@@ -39,13 +39,13 @@ if __name__ == "__main__":
     model_second_run = transitleastsquares(t_second_run, y_second_run)
     results_second_run = model_second_run.power()
     numpy.testing.assert_almost_equal(
-        results_second_run.duration, 0.1478628403227008, decimal=5
+        results_second_run.duration, 0.15061016994013998, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results_second_run.SDE, 34.98291056410117, decimal=5
+        results_second_run.SDE, 34.9911304598618, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results_second_run.rp_rs, 0.025852178872027086, decimal=5
+        results_second_run.rp_rs, 0.025852178872027086, decimal=3
     )
 
     print("Passed")

@@ -62,72 +62,72 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(results.period, 365.22218620040417, decimal=5)
     numpy.testing.assert_almost_equal(
         results.transit_times,
-        [68.06015495259413, 433.2823411529983, 798.5045273534024],
+        [68.08637, 433.30855, 798.53074],
         decimal=5,
     )
 
     numpy.testing.assert_almost_equal(results.depth, 0.9998972750356973, decimal=5)
-    numpy.testing.assert_almost_equal(results.duration, 0.41082005564431956, decimal=5)
-    numpy.testing.assert_almost_equal(results.SDE, 4.471095518473202, decimal=5)
+    numpy.testing.assert_almost_equal(results.duration, 0.41845319797978703, decimal=5)
+    numpy.testing.assert_almost_equal(results.SDE, 4.243572802600693, decimal=3)
     numpy.testing.assert_almost_equal(
-        results.odd_even_mismatch, 0.15219910861779098, decimal=5
+        results.odd_even_mismatch, 0.15059221218811772, decimal=3
     )
-    numpy.testing.assert_almost_equal(results.rp_rs, 0.009114758081257387, decimal=5)
+    numpy.testing.assert_almost_equal(results.rp_rs, 0.009114758081257387, decimal=3)
 
     # Full light curve model
     numpy.testing.assert_almost_equal(
-        numpy.sum(results.model_lightcurve_time), 38276049.947393775, decimal=5
+        numpy.sum(results.model_lightcurve_time), 38275494.19583159, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        numpy.sum(results.model_lightcurve_model), 64234.99399704611, decimal=5
-    )
-
-    transit_times_expected = [68.06015495259413, 433.2823411529983, 798.5045273534024]
-    numpy.testing.assert_almost_equal(
-        results.transit_times, transit_times_expected, decimal=5
-    )
-    numpy.testing.assert_almost_equal(results.duration, 0.41082005564431956, decimal=5)
-
-    numpy.testing.assert_almost_equal(
-        max(results.model_folded_phase), 1.0000380285975052, decimal=5
-    )
-    numpy.testing.assert_almost_equal(
-        min(results.model_folded_phase), 3.8028597505324e-05, decimal=5
-    )
-    numpy.testing.assert_almost_equal(
-        numpy.mean(results.model_folded_phase), 0.5000380285975052, decimal=5
+        numpy.sum(results.model_lightcurve_model), 64233.9941755991, decimal=3
     )
 
+    transit_times_expected = [68.086, 433.309, 798.531]
     numpy.testing.assert_almost_equal(
-        results.depth_mean_even, (0.999915, 6.785539e-06), decimal=5
+        results.transit_times, transit_times_expected, decimal=3
+    )
+    numpy.testing.assert_almost_equal(results.duration, 0.41845319797978703, decimal=3)
+
+    numpy.testing.assert_almost_equal(
+        max(results.model_folded_phase), 1.0000380285975052, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results.depth_mean_odd, (0.999920, 1.209993e-05), decimal=5
+        min(results.model_folded_phase), 3.8028597505324e-05, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results.depth_mean, (0.999917, 6.086923e-06), decimal=5
+        numpy.mean(results.model_folded_phase), 0.5000380285975052, decimal=3
     )
 
     numpy.testing.assert_almost_equal(
-        results.transit_depths, [numpy.nan, 0.99991, 0.9999], decimal=5
+        results.depth_mean_even, (0.999915, 6.785539e-06), decimal=3
+    )
+    numpy.testing.assert_almost_equal(
+        results.depth_mean_odd, (0.999920, 1.209993e-05), decimal=3
+    )
+    numpy.testing.assert_almost_equal(
+        results.depth_mean, (0.999917, 6.086923e-06), decimal=3
+    )
+
+    numpy.testing.assert_almost_equal(
+        results.transit_depths, [numpy.nan, 0.99991, 0.9999], decimal=3
     )
 
     numpy.testing.assert_almost_equal(
         results.transit_depths_uncertainties,
         [numpy.nan, 2.92371e-06, 4.48803e-06],
-        decimal=5,
+        decimal=3,
     )
     numpy.testing.assert_almost_equal(
-        results.odd_even_mismatch, 0.15219910861779098, decimal=5
+        results.odd_even_mismatch, 0.15059221218811772, decimal=3
     )
-    numpy.testing.assert_almost_equal(results.transit_count, 3, decimal=5)
-    numpy.testing.assert_almost_equal(results.distinct_transit_count, 2, decimal=5)
-    numpy.testing.assert_almost_equal(results.empty_transit_count, 1, decimal=5)
+    numpy.testing.assert_almost_equal(results.transit_count, 3, decimal=3)
+    numpy.testing.assert_almost_equal(results.distinct_transit_count, 2, decimal=3)
+    numpy.testing.assert_almost_equal(results.empty_transit_count, 1, decimal=3)
     numpy.testing.assert_almost_equal(
-        results.snr_per_transit, [0, 37.05205333, 37.49345826], decimal=5
+        results.snr_per_transit, [0., 37.052, 36.558], decimal=3
     )
-    numpy.testing.assert_almost_equal(results.snr, 52.71163674786351, decimal=5)
+    numpy.testing.assert_almost_equal(results.snr, 52.050323372452034, decimal=3)
     numpy.testing.assert_almost_equal(
-        results.snr_pink_per_transit, [0, 45.47710446, 46.0188779], decimal=5
+        results.snr_pink_per_transit, [0., 45.477, 44.871], decimal=3
     )
     print("passed")
