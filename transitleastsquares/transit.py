@@ -24,6 +24,17 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     m = batman.TransitModel(ma, t)  # initializes model
     flux = m.light_curve(ma)  # calculates light curve
 
+    amplitude = numpy.min(flux)
+    flux = numpy.zeros(len(t))
+    tail = 5
+    for i in range(len(t)):
+        if flux[i] < mu:
+            y[i] = gauss(flux[i], amplitude, mu, sigma)
+        else:
+            y[i] = amplitude * math.exp(-abs(flux[i] - mu) / tail)
+    flux = y
+
+
     # Determine start of transit (first value < 1)
     idx_first = numpy.argmax(flux < 1)
     intransit_flux = flux[idx_first : -idx_first + 1]
@@ -41,6 +52,8 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
 
     return rescaled
 
+def gauss(x, A, mu, sigma):
+    return abs(A) * numpy.exp( -(x - mu)**2 / (2 * sigma**2) )
 
 def fractional_transit(
     duration,
