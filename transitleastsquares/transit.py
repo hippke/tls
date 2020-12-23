@@ -34,7 +34,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     sigma = 0.001
     initialized = False
     for i in range(len(t)):
-        if flux[i] < mu and flux[i - 1] <= flux[i]:
+        if flux[i] < mu and flux[i - 1] >= flux[i]:
             y[i] = gauss(flux[i], amplitude, mu, sigma)
             initialized = True
         elif initialized:
