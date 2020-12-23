@@ -28,15 +28,16 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     flux = m.light_curve(ma)  # calculates light curve
 
     amplitude = numpy.min(flux)
-    flux = numpy.ones(len(t))
     y = numpy.zeros(len(t))
     tail = 5
     mu = 1
     sigma = 0.001
+    initialized = False
     for i in range(len(t)):
         if flux[i] < mu:
             y[i] = gauss(y[i], amplitude, mu, sigma)
-        else:
+            initialized = True
+        elif initialized:
             y[i] = amplitude * math.exp(-abs(y[i] - mu) / tail)
     flux = y + 1
 
