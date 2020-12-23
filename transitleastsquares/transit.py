@@ -28,7 +28,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     flux = m.light_curve(ma)  # calculates light curve
 
     amplitude = numpy.min(flux)
-    y = numpy.zeros(len(t))
+    y = numpy.ones(len(t))
     tail = 5
     mu = 1
     sigma = 0.001
@@ -39,7 +39,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
             initialized = True
         elif initialized:
             y[i] = amplitude * math.exp(-abs(flux[i] - mu) / tail)
-    flux = y + 1
+    flux = y
 
 
     # Determine start of transit (first value < 1)
