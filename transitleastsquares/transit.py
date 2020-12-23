@@ -35,7 +35,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     initialized = False
     for i in range(len(t)):
         if flux[i] < mu:
-            y[i] = gauss(y[i], amplitude, mu, sigma)
+            y[i] = gauss(flux[i], amplitude, mu, sigma)
             initialized = True
         elif initialized:
             y[i] = amplitude * math.exp(-abs(y[i] - mu) / tail)
