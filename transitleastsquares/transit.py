@@ -41,7 +41,7 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
         if t[i] <= t0:
             y[i] = 1 - asymmetry * numpy.exp(-((t[i] - t0) ** 2 / ((2 * t1) ** 2)))
         elif flux[i] < 0:
-            y[i] = 1 - asymmetry * numpy.exp((t[i] - t4) / t4)
+            y[i] = 1 - asymmetry * numpy.exp((t0 - t) / t4)
     flux = y
     intransit_flux = flux[idx_first: -idx_first + 1]
 
