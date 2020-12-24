@@ -71,6 +71,7 @@ class transitleastsquares(object):
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
         lc_cache_overview, lc_arr = get_cache(
+            mode=self.transit_template,
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,

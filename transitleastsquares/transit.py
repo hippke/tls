@@ -8,7 +8,7 @@ import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.interpolation import interp1d
 
 
-def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
+def reference_transit(mode, samples, per, rp, a, inc, ecc, w, u, limb_dark):
     """Returns an Earth-like transit of width 1 and depth 1"""
 
     f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
@@ -26,12 +26,12 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     ma.limb_dark = limb_dark  # limb darkening model
     m = batman.TransitModel(ma, t)  # initializes model
     flux = m.light_curve(ma)  # calculates light curve
+    # Determine start of transit (first value < 1)
     idx_first = numpy.argmax(flux < 1)
     intransit_time = t[idx_first: -idx_first + 1]
-    flux = reference_comet_transit(t, flux, per)
+    if mode == "comet":
+        flux = reference_comet_transit(t, flux, per)
     intransit_flux = flux[idx_first: -idx_first + 1]
-    # Determine start of transit (first value < 1)
-
 
     # Downsample (bin) to target sample size
     x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples, per)
@@ -69,6 +69,7 @@ def reference_comet_transit(t, flux, per):
     return y
 
 def fractional_transit(
+    mode,
     duration,
     maxwidth,
     depth,
@@ -87,6 +88,7 @@ def fractional_transit(
 
     if cached_reference_transit is None:
         reference_flux = reference_transit(
+            mode=mode,
             samples=samples,
             per=per,
             rp=rp,
@@ -121,7 +123,7 @@ def fractional_transit(
     return result
 
 
-def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark):
+def get_cache(mode, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark):
     """Fetches (size(durations)*size(depths)) light curves of length 
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
@@ -134,6 +136,7 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_d
         dtype=[("duration", "f8"), ("width_in_samples", "i8"), ("overshoot", "f8")],
     )
     cached_reference_transit = reference_transit(
+        mode=mode,
         samples=maxwidth_in_samples,
         per=per,
         rp=rp,
@@ -148,6 +151,7 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_d
     row = 0
     for duration in durations:
         scaled_transit = fractional_transit(
+            mode=mode,
             duration=duration,
             maxwidth=numpy.max(durations),
             depth=tls_constants.SIGNAL_DEPTH,

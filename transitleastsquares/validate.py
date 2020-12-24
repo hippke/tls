@@ -116,10 +116,16 @@ def validate_args(self, kwargs):
         self.u = tls_constants.BOX_U
         self.limb_dark = tls_constants.BOX_LIMB_DARK
 
+    elif self.transit_template == "comet":
+        self.per = tls_constants.DEFAULT_PERIOD
+        self.rp = tls_constants.DEFAULT_RP
+        self.a = tls_constants.DEFAULT_A
+        self.inc = tls_constants.DEFAULT_INC
+
     else:
         raise ValueError(
             'Unknown transit_template. Known values: \
-            "default", "grazing", "box"'
+            "default", "grazing", "box", "comet"'
         )
 
     """Validations to avoid (garbage in ==> garbage out)"""
