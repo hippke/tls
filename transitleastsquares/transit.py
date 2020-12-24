@@ -28,13 +28,13 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     flux = m.light_curve(ma)  # calculates light curve
     idx_first = numpy.argmax(flux < 1)
     intransit_time = t[idx_first: -idx_first + 1]
-    flux = reference_comet_transit(t, flux)
+    flux = reference_comet_transit(t, flux, per)
     intransit_flux = flux[idx_first: -idx_first + 1]
     # Determine start of transit (first value < 1)
 
 
     # Downsample (bin) to target sample size
-    x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)
+    x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples, per)
     f = interp1d(x_new, intransit_time)
     downsampled_intransit_flux = f(intransit_flux)
 
@@ -45,23 +45,28 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
 
     return rescaled
 
-def reference_comet_transit(t, flux):
+def reference_comet_transit(t, flux, per):
     # Based on GMK et al. 2019: An automated search for transiting exocomets
     idx_first = numpy.argmax(flux < 1)
-    t0 = 0.5
-    t1 = t[idx_first] + 0.5
-    t4 = t[-idx_first + 1] + 0.5
+    t0 = 0.5 * per
+    t1 = (t[idx_first] + 0.5) * per
+    t4 = (t[-idx_first + 1] + 0.5) * per
+    ingress_param = 0.2
+    egress_param = 0.2
     amplitude = 1 - numpy.min(flux)
     y = numpy.ones(len(t))
+    initialized = False
     for i in range(len(t)):
-        time = t[i] + 0.5
+        time = (t[i] + 0.5) * per
         if flux[i] < 1 and time <= t0:
-            y[i] = 1 - amplitude * numpy.exp(-((time - t0) ** 2 / (2 * (t1 ** 2))))
-        elif flux[i] < 1:
-            y[i] = 1 - amplitude * numpy.exp((t0 - time) / t4)
+            y[i] = 1 - amplitude * numpy.exp(-((time - t0) ** 2 / (2 * (ingress_param ** 2))))
+            initialized = True
+        elif time > t0 and flux[i] < 1:
+            y[i] = 1 - amplitude * numpy.exp((t0 - time) / egress_param)
     import matplotlib.pyplot as plt
     plt.plot(t, y)
     plt.savefig("fig.png")
+    return y
 
 def fractional_transit(
     duration,
