@@ -304,6 +304,7 @@ class transitleastsquares(object):
 
             # Folded model flux
             model_folded_model = fractional_transit(
+                mode=self.transit_template,
                 duration=duration * maxwidth_in_samples * fill_half,
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
