@@ -28,23 +28,8 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     flux = m.light_curve(ma)  # calculates light curve
     idx_first = numpy.argmax(flux < 1)
     intransit_time = t[idx_first: -idx_first + 1]
-    # Based on GMK et al. 2019: An automated search for transiting exocomets
-    t0 = 0
-    t1 = t[idx_first]
-    t4 = t[-idx_first + 1]
-    asymmetry = 1.05
-    y = numpy.ones(len(t))
-    tail = 5
-    mu = 1
-    sigma = 0.001
-    for i in range(len(t)):
-        if t[i] <= t0:
-            y[i] = 1 - asymmetry * numpy.exp(-((t[i] - t0) ** 2 / ((2 * t1) ** 2)))
-        elif flux[i] < 0:
-            y[i] = 1 - asymmetry * numpy.exp((t0 - t) / t4)
-    flux = y
+    flux = reference_comet_transit(t, flux)
     intransit_flux = flux[idx_first: -idx_first + 1]
-
     # Determine start of transit (first value < 1)
 
 
@@ -60,8 +45,23 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
 
     return rescaled
 
-def gauss(x, A, mu, sigma):
-    return abs(A) * numpy.exp( -(x - mu)**2 / (2 * sigma**2) )
+def reference_comet_transit(t, flux):
+    # Based on GMK et al. 2019: An automated search for transiting exocomets
+    idx_first = numpy.argmax(flux < 1)
+    t0 = 0.5
+    t1 = t[idx_first] + 0.5
+    t4 = t[-idx_first + 1] + 0.5
+    amplitude = 1 - numpy.min(flux)
+    y = numpy.ones(len(t))
+    for i in range(len(t)):
+        time = t[i] + 0.5
+        if flux[i] < 1 and time <= t0:
+            y[i] = 1 - amplitude * numpy.exp(-((time - t0) ** 2 / (2 * (t1 ** 2))))
+        elif flux[i] < 1:
+            y[i] = 1 - amplitude * numpy.exp((t0 - time) / t4)
+    import matplotlib.pyplot as plt
+    plt.plot(t, y)
+    plt.savefig("fig.png")
 
 def fractional_transit(
     duration,
