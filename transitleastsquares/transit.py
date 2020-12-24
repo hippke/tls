@@ -63,9 +63,6 @@ def reference_comet_transit(t, flux, per):
             initialized = True
         elif time > t0 and flux[i] < 1:
             y[i] = 1 - amplitude * numpy.exp((t0 - time) / egress_param)
-    import matplotlib.pyplot as plt
-    plt.plot(t, y)
-    plt.savefig("fig.png")
     return y
 
 def fractional_transit(
