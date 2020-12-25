@@ -74,7 +74,7 @@ class TransitTemplateGenerator(ABC):
 
         return result
 
-    def get_cache(self, period_grid, duration_grid, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark):
+    def get_cache(self, period_grid, durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark):
         """Fetches (size(durations)*size(depths)) light curves of length
             maxwidth_in_samples and returns these LCs in a 2D array, together with
             their metadata in a separate array."""
@@ -88,7 +88,7 @@ class TransitTemplateGenerator(ABC):
         )
         cached_reference_transit = self.reference_transit(
             period_grid=period_grid,
-            duration_grid=duration_grid,
+            duration_grid=durations,
             samples=maxwidth_in_samples,
             per=per,
             rp=rp,
@@ -103,6 +103,8 @@ class TransitTemplateGenerator(ABC):
         row = 0
         for duration in durations:
             scaled_transit = self.fractional_transit(
+                period_grid=period_grid,
+                duration_grid=durations,
                 duration=duration,
                 maxwidth=numpy.max(durations),
                 depth=tls_constants.SIGNAL_DEPTH,

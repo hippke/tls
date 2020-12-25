@@ -77,7 +77,6 @@ class transitleastsquares(object):
             maxwidth_in_samples = maxwidth_in_samples + 1
         lc_cache_overview, lc_arr = transit_template_generator.get_cache(
             period_grid=period_grid,
-            duration_grid=duration_grid,
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,
@@ -311,7 +310,7 @@ class transitleastsquares(object):
             # Folded model flux
             model_folded_model = transit_template_generator.fractional_transit(
                 period_grid=period_grid,
-                duration_grid=duration_grid,
+                duration_grid=durations,
                 duration=duration * maxwidth_in_samples * fill_half,
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
@@ -328,7 +327,7 @@ class transitleastsquares(object):
             # Full unfolded light curve model
             model_transit_single = transit_template_generator.fractional_transit(
                 period_grid=period_grid,
-                duration_grid=duration_grid,
+                duration_grid=durations,
                 duration=(duration * maxwidth_in_samples),
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
