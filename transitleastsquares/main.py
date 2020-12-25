@@ -30,7 +30,7 @@ from transitleastsquares.stats import (
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.helpers import resample, transit_mask
 from transitleastsquares.helpers import impact_to_inclination
-from transitleastsquares.grid import duration_grid, period_grid
+from transitleastsquares.grid import period_grid
 from transitleastsquares.core import (
     edge_effect_correction,
     lowest_residuals_in_this_duration,
