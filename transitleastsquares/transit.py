@@ -5,45 +5,21 @@ import math
 import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
 import numpy
 import transitleastsquares.tls_constants as tls_constants
+from transitleastsquares.comet_transit_template_generator import CometTransitTemplateGenerator
+from transitleastsquares.default_transit_template_generator import DefaultTransitTemplateGenerator
 from transitleastsquares.interpolation import interp1d
 
+default_transit_template_generator = DefaultTransitTemplateGenerator()
+transit_template_generators = {"default": default_transit_template_generator,
+                               "grazing": default_transit_template_generator,
+                               "comet": CometTransitTemplateGenerator()}
 
-def reference_transit(mode, samples, per, rp, a, inc, ecc, w, u, limb_dark):
+def reference_transit(mode, period_grid, duration_grid, samples, per, rp, a, inc, ecc, w, u, limb_dark):
     """Returns an Earth-like transit of width 1 and depth 1"""
-
-    f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
-    duration = 1  # transit duration in days. Increase for exotic cases
-    t = numpy.linspace(-duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE)
-    ma = batman.TransitParams()
-    ma.t0 = 0  # time of inferior conjunction
-    ma.per = per  # orbital period, use Earth as a reference
-    ma.rp = rp  # planet radius (in units of stellar radii)
-    ma.a = a  # semi-major axis (in units of stellar radii)
-    ma.inc = inc  # orbital inclination (in degrees)
-    ma.ecc = ecc  # eccentricity
-    ma.w = w  # longitude of periastron (in degrees)
-    ma.u = u  # limb darkening coefficients
-    ma.limb_dark = limb_dark  # limb darkening model
-    m = batman.TransitModel(ma, t)  # initializes model
-    flux = m.light_curve(ma)  # calculates light curve
-    # Determine start of transit (first value < 1)
-    idx_first = numpy.argmax(flux < 1)
-    intransit_time = t[idx_first: -idx_first + 1]
-    if mode == "comet":
-        flux = reference_comet_transit(t, flux, per)
-    intransit_flux = flux[idx_first: -idx_first + 1]
-
-    # Downsample (bin) to target sample size
-    x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples, per)
-    f = interp1d(x_new, intransit_time)
-    downsampled_intransit_flux = f(intransit_flux)
-
-    # Rescale to height [0..1]
-    rescaled = (numpy.min(downsampled_intransit_flux) - downsampled_intransit_flux) / (
-        numpy.min(downsampled_intransit_flux) - 1
-    )
-
-    return rescaled
+    if mode not in transit_template_generators:
+        raise ValueNotFoundError
+    return transit_template_generators[mode].reference_transit(period_grid, duration_grid, samples, per, rp, a, inc,
+                                                               ecc, w, u, limb_dark)
 
 def reference_comet_transit(t, flux, per):
     # Based on GMK et al. 2019: An automated search for transiting exocomets

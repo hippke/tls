@@ -8,6 +8,8 @@ from functools import partial
 from tqdm import tqdm
 
 # TLS parts
+from transitleastsquares.comet_transit_template_generator import CometTransitTemplateGenerator
+from transitleastsquares.default_transit_template_generator import DefaultTransitTemplateGenerator
 from transitleastsquares.results import transitleastsquaresresults
 import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.stats import (
@@ -37,7 +39,6 @@ from transitleastsquares.core import (
     foldfast,
     search_period,
 )
-from transitleastsquares.transit import reference_transit, fractional_transit, get_cache
 from transitleastsquares.validate import validate_inputs, validate_args
 
 
@@ -46,13 +47,17 @@ class transitleastsquares(object):
 
     def __init__(self, t, y, dy=None):
         self.t, self.y, self.dy = validate_inputs(t, y, dy)
+        default_transit_template_generator = DefaultTransitTemplateGenerator()
+        self.transit_template_generators = {"default": default_transit_template_generator,
+                               "grazing": default_transit_template_generator,
+                               "comet": CometTransitTemplateGenerator()}
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
 
         print(tls_constants.TLS_VERSION)
         self, kwargs = validate_args(self, kwargs)
-
+        transit_template_generator = self.transit_template_generators[self.transit_template]
         periods = period_grid(
             R_star=self.R_star,
             M_star=self.M_star,
@@ -63,15 +68,16 @@ class transitleastsquares(object):
             n_transits_min=self.n_transits_min,
         )
 
-        durations = duration_grid(
+        durations = transit_template_generator.duration_grid(
             periods, shortest=1 / len(self.t), log_step=self.duration_grid_step
         )
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
-        lc_cache_overview, lc_arr = get_cache(
-            mode=self.transit_template,
+        lc_cache_overview, lc_arr = transit_template_generator.get_cache(
+            period_grid=period_grid,
+            duration_grid=duration_grid,
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,
@@ -303,8 +309,9 @@ class transitleastsquares(object):
             ) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
 
             # Folded model flux
-            model_folded_model = fractional_transit(
-                mode=self.transit_template,
+            model_folded_model = transit_template_generator.fractional_transit(
+                period_grid=period_grid,
+                duration_grid=duration_grid,
                 duration=duration * maxwidth_in_samples * fill_half,
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
@@ -319,8 +326,9 @@ class transitleastsquares(object):
                 limb_dark=self.limb_dark,
             )
             # Full unfolded light curve model
-            model_transit_single = fractional_transit(
-                mode=self.transit_template,
+            model_transit_single = transit_template_generator.fractional_transit(
+                period_grid=period_grid,
+                duration_grid=duration_grid,
                 duration=(duration * maxwidth_in_samples),
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
