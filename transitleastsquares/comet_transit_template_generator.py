@@ -66,8 +66,7 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
         durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
         return durations
 
-    @staticmethod
-    def __reference_comet_transit(t, flux, per):
+    def __reference_comet_transit(self, t, flux, per):
         idx_first = numpy.argmax(flux < 1)
         t0 = 0.5 * per
         t1 = (t[idx_first] + 0.5) * per
