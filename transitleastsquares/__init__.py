@@ -12,7 +12,7 @@
 from __future__ import division, print_function
 from transitleastsquares.main import transitleastsquares
 from transitleastsquares.helpers import cleaned_array, resample, transit_mask
-from transitleastsquares.grid import duration_grid, period_grid
+from transitleastsquares.grid import period_grid
 from transitleastsquares.stats import FAP
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.core import fold
