@@ -31,31 +31,6 @@ def T14(
         result = upper_limit
     return result
 
-
-def duration_grid(periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
-    
-    duration_max = T14(
-        R_s=tls_constants.R_STAR_MAX,
-        M_s=tls_constants.M_STAR_MAX,
-        P=min(periods),
-        small=False  # large planet for long transit duration
-    )
-    duration_min = T14(
-        R_s=tls_constants.R_STAR_MIN,
-        M_s=tls_constants.M_STAR_MIN,
-        P=max(periods),
-        small=True  # small planet for short transit duration
-    )
-
-    durations = [duration_min]
-    current_depth = duration_min
-    while current_depth * log_step < duration_max:
-        current_depth = current_depth * log_step
-        durations.append(current_depth)
-    durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
-    return durations
-
-
 def period_grid(
     R_star,
     M_star,
