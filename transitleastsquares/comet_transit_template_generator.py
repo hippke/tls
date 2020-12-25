@@ -32,7 +32,7 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
         # Determine start of transit (first value < 1)
         idx_first = numpy.argmax(flux < 1)
         intransit_time = t[idx_first: -idx_first + 1]
-        flux = self._reference_comet_transit(t, flux, per)
+        flux = self.__reference_comet_transit(t, flux, per)
         intransit_flux = flux[idx_first: -idx_first + 1]
 
         # Downsample (bin) to target sample size
