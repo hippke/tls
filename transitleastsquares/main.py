@@ -141,6 +141,7 @@ class transitleastsquares(object):
             pool = multiprocessing.Pool(processes=self.use_threads)
             params = partial(
                 search_period,
+                transit_template_generator,
                 t=self.t,
                 y=self.y,
                 dy=self.dy,
@@ -164,6 +165,7 @@ class transitleastsquares(object):
         else:
             for period in periods:
                 data = search_period(
+                    transit_template_generator,
                     period=period,
                     t=self.t,
                     y=self.y,

@@ -94,6 +94,7 @@ def out_of_transit_residuals(data, width_signal, dy):
 
 
 def search_period(
+    transit_template_generator,
     period,
     t,
     y,
@@ -140,8 +141,8 @@ def search_period(
     summed_residual_in_rows = float("inf")
 
     # Make unique to avoid duplicates in dense grids
-    duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
-    duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
+    duration_max = transit_template_generator.min_duration(period, R_star_max, M_star_max)
+    duration_min = transit_template_generator.min_duration(period, R_star_min, M_star_min)
 
     # Fractional transit duration can be longer than this.
     # Example: Data length 11 days, 2 transits at 0.5 days and 10.5 days
