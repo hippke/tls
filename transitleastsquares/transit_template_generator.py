@@ -18,6 +18,14 @@ class TransitTemplateGenerator(ABC):
     def duration_grid(self, periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
         pass
 
+    @abstractmethod
+    def min_duration(self, period, R_star, M_star, periods=None):
+        pass
+
+    @abstractmethod
+    def max_duration(self, period, R_star, M_star, periods=None):
+        pass
+
     def fractional_transit(self,
             period_grid,
             duration_grid,

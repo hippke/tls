@@ -50,7 +50,7 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
     def duration_grid(self, periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
         max_period = max(periods)
         # Assuming max comet tail 0.25 the orbit length of a 0.5 days period orbit.
-        duration_max = 0.25 * ((0.5 / max_period) ** (2 / 3))
+        duration_max = self.max_duration(max_period, tls_constants.R_STAR_MAX, tls_constants.M_STAR_MAX, periods)
         duration_min = T14(
             R_s=tls_constants.R_STAR_MIN,
             M_s=tls_constants.M_STAR_MIN,
@@ -65,6 +65,14 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
             durations.append(current_depth)
         durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
         return durations
+
+    def min_duration(self, period, R_star, M_star, periods=None):
+        return T14(R_s=R_star, M_s=M_star, P=period, small=True)
+
+    def max_duration(self, period, R_star, M_star, periods=None):
+        reference_period = 1
+        reference_period_max_duration_phase = 1
+        return reference_period_max_duration_phase * (reference_period / period) ** (2 / 3)
 
     def __reference_comet_transit(self, t, flux, per):
         idx_first = numpy.argmax(flux < 1)

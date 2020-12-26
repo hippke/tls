@@ -64,3 +64,9 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
             durations.append(current_depth)
         durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
         return durations
+
+    def min_duration(self, period, R_star, M_star, periods=None):
+        return T14(R_s=R_star, M_s=M_star, P=period, small=True)
+
+    def max_duration(self, period, R_star, M_star, periods=None):
+        return T14(R_s=R_star, M_s=M_star, P=period, small=True)
