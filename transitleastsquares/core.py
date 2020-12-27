@@ -141,7 +141,7 @@ def search_period(
     summed_residual_in_rows = float("inf")
 
     # Make unique to avoid duplicates in dense grids
-    duration_max = transit_template_generator.min_duration(period, R_star_max, M_star_max)
+    duration_max = transit_template_generator.max_duration(period, R_star_max, M_star_max)
     duration_min = transit_template_generator.min_duration(period, R_star_min, M_star_min)
 
     # Fractional transit duration can be longer than this.
