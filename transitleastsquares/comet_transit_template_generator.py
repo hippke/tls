@@ -51,13 +51,7 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
         max_period = max(periods)
         # Assuming max comet tail 0.25 the orbit length of a 0.5 days period orbit.
         duration_max = self.max_duration(max_period, tls_constants.R_STAR_MAX, tls_constants.M_STAR_MAX, periods)
-        duration_min = T14(
-            R_s=tls_constants.R_STAR_MIN,
-            M_s=tls_constants.M_STAR_MIN,
-            P=max_period,
-            small=True  # small planet for short transit duration
-        )
-
+        duration_min = self.min_duration(max_period, tls_constants.R_STAR_MIN, tls_constants.M_STAR_MIN, periods)
         durations = [duration_min]
         current_depth = duration_min
         while current_depth * log_step < duration_max:
