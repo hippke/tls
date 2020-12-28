@@ -131,7 +131,7 @@ def validate_args(self, kwargs):
                 'The custom transit_template_generator does not implement TransitTemplateGenerator.'
             )
         else:
-            self.transit_template_generators.append(custom_transit_template_generator)
+            self.transit_template_generators["custom"] = custom_transit_template_generator
     else:
         raise ValueError(
             'Unknown transit_template. Known values: \
