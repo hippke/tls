@@ -126,7 +126,7 @@ def validate_args(self, kwargs):
 
     elif self.transit_template == "custom":
         custom_transit_template_generator = kwargs.get("transit_template_generator")
-        if not issubclass(type(self.transit_template_generator), TransitTemplateGenerator):
+        if not issubclass(type(custom_transit_template_generator), TransitTemplateGenerator):
             raise ValueError(
                 'The custom transit_template_generator does not implement TransitTemplateGenerator.'
             )
