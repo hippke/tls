@@ -3,7 +3,7 @@ import numpy
 import warnings
 import multiprocessing
 
-from transitleastsquares import TransitTemplateGenerator
+from transitleastsquares.transit_template_generator import TransitTemplateGenerator
 from transitleastsquares.helpers import cleaned_array, impact_to_inclination
 import transitleastsquares.tls_constants as tls_constants
 
