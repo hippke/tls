@@ -44,19 +44,8 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
         return rescaled
 
     def duration_grid(self, periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
-        duration_max = T14(
-            R_s=tls_constants.R_STAR_MAX,
-            M_s=tls_constants.M_STAR_MAX,
-            P=min(periods),
-            small=False  # large planet for long transit duration
-        )
-        duration_min = T14(
-            R_s=tls_constants.R_STAR_MIN,
-            M_s=tls_constants.M_STAR_MIN,
-            P=max(periods),
-            small=True  # small planet for short transit duration
-        )
-
+        duration_max = self.max_duration(min(periods), tls_constants.R_STAR_MAX, tls_constants.M_STAR_MAX)
+        duration_min = self.max_duration(max(periods), tls_constants.R_STAR_MIN, tls_constants.M_STAR_MIN)
         durations = [duration_min]
         current_depth = duration_min
         while current_depth * log_step < duration_max:
@@ -69,4 +58,4 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
         return T14(R_s=R_star, M_s=M_star, P=period, small=True)
 
     def max_duration(self, period, R_star, M_star, periods=None):
-        return T14(R_s=R_star, M_s=M_star, P=period, small=True)
+        return T14(R_s=R_star, M_s=M_star, P=period, small=False)
