@@ -2,6 +2,8 @@ from __future__ import division, print_function
 import numpy
 import warnings
 import multiprocessing
+
+from transitleastsquares import TransitTemplateGenerator
 from transitleastsquares.helpers import cleaned_array, impact_to_inclination
 import transitleastsquares.tls_constants as tls_constants
 
@@ -122,6 +124,14 @@ def validate_args(self, kwargs):
         self.a = tls_constants.DEFAULT_A
         self.inc = tls_constants.DEFAULT_INC
 
+    elif self.transit_template == "custom":
+        custom_transit_template_generator = kwargs.get("transit_template_generator")
+        if not issubclass(type(self.transit_template_generator), TransitTemplateGenerator):
+            raise ValueError(
+                'The custom transit_template_generator does not implement TransitTemplateGenerator.'
+            )
+        else:
+            self.transit_template_generators.append(custom_transit_template_generator)
     else:
         raise ValueError(
             'Unknown transit_template. Known values: \
