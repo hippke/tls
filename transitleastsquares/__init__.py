@@ -17,3 +17,4 @@ from transitleastsquares.stats import FAP
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.core import fold
 from transitleastsquares.transit_template_generator import TransitTemplateGenerator
+from transitleastsquares import version
