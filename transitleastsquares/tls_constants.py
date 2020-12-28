@@ -141,4 +141,5 @@ VALID_PARAMETERS = [
     "use_threads",
     "show_progress_bar",
     "transit_template",
+    "transit_template_generator"
 ]
