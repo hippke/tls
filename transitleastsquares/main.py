@@ -368,7 +368,8 @@ class transitleastsquares(object):
             depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(
                 per_transit_count
             ) ** (0.5)
-            snr = ((1 - depth_mean) / numpy.std(flux_ootr)) * len(
+            flux_depth_mean_diff = 1 - depth_mean if depth_mean < 1 else depth_mean - 1
+            snr = (flux_depth_mean_diff / numpy.std(flux_ootr)) * len(
                 all_flux_intransit
             ) ** (0.5)
             rp_rs = rp_rs_from_depth(depth=1 - depth, law=self.limb_dark, params=self.u)
