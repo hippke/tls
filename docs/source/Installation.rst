@@ -22,4 +22,4 @@ If the command ``python`` does not point to Python 3 on your machine, you can tr
 Compatibility
 ------------------------
 
-TLS has been `tested to work <https://travis-ci.com/hippke/tls>`_ with Python 2.7, 3.5, 3.6, 3.7. It works on Python 2.7, but only in single-threaded mode.
+TLS has been `tested to work <https://travis-ci.com/hippke/tls>`_ with Python 2.7, 3.5, 3.6, 3.7, 3.8. It works on Python 2.7, but only in single-threaded mode.
