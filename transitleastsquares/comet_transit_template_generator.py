@@ -64,7 +64,7 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
         return T14(R_s=R_star, M_s=M_star, P=period, small=True)
 
     def max_duration(self, period, R_star, M_star, periods=None):
-        return 1
+        return 0.99
 
     def __reference_comet_transit(self, t, flux, per):
         idx_first = numpy.argmax(flux < 1)

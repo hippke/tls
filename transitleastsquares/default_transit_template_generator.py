@@ -45,7 +45,7 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
 
     def duration_grid(self, periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
         duration_max = self.max_duration(min(periods), tls_constants.R_STAR_MAX, tls_constants.M_STAR_MAX)
-        duration_min = self.max_duration(max(periods), tls_constants.R_STAR_MIN, tls_constants.M_STAR_MIN)
+        duration_min = self.min_duration(max(periods), tls_constants.R_STAR_MIN, tls_constants.M_STAR_MIN)
         durations = [duration_min]
         current_depth = duration_min
         while current_depth * log_step < duration_max:
