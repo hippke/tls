@@ -46,7 +46,7 @@ def lowest_residuals_in_this_duration(
     summed_residual_in_rows = datapoints
     best_row = 0
     best_depth = 0
-
+    mean = [1 - mean_value if mean_value <= 1 else mean_value - 1 for mean_value in mean]
     xth_point = 1  # How many cadences the template shifts forward in each step
     if T0_fit_margin > 0 and duration > T0_fit_margin:
         T0_fit_margin = 1 / T0_fit_margin
@@ -65,7 +65,8 @@ def lowest_residuals_in_this_duration(
             # Scale model and calculate residuals
             intransit_residual = 0
             for j in range(len(signal)):
-                sigi = (1 - signal[j]) * reverse_scale
+                sigi = 1 - signal[j] if signal[j] <= 1 else signal[j] - 1
+                sigi = sigi * reverse_scale
                 intransit_residual += ((data[j] - (1 - sigi)) ** 2) * dy[j]
             current_stat = intransit_residual + ootr[i] - summed_edge_effect_correction
             if current_stat < summed_residual_in_rows:
@@ -165,7 +166,7 @@ def search_period(
         while lc_cache_overview["width_in_samples"][chosen_transit_row] != duration:
             chosen_transit_row += 1
         this_residual, this_row, this_depth = lowest_residuals_in_this_duration(
-            mean=1 - running_mean(patched_data, duration),
+            mean=running_mean(patched_data, duration),
             transit_depth_min=transit_depth_min,
             patched_data_arr=patched_data,
             duration=duration,
