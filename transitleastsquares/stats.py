@@ -453,10 +453,10 @@ def snr_stats(
 
         intransit_points = numpy.size(y[idx_intransit])
         try:
-            snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise
+            snr_pink_per_transit[i] = (1 - mean_flux) / pinknoise if mean_flux < 1 else (mean_flux - 1) / pinknoise
             if intransit_points > 0 and not numpy.isnan(std):
                 std_binned = std / intransit_points ** 0.5
-                snr_per_transit[i] = (1 - mean_flux) / std_binned
+                snr_per_transit[i] = (1 - mean_flux) / std_binned if mean_flux < 1 else (mean_flux - 1) / std_binned
             else:
                 snr_per_transit[i] = 0
                 snr_pink_per_transit[i] = 0
