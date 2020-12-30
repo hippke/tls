@@ -1,7 +1,7 @@
 from __future__ import division, print_function
 import numpy
 from transitleastsquares import period_grid
-from transitleastsquares.default_transit_template_generator import DefaultTransitTemplateGenerator
+from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
 
 if __name__ == "__main__":
     print("Starting test: duration_grid...", end="")

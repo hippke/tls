@@ -1,12 +1,10 @@
-from abc import ABC, abstractmethod
-
 import batman
 import numpy
 
 from transitleastsquares import tls_constants
 from transitleastsquares.grid import T14
 from transitleastsquares.interpolation import interp1d
-from transitleastsquares.transit_template_generator import TransitTemplateGenerator
+from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
 
 
 class DefaultTransitTemplateGenerator(TransitTemplateGenerator):

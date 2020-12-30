@@ -1,5 +1,4 @@
 from __future__ import division, print_function
-from os import path
 import multiprocessing
 import numpy
 import sys
@@ -8,8 +7,8 @@ from functools import partial
 from tqdm import tqdm
 
 # TLS parts
-from transitleastsquares.comet_transit_template_generator import CometTransitTemplateGenerator
-from transitleastsquares.default_transit_template_generator import DefaultTransitTemplateGenerator
+from transitleastsquares.template_generator.comet_transit_template_generator import CometTransitTemplateGenerator
+from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
 from transitleastsquares.results import transitleastsquaresresults
 import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.stats import (
@@ -27,16 +26,10 @@ from transitleastsquares.stats import (
     snr_stats,
     count_stats,
 )
-from transitleastsquares.catalog import catalog_info
-from transitleastsquares.helpers import resample, transit_mask
-from transitleastsquares.helpers import impact_to_inclination
+from transitleastsquares.helpers import transit_mask
 from transitleastsquares.grid import period_grid
 from transitleastsquares.core import (
-    edge_effect_correction,
-    lowest_residuals_in_this_duration,
-    out_of_transit_residuals,
     fold,
-    foldfast,
     search_period,
 )
 from transitleastsquares.validate import validate_inputs, validate_args
