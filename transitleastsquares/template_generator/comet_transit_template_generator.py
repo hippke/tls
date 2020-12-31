@@ -8,10 +8,33 @@ from transitleastsquares.template_generator.transit_template_generator import Tr
 
 
 class CometTransitTemplateGenerator(TransitTemplateGenerator):
+    """
+    This class uses the equation (6) from Kennedy et al. (2019) to model exocomet transits.
+    """
+
     def __init__(self):
         super().__init__()
 
     def reference_transit(self, period_grid, duration_grid, samples, per, rp, a, inc, ecc, w, u, limb_dark):
+        """
+        Creates a reference transit with the desired shape
+        :param period_grid: The grid of periods to be processed
+        :param duration_grid: The grid of durations to be processed
+        :param samples: The samples count
+        :param per: The period for the template
+        :param rp: The radius of the comet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param a: The semimajor axis of the comet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param inc: The inclination of the comet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param ecc: The eccentricity of the comet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param w:
+        :param u:
+        :param limb_dark: The limb darkening applied to the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        """
         f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
         duration = 1  # transit duration in days. Increase for exotic cases
         t = numpy.linspace(-duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE)
@@ -60,7 +83,14 @@ class CometTransitTemplateGenerator(TransitTemplateGenerator):
         return T14(R_s=R_star, M_s=M_star, P=period, small=True)
 
     def max_duration(self, period, R_star, M_star, periods=None):
-        # Assuming max comet tail 10 times the maximum transit duration
+        """
+        Max transit duration of an exocomet cannot be enforced and we choose a soft limit of 10 times the largest
+        transit duration given by T14.
+        :param period: The period for which the duration needs to be calculated.
+        :param R_star: The radius of the host star.
+        :param M_star: The mass of the host star
+        :param periods: The period grid.
+        """
         t14 = T14(R_s=R_star, M_s=M_star, P=period, small=False) * 10
         return t14 if t14 < 1 else 0.99
 

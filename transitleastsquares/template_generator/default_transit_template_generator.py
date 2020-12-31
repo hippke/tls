@@ -8,6 +8,9 @@ from transitleastsquares.template_generator.transit_template_generator import Tr
 
 
 class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
+    """
+    Default implementation used by TLS.
+    """
     def __init__(self):
         super().__init__()
 
