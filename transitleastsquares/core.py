@@ -67,7 +67,8 @@ def lowest_residuals_in_this_duration(
             for j in range(len(signal)):
                 sigi = 1 - signal[j] if signal[j] <= 1 else signal[j] - 1
                 sigi = sigi * reverse_scale
-                intransit_residual += ((data[j] - (1 - sigi)) ** 2) * dy[j]
+                sig_diff = 1 - sigi if signal[j] <= 1 else 1 + sigi
+                intransit_residual += ((data[j] - sig_diff) ** 2) * dy[j]
             current_stat = intransit_residual + ootr[i] - summed_edge_effect_correction
             if current_stat < summed_residual_in_rows:
                 summed_residual_in_rows = current_stat

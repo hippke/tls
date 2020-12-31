@@ -139,8 +139,8 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_b
         Fold to all T0s so that the transit is expected at phase = 0"""
 
     dur = len(signal)
-    scale = tls_constants.SIGNAL_DEPTH / (1 - depth)
-    signal = 1 - ((1 - signal) / scale)
+    scale = tls_constants.SIGNAL_DEPTH / (1 - depth) if depth >= 0 else tls_constants.SIGNAL_DEPTH / (1 + depth)
+    signal = [1 - ((1 - value) / scale) if value <= 1 else 1 + ((value - 1) / scale) for value in signal]
     samples_per_period = numpy.size(y)
 
     if T0_fit_margin == 0:
