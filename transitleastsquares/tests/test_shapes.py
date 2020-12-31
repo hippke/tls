@@ -49,7 +49,7 @@ if __name__ == "__main__":
         results_comet.duration, 0.23209496125032572, decimal=5
     )
     numpy.testing.assert_almost_equal(
-        min(results_comet.chi2red), 0.09854043427316168, decimal=5)
+        min(results_comet.chi2red), 0.0980794344892094, decimal=5)
     print("Test passed: Comet-shaped")
 
     model_custom = transitleastsquares(t, y_filt)
