@@ -7,23 +7,65 @@ from transitleastsquares.interpolation import interp1d
 
 
 class TransitTemplateGenerator(ABC):
+    """
+    Root class to be used to implement transit shapes and their behaviours.
+    """
     def __init__(self):
         pass
 
     @abstractmethod
     def reference_transit(self, period_grid, duration_grid, samples, per, rp, a, inc, ecc, w, u, limb_dark):
+        """
+        Creates a reference transit with the desired shape
+        :param period_grid: The grid of periods to be processed
+        :param duration_grid: The grid of durations to be processed
+        :param samples: The samples count
+        :param per: The period for the template
+        :param rp: The radius of the planet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param a: The semimajor axis of the planet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param inc: The inclination of the planet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param ecc: The eccentricity of the planet causing the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        :param w:
+        :param u:
+        :param limb_dark: The limb darkening applied to the transit. This only applies to some templates and is kept to
+        respect the original TLS implementation.
+        """
         pass
 
     @abstractmethod
     def duration_grid(self, periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
+        """
+        Generates a grid of durations.
+        :param periods: The grid of periods to be used.
+        :param shortest: The shortest duration.
+        :param log_step: The logarithmic step increment factor.
+        """
         pass
 
     @abstractmethod
     def min_duration(self, period, R_star, M_star, periods=None):
+        """
+        Calculates the minimum duration for this template.
+        :param period: The period for which the duration needs to be calculated.
+        :param R_star: The radius of the host star.
+        :param M_star: The mass of the host star
+        :param periods: The period grid.
+        """
         pass
 
     @abstractmethod
     def max_duration(self, period, R_star, M_star, periods=None):
+        """
+        Calculates the maximum duration for this template.
+        :param period: The period for which the duration needs to be calculated.
+        :param R_star: The radius of the host star.
+        :param M_star: The mass of the host star
+        :param periods: The period grid.
+        """
         pass
 
     def fractional_transit(self,
