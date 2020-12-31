@@ -43,6 +43,7 @@ class transitleastsquares(object):
         default_transit_template_generator = DefaultTransitTemplateGenerator()
         self.transit_template_generators = {"default": default_transit_template_generator,
                                "grazing": default_transit_template_generator,
+                               "box": default_transit_template_generator,
                                "comet": CometTransitTemplateGenerator()}
 
     def power(self, **kwargs):
