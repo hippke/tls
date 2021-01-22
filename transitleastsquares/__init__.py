@@ -16,5 +16,5 @@ from transitleastsquares.grid import period_grid
 from transitleastsquares.stats import FAP
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.core import fold
-from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
+from .template_generator.transit_template_generator import TransitTemplateGenerator
 from transitleastsquares import version
