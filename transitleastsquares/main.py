@@ -207,8 +207,8 @@ class transitleastsquares(object):
         chi2_min = numpy.min(chi2)
         chi2red_min = numpy.min(chi2red)
 
-        return transit_template_generator.calculate_results(self, no_transits_were_fit, chi2, chi2red, chi2_min,
+        return transit_template_generator.calculate_results(no_transits_were_fit, chi2, chi2red, chi2_min,
                                                             chi2red_min, test_statistic_periods, test_statistic_depths,
-                                                            transitleastsquares, lc_arr, best_row, period_grid,
+                                                            self, lc_arr, best_row, period_grid,
                                                             durations, duration, maxwidth_in_samples)
 
