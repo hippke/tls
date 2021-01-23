@@ -3,8 +3,6 @@ import numpy
 from os import path
 import transitleastsquares.tls_constants as tls_constants
 from transitleastsquares.helpers import running_median, transit_mask
-from tqdm import tqdm
-from transitleastsquares.core import fold
 
 
 def FAP(SDE):
@@ -130,76 +128,6 @@ def spectra(chi2, oversampling_factor):
         SDE = SDE_raw
 
     return SR, power_raw, power, SDE_raw, SDE
-
-
-def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar):
-    """ After the search, we know the best period, width and duration.
-        But T0 was not preserved due to speed optimizations. 
-        Thus, iterate over T0s using the given parameters
-        Fold to all T0s so that the transit is expected at phase = 0"""
-
-    dur = len(signal)
-    scale = tls_constants.SIGNAL_DEPTH / (1 - depth) if depth >= 0 else tls_constants.SIGNAL_DEPTH / (1 + depth)
-    signal = [1 - ((1 - value) / scale) if value <= 1 else 1 + ((value - 1) / scale) for value in signal]
-    samples_per_period = numpy.size(y)
-
-    if T0_fit_margin == 0:
-        points = samples_per_period
-    else:
-        step_factor = T0_fit_margin * dur
-        points = int(samples_per_period / step_factor)
-    if points > samples_per_period:
-        points = samples_per_period
-
-    # Create all possible T0s from the start of [t] to [t+period] in [samples] steps
-    T0_array = numpy.linspace(
-        start=numpy.min(t), stop=numpy.min(t) + period, num=points
-    )
-
-    # Avoid showing progress bar when expected runtime is short
-    if points > tls_constants.PROGRESSBAR_THRESHOLD and show_progress_bar:
-        show_progress_info = True
-    else:
-        show_progress_info = False
-
-    residuals_lowest = float("inf")
-    T0 = 0
-
-    if show_progress_info:
-        print("Searching for best T0 for period", format(period, ".5f"), "days")
-        pbar2 = tqdm(total=numpy.size(T0_array))
-    signal_ootr = numpy.ones(len(y[dur:]))
-
-    # Future speed improvement possible: Add multiprocessing. Will be slower for
-    # short data and T0_FIT_MARGIN > 0.01, but faster for large data with dense
-    # sampling (T0_FIT_MARGIN=0)
-    for Tx in T0_array:
-        phases = fold(time=t, period=period, T0=Tx)
-        sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
-        phases = phases[sort_index]
-        flux = y[sort_index]
-        dy = dy[sort_index]
-
-        # Roll so that the signal starts at index 0
-        # Numpy roll is slow, so we replace it with less elegant concatenate
-        # flux = numpy.roll(flux, roll_cadences)
-        # dy = numpy.roll(dy, roll_cadences)
-        roll_cadences = int(dur / 2) + 1
-        flux = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
-        dy = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
-
-        residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
-        residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
-        residuals_total = residuals_intransit + residuals_ootr
-
-        if show_progress_info:
-            pbar2.update(1)
-        if residuals_total < residuals_lowest:
-            residuals_lowest = residuals_total
-            T0 = Tx
-    if show_progress_info:
-        pbar2.close()
-    return T0
 
 
 def model_lightcurve(transit_times, period, t, model_transit_single):
@@ -418,12 +346,14 @@ def snr_stats(
     transit_times,
     transit_duration_in_days,
     per_transit_count,
+    intransit=None
 ):
     """Return snr_per_transit and snr_pink_per_transit"""
 
     snr_per_transit = numpy.zeros([len(transit_times)])
     snr_pink_per_transit = numpy.zeros([len(transit_times)])
-    intransit = transit_mask(t, period, 2 * duration, T0)
+    if intransit is None:
+        intransit = transit_mask(t, period, 2 * duration, T0)
     flux_ootr = y[~intransit]
 
     try:
