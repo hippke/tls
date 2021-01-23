@@ -7,7 +7,7 @@ from functools import partial
 from tqdm import tqdm
 
 # TLS parts
-from transitleastsquares.template_generator.comet_transit_template_generator import CometTransitTemplateGenerator
+from transitleastsquares.template_generator.tailed_transit_template_generator import TailedTransitTemplateGenerator
 from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
 from transitleastsquares.results import transitleastsquaresresults
 import transitleastsquares.tls_constants as tls_constants
@@ -16,7 +16,6 @@ from transitleastsquares.stats import (
     rp_rs_from_depth,
     period_uncertainty,
     spectra,
-    final_T0_fit,
     model_lightcurve,
     all_transit_times,
     calculate_transit_duration_in_days,
@@ -26,7 +25,6 @@ from transitleastsquares.stats import (
     snr_stats,
     count_stats,
 )
-from transitleastsquares.helpers import transit_mask
 from transitleastsquares.grid import period_grid
 from transitleastsquares.core import (
     fold,
@@ -44,7 +42,7 @@ class transitleastsquares(object):
         self.transit_template_generators = {"default": default_transit_template_generator,
                                "grazing": default_transit_template_generator,
                                "box": default_transit_template_generator,
-                               "comet": CometTransitTemplateGenerator()}
+                               "tailed": TailedTransitTemplateGenerator()}
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
@@ -209,247 +207,8 @@ class transitleastsquares(object):
         chi2_min = numpy.min(chi2)
         chi2red_min = numpy.min(chi2red)
 
-        if no_transits_were_fit:
-            power_raw = numpy.zeros(len(chi2))
-            power = numpy.zeros(len(chi2))
-            period = numpy.nan
-            depth = 1
-            SR = 0
-            SDE = 0
-            SDE_raw = 0
-            T0 = 0
-            transit_times = numpy.nan
-            transit_duration_in_days = numpy.nan
-            internal_samples = (
-                int(len(self.y)) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
-            )
-            folded_phase = numpy.nan
-            folded_y = numpy.nan
-            folded_dy = numpy.nan
-            model_folded_phase = numpy.nan
-            model_folded_model = numpy.nan
-            model_transit_single = numpy.nan
-            model_lightcurve_model = numpy.nan
-            model_lightcurve_time = numpy.nan
-            depth_mean_odd = numpy.nan
-            depth_mean_even = numpy.nan
-            depth_mean_odd_std = numpy.nan
-            depth_mean_even_std = numpy.nan
-            all_flux_intransit_odd = numpy.nan
-            all_flux_intransit_even = numpy.nan
-            per_transit_count = numpy.nan
-            transit_depths = numpy.nan
-            transit_depths_uncertainties = numpy.nan
-            all_flux_intransit = numpy.nan
-            snr_per_transit = numpy.nan
-            snr_pink_per_transit = numpy.nan
-            depth_mean = numpy.nan
-            depth_mean_std = numpy.nan
-            snr = numpy.nan
-            rp_rs = numpy.nan
-            depth_mean_odd = numpy.nan
-            depth_mean_even = numpy.nan
-            depth_mean_odd_std = numpy.nan
-            depth_mean_even_std = numpy.nan
-            odd_even_difference = numpy.nan
-            odd_even_std_sum = numpy.nan
-            odd_even_mismatch = numpy.nan
-            transit_count = numpy.nan
-            empty_transit_count = numpy.nan
-            distinct_transit_count = numpy.nan
-            duration = numpy.nan
-            in_transit_count = numpy.nan
-            after_transit_count = numpy.nan
-            before_transit_count = numpy.nan
-        else:
-            SR, power_raw, power, SDE_raw, SDE = spectra(chi2, self.oversampling_factor)
-            index_highest_power = numpy.argmax(power)
-            period = test_statistic_periods[index_highest_power]
-            depth = test_statistic_depths[index_highest_power]
-            T0 = final_T0_fit(
-                signal=lc_arr[best_row],
-                depth=depth,
-                t=self.t,
-                y=self.y,
-                dy=self.dy,
-                period=period,
-                T0_fit_margin=self.T0_fit_margin,
-                show_progress_bar=self.show_progress_bar,
-            )
-            transit_times = all_transit_times(T0, self.t, period)
+        return transit_template_generator.calculate_results(self, no_transits_were_fit, chi2, chi2red, chi2_min,
+                                                            chi2red_min, test_statistic_periods, test_statistic_depths,
+                                                            transitleastsquares, lc_arr, best_row, period_grid,
+                                                            durations, duration, maxwidth_in_samples)
 
-            transit_duration_in_days = calculate_transit_duration_in_days(
-                self.t, period, transit_times, duration
-            )
-            phases = fold(self.t, period, T0=T0 + period / 2)
-            sort_index = numpy.argsort(phases)
-            folded_phase = phases[sort_index]
-            folded_y = self.y[sort_index]
-            folded_dy = self.dy[sort_index]
-            # Model phase, shifted by half a cadence so that mid-transit is at phase=0.5
-            model_folded_phase = numpy.linspace(
-                0 + 1 / numpy.size(self.t) / 2,
-                1 + 1 / numpy.size(self.t) / 2,
-                numpy.size(self.t),
-            )
-            # Folded model / model curve
-            # Data phase 0.5 is not always at the midpoint (not at cadence: len(y)/2),
-            # so we need to roll the model to match the model so that its mid-transit
-            # is at phase=0.5
-            fill_factor = calculate_fill_factor(self.t)
-            fill_half = 1 - ((1 - fill_factor) * 0.5)
-            stretch = calculate_stretch(self.t, period, transit_times)
-            internal_samples = (
-                int(len(self.y) / len(transit_times))
-            ) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
-
-            # Folded model flux
-            model_folded_model = transit_template_generator.fractional_transit(
-                period_grid=period_grid,
-                duration_grid=durations,
-                duration=duration * maxwidth_in_samples * fill_half,
-                maxwidth=maxwidth_in_samples / stretch,
-                depth=1 - depth,
-                samples=int(len(self.t / len(transit_times))),
-                per=self.per,
-                rp=self.rp,
-                a=self.a,
-                inc=self.inc,
-                ecc=self.ecc,
-                w=self.w,
-                u=self.u,
-                limb_dark=self.limb_dark,
-            )
-            # Full unfolded light curve model
-            model_transit_single = transit_template_generator.fractional_transit(
-                period_grid=period_grid,
-                duration_grid=durations,
-                duration=(duration * maxwidth_in_samples),
-                maxwidth=maxwidth_in_samples / stretch,
-                depth=1 - depth,
-                samples=internal_samples,
-                per=self.per,
-                rp=self.rp,
-                a=self.a,
-                inc=self.inc,
-                ecc=self.ecc,
-                w=self.w,
-                u=self.u,
-                limb_dark=self.limb_dark,
-            )
-            model_lightcurve_model, model_lightcurve_time = model_lightcurve(
-                transit_times, period, self.t, model_transit_single
-            )
-            depth_mean_odd, depth_mean_even, depth_mean_odd_std, depth_mean_even_std, all_flux_intransit_odd, all_flux_intransit_even, per_transit_count, transit_depths, transit_depths_uncertainties = intransit_stats(
-                self.t, self.y, transit_times, transit_duration_in_days
-            )
-            all_flux_intransit = numpy.concatenate(
-                [all_flux_intransit_odd, all_flux_intransit_even]
-            )
-            snr_per_transit, snr_pink_per_transit = snr_stats(
-                t=self.t,
-                y=self.y,
-                period=period,
-                duration=duration,
-                T0=T0,
-                transit_times=transit_times,
-                transit_duration_in_days=transit_duration_in_days,
-                per_transit_count=per_transit_count,
-            )
-            intransit = transit_mask(self.t, period, 2 * duration, T0)
-            flux_ootr = self.y[~intransit]
-            depth_mean = numpy.mean(all_flux_intransit)
-            depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(
-                per_transit_count
-            ) ** (0.5)
-            flux_depth_mean_diff = 1 - depth_mean if depth_mean < 1 else depth_mean - 1
-            snr = (flux_depth_mean_diff / numpy.std(flux_ootr)) * len(
-                all_flux_intransit
-            ) ** (0.5)
-            rp_rs = rp_rs_from_depth(depth=1 - depth, law=self.limb_dark, params=self.u)
-
-            if len(all_flux_intransit_odd) > 0:
-                depth_mean_odd = numpy.mean(all_flux_intransit_odd)
-                depth_mean_odd_std = numpy.std(all_flux_intransit_odd) / numpy.sum(
-                    len(all_flux_intransit_odd)
-                ) ** (0.5)
-            else:
-                depth_mean_odd = numpy.nan
-                depth_mean_odd_std = numpy.nan
-
-            if len(all_flux_intransit_even) > 0:
-                depth_mean_even = numpy.mean(all_flux_intransit_even)
-                depth_mean_even_std = numpy.std(all_flux_intransit_even) / numpy.sum(
-                    len(all_flux_intransit_even)
-                ) ** (0.5)
-            else:
-                depth_mean_even = numpy.nan
-                depth_mean_even_std = numpy.nan
-
-            in_transit_count, after_transit_count, before_transit_count = count_stats(
-                self.t, self.y, transit_times, transit_duration_in_days
-            )
-
-            # Odd even mismatch in standard deviations
-            odd_even_difference = abs(depth_mean_odd - depth_mean_even)
-            odd_even_std_sum = depth_mean_odd_std + depth_mean_even_std
-            odd_even_mismatch = odd_even_difference / odd_even_std_sum
-
-            transit_count = len(transit_times)
-            empty_transit_count = numpy.count_nonzero(per_transit_count == 0)
-            distinct_transit_count = transit_count - empty_transit_count
-
-            duration = transit_duration_in_days
-
-            if empty_transit_count / transit_count >= 0.33:
-                text = (
-                    str(empty_transit_count)
-                    + " of "
-                    + str(transit_count)
-                    + " transits without data. The true period may be twice the given period."
-                )
-                warnings.warn(text)
-
-        return transitleastsquaresresults(
-            SDE,
-            SDE_raw,
-            chi2_min,
-            chi2red_min,
-            period,
-            period_uncertainty(test_statistic_periods, power),
-            T0,
-            duration,
-            depth,
-            (depth_mean, depth_mean_std),
-            (depth_mean_even, depth_mean_even_std),
-            (depth_mean_odd, depth_mean_odd_std),
-            transit_depths,
-            transit_depths_uncertainties,
-            rp_rs,
-            snr,
-            snr_per_transit,
-            snr_pink_per_transit,
-            odd_even_mismatch,
-            transit_times,
-            per_transit_count,
-            transit_count,
-            distinct_transit_count,
-            empty_transit_count,
-            FAP(SDE),
-            in_transit_count,
-            after_transit_count,
-            before_transit_count,
-            test_statistic_periods,
-            power,
-            power_raw,
-            SR,
-            chi2,
-            chi2red,
-            model_lightcurve_time,
-            model_lightcurve_model,
-            model_folded_phase,
-            folded_y,
-            folded_dy,
-            folded_phase,
-            model_folded_model,
-        )
