@@ -7,7 +7,7 @@ from transitleastsquares.interpolation import interp1d
 from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
 
 
-class CometTransitTemplateGenerator(TransitTemplateGenerator):
+class TailedTransitTemplateGenerator(TransitTemplateGenerator):
     """
     This class uses the equation (6) from Kennedy et al. (2019) to model exocomet transits.
     """

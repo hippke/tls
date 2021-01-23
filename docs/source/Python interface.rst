@@ -65,7 +65,7 @@ Physical parameters to create a
 
 Available defaults for the physical parameters of the transit model. When set, the individual parameters are overruled. A different search can be performed to look for comet-like transits based on the equations from `Kennedy et al. (2019) <https://ui.adsabs.harvard.edu/abs/2019MNRAS.482.5587K/exportcitation>`_ where the deepest transit depth is, however, obtained from the batman transit model. There is also an additional option to incorporate a user-defined transit template by injecting custom implentation of `TransitTemplateGenerator <https://github.com/hippke/tls/tree/master/transitleastsquares/template_generator/TransitTemplateGenerator>`_.
 
-:transit_template: *(str)* Choice of ``default``, ``grazing``, ``box``, ```comet`` and ``custom``. 
+:transit_template: *(str)* Choice of ``default``, ``grazing``, ``box``, ```tailed`` and ``custom``.
 :transit_template_generator: *(TransitTemplateGenerator)* When transit_template=``custom``, this input parameter needs to be fed into TLS as an object instantiated from a class extending the TLS TransitTemplateGenerator class.
 
 
