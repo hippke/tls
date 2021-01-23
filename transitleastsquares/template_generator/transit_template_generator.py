@@ -1,9 +1,16 @@
+import warnings
 from abc import ABC, abstractmethod
 
 import numpy
 
 from transitleastsquares import tls_constants
 from transitleastsquares.interpolation import interp1d
+from tqdm import tqdm
+from transitleastsquares.core import fold
+from transitleastsquares.results import transitleastsquaresresults
+from transitleastsquares.stats import count_stats, snr_stats, model_lightcurve, calculate_stretch, \
+    calculate_fill_factor, calculate_transit_duration_in_days, all_transit_times, spectra, intransit_stats, FAP, \
+    period_uncertainty, rp_rs_from_depth
 
 
 class TransitTemplateGenerator(ABC):
@@ -65,6 +72,38 @@ class TransitTemplateGenerator(ABC):
         :param R_star: The radius of the host star.
         :param M_star: The mass of the host star
         :param periods: The period grid.
+        """
+        pass
+
+    @abstractmethod
+    def final_T0_fit(self, signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar):
+        """ After the search, we know the best period, width and duration.
+            But T0 was not preserved due to speed optimizations.
+            Thus, iterate over T0s using the given parameters
+            Fold to all T0s so that the transit is expected at phase = 0"""
+        pass
+
+    @abstractmethod
+    def transit_mask(self, t, period, duration, T0):
+        """
+        Computes a boolean mask for the entire time set given by 't' and the transit parameters 'duration', 'T0' and
+        'period'.
+        :param t: the time set
+        :param period: the transit period
+        :param duration: the transit duration
+        :param T0: the transit T0
+        :return: the boolean transit mask
+        """
+        # Works with numba, but is not faster
+        mask = numpy.abs((t - T0 + 0.5 * period) % period - 0.5 * period) < 0.5 * duration
+        return mask
+
+    @abstractmethod
+    def calculate_results(self, no_transits_were_fit, chi2, chi2red, chi2_min, chi2red_min, test_statistic_periods,
+                          test_statistic_depths, transitleastsquares, lc_arr, best_row, period_grid, durations,
+                          duration, maxwidth_in_samples):
+        """
+        Returns a transitleastsquaresresult for the given computed statistics.
         """
         pass
 
