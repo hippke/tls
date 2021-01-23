@@ -44,7 +44,7 @@ if __name__ == "__main__":
     # comet
     model_comet = transitleastsquares(t, y_filt)
     results_comet = model_comet.power(transit_template="tailed")
-
+    assert 'rp_rs' not in results_comet
     numpy.testing.assert_almost_equal(
         results_comet.duration, 0.23209496125032572, decimal=5
     )
