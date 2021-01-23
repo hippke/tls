@@ -1,5 +1,3 @@
-import warnings
-
 import batman
 import numpy
 
@@ -273,7 +271,7 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
                 limb_dark=transitleastsquares.limb_dark,
             )
             model_lightcurve_model, model_lightcurve_time = model_lightcurve(
-                transit_times, period, self.t, model_transit_single
+                transit_times, period, transitleastsquares.t, model_transit_single
             )
             depth_mean_odd, depth_mean_even, depth_mean_odd_std, depth_mean_even_std, all_flux_intransit_odd, \
             all_flux_intransit_even, per_transit_count, transit_depths, transit_depths_uncertainties = intransit_stats(
@@ -291,7 +289,7 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
                 transit_times=transit_times,
                 transit_duration_in_days=transit_duration_in_days,
                 per_transit_count=per_transit_count,
-                in_transit=self.transit_mask(transitleastsquares.t, period, 2 * duration, T0)
+                intransit=self.transit_mask(transitleastsquares.t, period, 2 * duration, T0)
             )
             intransit = self.transit_mask(transitleastsquares.t, period, 2 * duration, T0)
             flux_ootr = transitleastsquares.y[~intransit]
