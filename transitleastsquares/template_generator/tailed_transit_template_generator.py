@@ -2,12 +2,13 @@ import batman
 import numpy
 
 from transitleastsquares import tls_constants
+from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
+from transitleastsquares.results import transitleastsquaresresults
 from transitleastsquares.grid import T14
 from transitleastsquares.interpolation import interp1d
-from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
 
 
-class TailedTransitTemplateGenerator(TransitTemplateGenerator):
+class TailedTransitTemplateGenerator(DefaultTransitTemplateGenerator):
     """
     This class uses the equation (6) from Kennedy et al. (2019) to model exocomet transits.
     """
@@ -93,6 +94,15 @@ class TailedTransitTemplateGenerator(TransitTemplateGenerator):
         """
         t14 = T14(R_s=R_star, M_s=M_star, P=period, small=False) * 10
         return t14 if t14 < 1 else 0.99
+
+    def calculate_results(self, no_transits_were_fit, chi2, chi2red, chi2_min, chi2red_min, test_statistic_periods,
+                          test_statistic_depths, transitleastsquares, lc_arr, best_row, period_grid, durations,
+                          duration, maxwidth_in_samples):
+        results = super().calculate_results(no_transits_were_fit, chi2, chi2red, chi2_min, chi2red_min, test_statistic_periods,
+                          test_statistic_depths, transitleastsquares, lc_arr, best_row, period_grid, durations,
+                          duration, maxwidth_in_samples)
+        results.pop('rp_rs')
+        return results
 
     def __reference_comet_transit(self, t, flux, per):
         idx_first = numpy.argmax(flux < 1)
