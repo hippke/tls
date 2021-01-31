@@ -7,27 +7,11 @@ from functools import partial
 from tqdm import tqdm
 
 # TLS parts
-from transitleastsquares.template_generator.tailed_transit_template_generator import TailedTransitTemplateGenerator
-from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
-from transitleastsquares.results import transitleastsquaresresults
+from .template_generator.tailed_transit_template_generator import TailedTransitTemplateGenerator
+from .template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
 import transitleastsquares.tls_constants as tls_constants
-from transitleastsquares.stats import (
-    FAP,
-    rp_rs_from_depth,
-    period_uncertainty,
-    spectra,
-    model_lightcurve,
-    all_transit_times,
-    calculate_transit_duration_in_days,
-    calculate_stretch,
-    calculate_fill_factor,
-    intransit_stats,
-    snr_stats,
-    count_stats,
-)
 from transitleastsquares.grid import period_grid
 from transitleastsquares.core import (
-    fold,
     search_period,
 )
 from transitleastsquares.validate import validate_inputs, validate_args
