@@ -4,7 +4,7 @@ import numpy
 from transitleastsquares import tls_constants
 from transitleastsquares.grid import T14
 from transitleastsquares.interpolation import interp1d
-from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
+from .transit_template_generator import TransitTemplateGenerator
 from tqdm import tqdm
 from transitleastsquares.core import fold
 from transitleastsquares.results import transitleastsquaresresults
