@@ -21,7 +21,7 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
         super().__init__()
 
     def reference_transit(self, period_grid, duration_grid, samples, per, rp, a, inc, ecc, w, u, limb_dark):
-        f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)f
+        f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
         duration = 1  # transit duration in days. Increase for exotic cases
         t = numpy.linspace(-duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE)
         ma = batman.TransitParams()
