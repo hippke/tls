@@ -1,6 +1,6 @@
 import batman
 import numpy
-
+import warnings
 from transitleastsquares import tls_constants
 from transitleastsquares.grid import T14
 from transitleastsquares.interpolation import interp1d
@@ -21,7 +21,7 @@ class DefaultTransitTemplateGenerator(TransitTemplateGenerator):
         super().__init__()
 
     def reference_transit(self, period_grid, duration_grid, samples, per, rp, a, inc, ecc, w, u, limb_dark):
-        f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
+        f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)f
         duration = 1  # transit duration in days. Increase for exotic cases
         t = numpy.linspace(-duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE)
         ma = batman.TransitParams()
