@@ -9,12 +9,12 @@ from tqdm import tqdm
 # TLS parts
 from .template_generator.tailed_transit_template_generator import TailedTransitTemplateGenerator
 from .template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
-from . import tls_constants as tls_constants
-from .grid import period_grid
-from .core import (
+import transitleastsquares.tls_constants as tls_constants
+from transitleastsquares.grid import period_grid
+from transitleastsquares.core import (
     search_period,
 )
-from .validate import validate_inputs, validate_args
+from transitleastsquares.validate import validate_inputs, validate_args
 
 
 class transitleastsquares(object):
