@@ -1,11 +1,11 @@
 from __future__ import division, print_function
 import numpy
-from transitleastsquares import period_grid
 from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
 
 if __name__ == "__main__":
     print("Starting test: duration_grid...", end="")
-    periods = period_grid(
+    default_transit_template_generator = DefaultTransitTemplateGenerator()
+    periods = default_transit_template_generator.period_grid(
         R_star=1,  # R_sun
         M_star=1,  # M_sun
         time_span=20,  # days

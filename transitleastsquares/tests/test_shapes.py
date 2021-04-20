@@ -24,6 +24,9 @@ if __name__ == "__main__":
 
     # box
     model_box = transitleastsquares(t, y_filt)
+    results_box = model_box.power(transit_template="box", period_grid=numpy.arange(1, 5, 0.01))
+    numpy.testing.assert_equal(len(model_box.period_grid), 400)
+
     results_box = model_box.power(transit_template="box")
     numpy.testing.assert_almost_equal(
         results_box.duration, 0.06111785726416931, decimal=5)
@@ -67,7 +70,6 @@ if __name__ == "__main__":
     model_custom = transitleastsquares(t, y_filt)
     results_custom = model_custom.power(transit_template="custom",
                                         transit_template_generator=TestTransitTemplateGenerator())
-
     numpy.testing.assert_almost_equal(
         results_custom.duration, 0.06722964299058617, decimal=5
     )

@@ -1,21 +1,22 @@
 from __future__ import division, print_function
 import numpy
-from transitleastsquares import period_grid
+
+from transitleastsquares import DefaultTransitTemplateGenerator
 
 if __name__ == "__main__":
     print("Starting test: period_grid...", end="")
-
-    periods = period_grid(R_star=1, M_star=1, time_span=0.1)
+    default_transit_template_generator = DefaultTransitTemplateGenerator()
+    periods = default_transit_template_generator.period_grid(R_star=1, M_star=1, time_span=0.1)
     numpy.testing.assert_almost_equal(max(periods), 2.4999999999999987)
     numpy.testing.assert_almost_equal(min(periods), 0.6002621413799498)
     numpy.testing.assert_equal(len(periods), 268)
 
-    periods = period_grid(R_star=1, M_star=1, time_span=20)
+    periods = default_transit_template_generator.period_grid(R_star=1, M_star=1, time_span=20)
     numpy.testing.assert_almost_equal(max(periods), 10)
     numpy.testing.assert_almost_equal(min(periods), 0.6015575922909607)
     numpy.testing.assert_equal(len(periods), 1716)
 
-    periods = period_grid(
+    periods = default_transit_template_generator.period_grid(
         R_star=5,  # R_sun
         M_star=1,  # M_sun
         time_span=20,  # days
@@ -27,7 +28,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(min(periods), 0.6015575922909607)
     numpy.testing.assert_equal(len(periods), 1716)
 
-    periods = period_grid(
+    periods = default_transit_template_generator.period_grid(
         R_star=1,  # R_sun
         M_star=1,  # M_sun
         time_span=20,  # days
@@ -39,7 +40,7 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(min(periods), 0.60155759)
     numpy.testing.assert_equal(len(periods), 1716)
 
-    periods = period_grid(
+    periods = default_transit_template_generator.period_grid(
         R_star=0.1,  # R_sun
         M_star=1,  # M_sun
         time_span=1000,  # days
