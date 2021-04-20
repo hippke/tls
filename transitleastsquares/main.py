@@ -9,12 +9,11 @@ from tqdm import tqdm
 # TLS parts
 from .template_generator.tailed_transit_template_generator import TailedTransitTemplateGenerator
 from .template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
-import transitleastsquares.tls_constants as tls_constants
-from transitleastsquares.grid import period_grid
-from transitleastsquares.core import (
+from . import tls_constants
+from .core import (
     search_period,
 )
-from transitleastsquares.validate import validate_inputs, validate_args
+from .validate import validate_inputs, validate_args
 
 
 class transitleastsquares(object):
@@ -34,7 +33,7 @@ class transitleastsquares(object):
         print(tls_constants.TLS_VERSION)
         self, kwargs = validate_args(self, kwargs)
         transit_template_generator = self.transit_template_generators[self.transit_template]
-        periods = period_grid(
+        periods = self.period_grid if self.period_grid is not None else transit_template_generator.period_grid(
             R_star=self.R_star,
             M_star=self.M_star,
             time_span=numpy.max(self.t) - numpy.min(self.t),
@@ -52,7 +51,7 @@ class transitleastsquares(object):
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
         lc_cache_overview, lc_arr = transit_template_generator.get_cache(
-            period_grid=period_grid,
+            period_grid=periods,
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             per=self.per,
@@ -193,6 +192,6 @@ class transitleastsquares(object):
 
         return transit_template_generator.calculate_results(no_transits_were_fit, chi2, chi2red, chi2_min,
                                                             chi2red_min, test_statistic_periods, test_statistic_depths,
-                                                            self, lc_arr, best_row, period_grid,
+                                                            self, lc_arr, best_row, periods,
                                                             durations, duration, maxwidth_in_samples)
 
