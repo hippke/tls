@@ -3,9 +3,9 @@ import numpy
 import warnings
 import multiprocessing
 
-from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
-from transitleastsquares.helpers import cleaned_array, impact_to_inclination
-import transitleastsquares.tls_constants as tls_constants
+from .template_generator.transit_template_generator import TransitTemplateGenerator
+from .helpers import cleaned_array, impact_to_inclination
+from . import tls_constants
 
 
 def validate_inputs(t, y, dy):
