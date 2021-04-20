@@ -132,11 +132,14 @@ def validate_args(self, kwargs):
             )
         else:
             self.transit_template_generators["custom"] = custom_transit_template_generator
+
     else:
         raise ValueError(
             'Unknown transit_template. Known values: \
             "default", "grazing", "box", "tailed"'
         )
+
+    self.period_grid = kwargs.get("period_grid", None)
 
     """Validations to avoid (garbage in ==> garbage out)"""
 
@@ -192,4 +195,7 @@ def validate_args(self, kwargs):
         self.T0_fit_margin = 0
     elif self.T0_fit_margin > 0.1:  # Sensible limit 10% of transit duration
         self.T0_fit_margin = 0.1
+
+    if self.period_grid is not None and not isinstance(self.period_grid, numpy.ndarray):
+        raise ValueError("period_grid must be a `ndarray`")
     return self, kwargs
