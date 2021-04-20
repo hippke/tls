@@ -10,13 +10,12 @@
 #       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany
 
 from __future__ import division, print_function
-from transitleastsquares.main import transitleastsquares
-from transitleastsquares.helpers import cleaned_array, resample, transit_mask
-from transitleastsquares.grid import period_grid
-from transitleastsquares.stats import FAP
-from transitleastsquares.catalog import catalog_info
-from transitleastsquares.core import fold
-from transitleastsquares.template_generator.transit_template_generator import TransitTemplateGenerator
-from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
-from transitleastsquares.results import transitleastsquaresresults
-from transitleastsquares import version
+from .main import transitleastsquares
+from .helpers import cleaned_array, resample, transit_mask
+from .stats import FAP
+from .catalog import catalog_info
+from .core import fold
+from .template_generator.transit_template_generator import TransitTemplateGenerator
+from .template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
+from .results import transitleastsquaresresults
+from . import version

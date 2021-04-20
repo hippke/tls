@@ -2,7 +2,7 @@ from __future__ import division, print_function
 import numba
 import numpy
 from numpy import arccos, degrees
-from transitleastsquares.interpolation import interp1d
+from .interpolation import interp1d
 
 
 def resample(time, flux, factor):

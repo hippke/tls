@@ -1,9 +1,9 @@
 from __future__ import division, print_function
 import numpy
 import numba
-import transitleastsquares.tls_constants as tls_constants
-from transitleastsquares.grid import T14
-from transitleastsquares.helpers import running_mean
+from . import tls_constants
+from .grid import T14
+from .helpers import running_mean
 
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)

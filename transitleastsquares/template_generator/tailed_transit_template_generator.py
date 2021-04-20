@@ -1,11 +1,11 @@
 import batman
 import numpy
 
-from transitleastsquares import tls_constants
-from transitleastsquares.template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
-from transitleastsquares.results import transitleastsquaresresults
-from transitleastsquares.grid import T14
-from transitleastsquares.interpolation import interp1d
+from .. import tls_constants
+from ..template_generator.default_transit_template_generator import DefaultTransitTemplateGenerator
+from ..results import transitleastsquaresresults
+from ..grid import T14
+from ..interpolation import interp1d
 
 
 class TailedTransitTemplateGenerator(DefaultTransitTemplateGenerator):
