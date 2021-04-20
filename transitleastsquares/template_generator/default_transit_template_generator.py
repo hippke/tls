@@ -1,14 +1,14 @@
 import batman
 import numpy
 import warnings
-from transitleastsquares import tls_constants
-from transitleastsquares.grid import T14
-from transitleastsquares.interpolation import interp1d
+from .. import tls_constants
+from ..grid import T14
+from ..interpolation import interp1d
 from .transit_template_generator import TransitTemplateGenerator
 from tqdm import tqdm
-from transitleastsquares.core import fold
-from transitleastsquares.results import transitleastsquaresresults
-from transitleastsquares.stats import count_stats, snr_stats, model_lightcurve, calculate_stretch, \
+from ..core import fold
+from ..results import transitleastsquaresresults
+from ..stats import count_stats, snr_stats, model_lightcurve, calculate_stretch, \
     calculate_fill_factor, calculate_transit_duration_in_days, all_transit_times, spectra, intransit_stats, FAP, \
     period_uncertainty, rp_rs_from_depth
 
