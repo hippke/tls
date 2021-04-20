@@ -2,13 +2,13 @@ import warnings
 from abc import ABC, abstractmethod
 
 import numpy
-
-from transitleastsquares import tls_constants
-from transitleastsquares.interpolation import interp1d
+from numpy import pi, sqrt
+from .. import tls_constants
+from ..interpolation import interp1d
 from tqdm import tqdm
-from transitleastsquares.core import fold
-from transitleastsquares.results import transitleastsquaresresults
-from transitleastsquares.stats import count_stats, snr_stats, model_lightcurve, calculate_stretch, \
+from ..core import fold
+from ..results import transitleastsquaresresults
+from ..stats import count_stats, snr_stats, model_lightcurve, calculate_stretch, \
     calculate_fill_factor, calculate_transit_duration_in_days, all_transit_times, spectra, intransit_stats, FAP, \
     period_uncertainty, rp_rs_from_depth
 
@@ -52,6 +52,106 @@ class TransitTemplateGenerator(ABC):
         :param log_step: The logarithmic step increment factor.
         """
         pass
+
+    def period_grid(self, R_star, M_star, time_span, period_min=0, period_max=float("inf"),
+            oversampling_factor=tls_constants.OVERSAMPLING_FACTOR, n_transits_min=tls_constants.N_TRANSITS_MIN):
+        """
+        Generates a grid of optimal sampling periods for transit search in light curves.
+        Following Ofir (2014, A&A, 561, A138)
+        :param R_star: The star radius
+        :param M_star: The star mass
+        :param time_span: The light curve timespam
+        :param period_min: The minimum period of the grid
+        :param period_max: The maximum period of the grid
+        :param oversampling_factor: The grid density free parameter
+        :param n_transits_min: The minimum number of transits to be matched
+        """
+        if R_star < 0.1:
+            text = (
+                    "Warning: R_star was set to 0.1 for period_grid (was unphysical: "
+                    + str(R_star)
+                    + ")"
+            )
+            warnings.warn(text)
+            R_star = 0.1
+
+        if R_star > 10000:
+            text = (
+                    "Warning: R_star was set to 10000 for period_grid (was unphysical: "
+                    + str(R_star)
+                    + ")"
+            )
+            warnings.warn(text)
+            R_star = 10000
+
+        if M_star < 0.01:
+            text = (
+                    "Warning: M_star was set to 0.01 for period_grid (was unphysical: "
+                    + str(M_star)
+                    + ")"
+            )
+            warnings.warn(text)
+            M_star = 0.01
+
+        if M_star > 1000:
+            text = (
+                    "Warning: M_star was set to 1000 for period_grid (was unphysical: "
+                    + str(M_star)
+                    + ")"
+            )
+            warnings.warn(text)
+            M_star = 1000
+
+        R_star = R_star * tls_constants.R_sun
+        M_star = M_star * tls_constants.M_sun
+        time_span = time_span * tls_constants.SECONDS_PER_DAY  # seconds
+
+        # boundary conditions
+        f_min = n_transits_min / time_span
+        f_max = 1.0 / (2 * pi) * sqrt(tls_constants.G * M_star / (3 * R_star) ** 3)
+
+        # optimal frequency sampling, Equations (5), (6), (7)
+        A = (
+                (2 * pi) ** (2.0 / 3)
+                / pi
+                * R_star
+                / (tls_constants.G * M_star) ** (1.0 / 3)
+                / (time_span * oversampling_factor)
+        )
+        C = f_min ** (1.0 / 3) - A / 3.0
+        N_opt = (f_max ** (1.0 / 3) - f_min ** (1.0 / 3) + A / 3) * 3 / A
+
+        X = numpy.arange(N_opt) + 1
+        f_x = (A / 3 * X + C) ** 3
+        P_x = 1 / f_x
+
+        # Cut to given (optional) selection of periods
+        periods = P_x / tls_constants.SECONDS_PER_DAY
+        selected_index = numpy.where(
+            numpy.logical_and(periods > period_min, periods <= period_max)
+        )
+
+        number_of_periods = numpy.size(periods[selected_index])
+
+        if number_of_periods > 10 ** 6:
+            text = (
+                    "period_grid generates a very large grid ("
+                    + str(number_of_periods)
+                    + "). Recommend to check physical plausibility for stellar mass, radius, and time series duration."
+            )
+            warnings.warn(text)
+
+        if number_of_periods < tls_constants.MINIMUM_PERIOD_GRID_SIZE:
+            if time_span < 5 * tls_constants.SECONDS_PER_DAY:
+                time_span = 5 * tls_constants.SECONDS_PER_DAY
+            warnings.warn(
+                "period_grid defaults to R_star=1 and M_star=1 as given density yielded grid with too few values"
+            )
+            return self.period_grid(
+                R_star=1, M_star=1, time_span=time_span / tls_constants.SECONDS_PER_DAY
+            )
+        else:
+            return periods[selected_index]  # periods in [days]
 
     @abstractmethod
     def min_duration(self, period, R_star, M_star, periods=None):
