@@ -1,7 +1,7 @@
 from __future__ import division, print_function
 import sys
 from os import path
-import transitleastsquares.version as tls_version
+from . import version as tls_version
 
 """Magic constants"""
 resources_dir = path.join(path.dirname(__file__))
