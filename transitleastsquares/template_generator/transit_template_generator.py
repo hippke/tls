@@ -54,7 +54,8 @@ class TransitTemplateGenerator(ABC):
         pass
 
     def period_grid(self, R_star, M_star, time_span, period_min=0, period_max=float("inf"),
-            oversampling_factor=tls_constants.OVERSAMPLING_FACTOR, n_transits_min=tls_constants.N_TRANSITS_MIN):
+            oversampling_factor=tls_constants.OVERSAMPLING_FACTOR, n_transits_min=tls_constants.N_TRANSITS_MIN,
+                    effective_time_span=None):
         """
         Generates a grid of optimal sampling periods for transit search in light curves.
         Following Ofir (2014, A&A, 561, A138)
@@ -101,11 +102,12 @@ class TransitTemplateGenerator(ABC):
             )
             warnings.warn(text)
             M_star = 1000
-
+        if effective_time_span is None:
+            effective_time_span = time_span
         R_star = R_star * tls_constants.R_sun
         M_star = M_star * tls_constants.M_sun
         time_span = time_span * tls_constants.SECONDS_PER_DAY  # seconds
-
+        effective_time_span = effective_time_span * tls_constants.SECONDS_PER_DAY
         # boundary conditions
         f_min = n_transits_min / time_span
         f_max = 1.0 / (2 * pi) * sqrt(tls_constants.G * M_star / (3 * R_star) ** 3)
@@ -116,7 +118,7 @@ class TransitTemplateGenerator(ABC):
                 / pi
                 * R_star
                 / (tls_constants.G * M_star) ** (1.0 / 3)
-                / (time_span * oversampling_factor)
+                / (effective_time_span * oversampling_factor)
         )
         C = f_min ** (1.0 / 3) - A / 3.0
         N_opt = (f_max ** (1.0 / 3) - f_min ** (1.0 / 3) + A / 3) * 3 / A
