@@ -6,7 +6,6 @@
 [![Image](https://img.shields.io/badge/documentation-%E2%9C%93-blue.svg)](https://transitleastsquares.readthedocs.io/en/latest/index.html)
 [![Image](https://img.shields.io/badge/tutorials-%E2%9C%93-blue.svg)](https://github.com/hippke/tls/tree/master/tutorials)
 [![Image](https://img.shields.io/badge/arXiv-1901.02015-blue.svg)](https://arxiv.org/abs/1901.02015)
-[![Build Status](https://travis-ci.com/hippke/tls.svg?branch=master)](https://travis-ci.com/hippke/tls)
 
 
 ## Motivation
