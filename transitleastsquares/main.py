@@ -46,11 +46,12 @@ class transitleastsquares(object):
 
     def __init__(self, t, y, dy=None, verbose=True):
         self.t, self.y, self.dy = validate_inputs(t, y, dy)
+        self.verbose = verbose
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
 
-        if verbose:
+        if self.verbose:
             print(tls_constants.TLS_VERSION)
         self, kwargs = validate_args(self, kwargs)
 
@@ -82,10 +83,10 @@ class transitleastsquares(object):
             w=self.w,
             u=self.u,
             limb_dark=self.limb_dark,
-            verbose=verbose
+            verbose=self.verbose
         )
 
-        if verbose:
+        if self.verbose:
             print(
                 "Searching "
                 + str(len(self.y))
@@ -104,7 +105,7 @@ class transitleastsquares(object):
             self.use_threads = 1
             warnings.warn("This TLS version supports no multithreading on Python 2")
 
-        if verbose:
+        if self.verbose:
             if self.use_threads == multiprocessing.cpu_count():
                 print("Using all " + str(self.use_threads) + " CPU threads")
             else:
