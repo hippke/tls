@@ -44,13 +44,15 @@ from transitleastsquares.validate import validate_inputs, validate_args
 class transitleastsquares(object):
     """Compute the transit least squares of limb-darkened transit models"""
 
-    def __init__(self, t, y, dy=None):
+    def __init__(self, t, y, dy=None, verbose=True):
         self.t, self.y, self.dy = validate_inputs(t, y, dy)
+        self.verbose = verbose
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
 
-        print(tls_constants.TLS_VERSION)
+        if self.verbose:
+            print(tls_constants.TLS_VERSION)
         self, kwargs = validate_args(self, kwargs)
 
         periods = period_grid(
@@ -81,19 +83,21 @@ class transitleastsquares(object):
             w=self.w,
             u=self.u,
             limb_dark=self.limb_dark,
+            verbose=self.verbose
         )
 
-        print(
-            "Searching "
-            + str(len(self.y))
-            + " data points, "
-            + str(len(periods))
-            + " periods from "
-            + str(round(min(periods), 3))
-            + " to "
-            + str(round(max(periods), 3))
-            + " days"
-        )
+        if self.verbose:
+            print(
+                "Searching "
+                + str(len(self.y))
+                + " data points, "
+                + str(len(periods))
+                + " periods from "
+                + str(round(min(periods), 3))
+                + " to "
+                + str(round(max(periods), 3))
+                + " days"
+            )
 
         # Python 2 multiprocessing with "partial" doesn't work
         # For now, only single-threading in Python 2 is supported
@@ -101,16 +105,17 @@ class transitleastsquares(object):
             self.use_threads = 1
             warnings.warn("This TLS version supports no multithreading on Python 2")
 
-        if self.use_threads == multiprocessing.cpu_count():
-            print("Using all " + str(self.use_threads) + " CPU threads")
-        else:
-            print(
-                "Using "
-                + str(self.use_threads)
-                + " of "
-                + str(multiprocessing.cpu_count())
-                + " CPU threads"
-            )
+        if self.verbose:
+            if self.use_threads == multiprocessing.cpu_count():
+                print("Using all " + str(self.use_threads) + " CPU threads")
+            else:
+                print(
+                    "Using "
+                    + str(self.use_threads)
+                    + " of "
+                    + str(multiprocessing.cpu_count())
+                    + " CPU threads"
+                )
 
         if self.show_progress_bar:
             bar_format = "{desc}{percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} periods | {elapsed}<{remaining}"

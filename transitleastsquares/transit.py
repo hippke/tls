@@ -95,12 +95,14 @@ def fractional_transit(
     return result
 
 
-def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark):
+def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
+              limb_dark, verbose=True):
     """Fetches (size(durations)*size(depths)) light curves of length 
         maxwidth_in_samples and returns these LCs in a 2D array, together with 
         their metadata in a separate array."""
 
-    print("Creating model cache for", str(len(durations)), "durations")
+    if verbose:
+        print("Creating model cache for", str(len(durations)), "durations")
     lc_arr = []
     rows = numpy.size(durations)
     lc_cache_overview = numpy.zeros(
