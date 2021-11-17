@@ -48,6 +48,8 @@ def validate_inputs(t, y, dy):
 
 def validate_args(self, kwargs):
 
+    self.verbose = kwargs.get("verbose", tls_constants.VERBOSE)
+
     # Warn user if unknown parameters
     for key, value in kwargs.items():
         if key not in tls_constants.VALID_PARAMETERS:

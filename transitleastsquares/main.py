@@ -50,10 +50,11 @@ class transitleastsquares(object):
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
+        self, kwargs = validate_args(self, kwargs)
 
         if self.verbose:
             print(tls_constants.TLS_VERSION)
-        self, kwargs = validate_args(self, kwargs)
+        
 
         periods = period_grid(
             R_star=self.R_star,
@@ -278,6 +279,7 @@ class transitleastsquares(object):
                 period=period,
                 T0_fit_margin=self.T0_fit_margin,
                 show_progress_bar=self.show_progress_bar,
+                verbose=self.verbose
             )
             transit_times = all_transit_times(T0, self.t, period)
 

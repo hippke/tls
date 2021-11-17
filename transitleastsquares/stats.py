@@ -132,7 +132,7 @@ def spectra(chi2, oversampling_factor):
     return SR, power_raw, power, SDE_raw, SDE
 
 
-def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar):
+def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar, verbose):
     """ After the search, we know the best period, width and duration.
         But T0 was not preserved due to speed optimizations. 
         Thus, iterate over T0s using the given parameters
@@ -165,8 +165,10 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_b
     residuals_lowest = float("inf")
     T0 = 0
 
-    if show_progress_info:
+    if verbose:
         print("Searching for best T0 for period", format(period, ".5f"), "days")
+
+    if show_progress_info:
         pbar2 = tqdm(total=numpy.size(T0_array))
     signal_ootr = numpy.ones(len(y[dur:]))
 

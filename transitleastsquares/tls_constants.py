@@ -13,6 +13,9 @@ TLS_VERSION = (
     + ")"
 )
 
+# In the default, print status information during search
+VERBOSE = True
+
 # astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
 R_sun = 695508000  # radius of the Sun [m]
@@ -141,4 +144,5 @@ VALID_PARAMETERS = [
     "use_threads",
     "show_progress_bar",
     "transit_template",
+    "verbose"
 ]
