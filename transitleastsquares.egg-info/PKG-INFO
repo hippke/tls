@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: transitleastsquares
-Version: 1.0.29
+Version: 1.0.30
 Summary: An optimized transit-fitting algorithm to search for periodic transits of small planets
 Home-page: https://github.com/hippke/tls
 Author: Michael Hippke

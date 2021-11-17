@@ -45,7 +45,7 @@ if __name__ == "__main__":
         transit_depth_min=10 * 10 ** -6,
         oversampling_factor=5,
         duration_grid_step=1.02, 
-        verbose=False 
+        verbose=True 
     )
 
     numpy.testing.assert_almost_equal(results.chi2_min, 8831.654060613922, decimal=5)

@@ -84,12 +84,13 @@ Parameters to balance detection efficiency and computational requirements:
 Parameters to adjust the computational load and the user experience:
 
 :use_threads: *(int)* Number of parallel threads to be used. A processor like the Intel Core i7-8700K has 6 cores and can run 12 threads in parallel using hyperthreading. Setting ``use_threads=12`` will cause a full load. If no parameter is given, TLS determines the number of available threads and uses the maximum available (in this case: 12).
-:show_progress_bar: *(bool, default: True)* When set to ``False``, no progress bar (using ``tqdm``) will be shown
+:show_progress_bar: *(bool, default: True)* When set to ``False``, no progress bar (using ``tqdm``) is shown
 
 .. note::
 
    Multi-threading (``use_threads>1`) only works with TLS running on Python 3 as of now. On Python 2, TLS should work, but will fall back to single-core.
 
+:verbose: *(bool default: True)* Prints various status information during search. If set to ``False``, no status information is shown.
 
 
 
