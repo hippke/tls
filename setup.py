@@ -39,7 +39,7 @@ setup(name='transitleastsquares',
         'numba',
         'tqdm',
         'batman-package',
-        'argparse',
+        'argparse; python_version < "2.7"',
         'configparser'
         ]
 )
