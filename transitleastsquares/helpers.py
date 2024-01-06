@@ -93,7 +93,7 @@ def running_mean_equal_length(data, width_signal):
 def running_median(data, kernel):
     """Returns sliding median of width 'kernel' and same length as data """
     idx = numpy.arange(kernel) + numpy.arange(len(data) - kernel + 1)[:, None]
-    idx = idx.astype(numpy.int)  # needed if oversampling_factor is not int
+    idx = idx.astype(numpy.int64)  # needed if oversampling_factor is not int
     med = numpy.median(data[idx], axis=1)
 
     # Append the first/last value at the beginning/end to match the length of
