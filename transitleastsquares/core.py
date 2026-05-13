@@ -37,13 +37,13 @@ def lowest_residuals_in_this_duration(
     ootr,
     summed_edge_effect_correction,
     chosen_transit_row,
-    datapoints,
+    constant_residual,
     T0_fit_margin,
 ):
 
-    # if nothing is fit, we fit a straight line: signal=1. Then, at dy=1,
-    # the squared sum of residuals equals the number of datapoints
-    summed_residual_in_rows = datapoints
+    # if nothing is fit, we fit a straight line: signal=1.
+    # this gives a chi2 of value constant_residual
+    summed_residual_in_rows = constant_residual
     best_row = 0
     best_depth = 0
 
@@ -158,6 +158,7 @@ def search_period(
     skipped_all = True
     best_row = 0  # shortest and shallowest transit
     best_depth = 0
+    constant_residual = numpy.sum((flux - 1)**2/dy**2)
 
     for duration in durations:
         chosen_transit_row = 0
@@ -176,7 +177,7 @@ def search_period(
             ),
             summed_edge_effect_correction=this_edge_effect_correction,
             chosen_transit_row=chosen_transit_row,
-            datapoints=len(flux),
+            constant_residual=constant_residual,
             T0_fit_margin=T0_fit_margin,
         )
 
