@@ -125,7 +125,10 @@ def fold_order_into(t, period, phases, counts, order, keys, folded=False):
     """Stable phase permutation, delaying flux/weight gathers until prefixing.
 
     Recompute bucket IDs during scatter so the integer buffer can hold output
-    indices instead of input bucket IDs. No flux or weight payload is scattered.
+    indices instead of input bucket IDs. Only the permutation is scattered: no
+    keys and no flux/weight payload (PERFORMANCE_LOG step 49); the insertion
+    repair compares phases[order[i]] with the same strict ordering, so the
+    result is the identical stable order. `keys` is no longer written.
     folded=True reuses phases from an unsuccessful few-run merge attempt.
     """
     n = len(t)
@@ -142,21 +145,21 @@ def fold_order_into(t, period, phases, counts, order, keys, folded=False):
         k = min(n - 1, max(0, int(phases[i] * n)))
         pos = counts[k]
         counts[k] = pos + 1
-        keys[pos] = phases[i]
         order[pos] = i
     work = 0
+    prev = phases[order[0]] if n > 0 else 0.0
     for i in range(1, n):
-        kv = keys[i]
-        if kv < keys[i - 1]:
-            iv = order[i]
+        iv = order[i]
+        kv = phases[iv]
+        if kv < prev:
             j = i - 1
-            while j >= 0 and keys[j] > kv:
-                keys[j + 1] = keys[j]
+            while j >= 0 and phases[order[j]] > kv:
                 order[j + 1] = order[j]
                 j -= 1
-            keys[j + 1] = kv
             order[j + 1] = iv
             work += i - 1 - j
+        else:
+            prev = kv
             if work > 8 * n:
                 fallback = numpy.argsort(phases[:n], kind="mergesort")
                 for q in range(n):
@@ -306,6 +309,11 @@ def search_period_fused(
 ):
     """Returns (chi2_min, template row, depth) for one trial period.
 
+    y: input *residuals* r = 1 - flux (float64, or float32 storage for the
+    approximate backends; see FusedProblem.set_storage). The kernel uses
+    f = 1 - r, which is exact for float32 r, so (1 - f) recovers r.
+    inv_dy2: weights 1/dy^2 in the same storage precision.
+
     fbuf/ibuf: preallocated work buffers (see workspace_size). Reusing them
     across periods avoids ~1 ms of page faults per period for N ~ 1e5.
 
@@ -398,6 +406,9 @@ def search_period_fused(
                     break
                 runs += 1
     w0 = inv_dy2[0]
+    # cum_rw is read only by stride-binned correlations: skip its chain and
+    # store otherwise (less memory traffic per period; step 49).
+    has_bins = len(a_bin) > 0
     has_pl = len(pl_c) > 0
     if screen is not None:
         has_pl = True
@@ -439,7 +450,7 @@ def search_period_fused(
                         src = h2
                         h2 += 1
                         p2 = phases[h2] if h2 < n else 2.0
-                    f = y[src]
+                    f = 1.0 - y[src]
                     if k < maxw:
                         flux_sorted[k] = f
                 else:
@@ -448,7 +459,8 @@ def search_period_fused(
                 rw[k] = rk
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
-                cum_rw[k + 1] = cum_rw[k] + rk
+                if has_bins:
+                    cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * w0
                 if has_pl:
@@ -470,7 +482,7 @@ def search_period_fused(
                         src = h2
                         h2 += 1
                         p2 = phases[h2] if h2 < n else 2.0
-                    f = y[src]
+                    f = 1.0 - y[src]
                     if k < maxw:
                         flux_sorted[k] = f
                 else:
@@ -487,7 +499,8 @@ def search_period_fused(
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
                 cum_w[k + 1] = cum_w[k] + wk
-                cum_rw[k + 1] = cum_rw[k] + rk
+                if has_bins:
+                    cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * wk
                 if has_pl:
@@ -504,12 +517,13 @@ def search_period_fused(
             # w = w0 everywhere: no weight arrays (w, cum_w) needed
             for k in range(m):
                 src = bucket[k if k < n else k - n]
-                f = y[src]
+                f = 1.0 - y[src]
                 rk = (1.0 - f) * w0
                 rw[k] = rk
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
-                cum_rw[k + 1] = cum_rw[k] + rk
+                if has_bins:
+                    cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * w0
                 if has_pl:
@@ -519,7 +533,7 @@ def search_period_fused(
         else:
             for k in range(m):
                 src = bucket[k if k < n else k - n]
-                f = y[src]
+                f = 1.0 - y[src]
                 wk = inv_dy2[src]
                 rk = (1.0 - f) * wk
                 w[k] = wk
@@ -527,7 +541,8 @@ def search_period_fused(
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
                 cum_w[k + 1] = cum_w[k] + wk
-                cum_rw[k + 1] = cum_rw[k] + rk
+                if has_bins:
+                    cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * wk
                 if has_pl:
@@ -1224,6 +1239,7 @@ class FusedProblem:
         self.inv_dy2 = 1 / dy**2
         self.input_means = _input_means(self.y, self.inv_dy2)
         self.uniform_weights = bool(numpy.all(self.inv_dy2 == self.inv_dy2[0]))
+        self.set_storage(numpy.float64)
         self.time_span = float(numpy.max(self.t) - numpy.min(self.t))
         self.index_dtype = sort_index_dtype(len(self.t))
         self.templates = flatten_templates(problem.lc_arr, problem.lc_cache_overview)
@@ -1284,6 +1300,15 @@ class FusedProblem:
                 not self.uniform_weights, proxy_eps, min_length, budget,
             )
 
+    def set_storage(self, dtype):
+        """Precision of the per-point inputs gathered every period: residuals
+        r = 1 - y and weights. float64 (default, exact backends) or float32
+        (approximate backends, PERFORMANCE_LOG step 50: |dr| <= 6e-8 |r|, SDE
+        changes <= 5e-4, no recovery changes). Prefix sums stay float64."""
+        self.storage = numpy.dtype(dtype).type
+        self.r_in = (1.0 - self.y).astype(self.storage)
+        self.w_in = self.inv_dy2.astype(self.storage)
+
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
         self.dtype = numpy.dtype(dtype).type
@@ -1338,8 +1363,8 @@ class FusedProblem:
         chi2, row, depth = search_period_fused(
             float(period),
             self.t,
-            self.y,
-            self.inv_dy2,
+            self.r_in,
+            self.w_in,
             self.uniform_weights,
             self.time_span,
             p.transit_depth_min,

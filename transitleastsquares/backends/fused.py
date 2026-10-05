@@ -2,6 +2,8 @@
 
 import os
 
+import numpy
+
 from transitleastsquares.backends.pool import ProcessPoolBackend
 from transitleastsquares.core_fused import FusedProblem
 
@@ -31,6 +33,8 @@ class FusedBackend(ProcessPoolBackend):
         )
         if self.exact:
             fp.set_screen()
+        else:
+            fp.set_storage(numpy.float32)  # approximate backends (step 50)
         return fp
 
     def coarsen(self):
@@ -96,6 +100,8 @@ class FusedThreadsBackend(FusedBackend):
         )
         if self.exact:
             fp.set_screen()
+        else:
+            fp.set_storage(numpy.float32)
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -108,8 +114,8 @@ class FusedThreadsBackend(FusedBackend):
                     search_periods_fused_parallel(
                         blk,
                         fp.t,
-                        fp.y,
-                        fp.inv_dy2,
+                        fp.r_in,
+                        fp.w_in,
                         fp.uniform_weights,
                         fp.time_span,
                         p.transit_depth_min,
