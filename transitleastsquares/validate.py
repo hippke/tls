@@ -100,10 +100,18 @@ def validate_args(self, kwargs):
 
     self.transit_template = kwargs.get("transit_template", "default")
     if self.transit_template == "default":
-        self.per = tls_constants.DEFAULT_PERIOD
-        self.rp = tls_constants.DEFAULT_RP
-        self.a = tls_constants.DEFAULT_A
-        self.inc = tls_constants.DEFAULT_INC
+        # BUGFIX: previously the default template unconditionally overwrote
+        # user-supplied per/rp/a/inc (and inc derived from b), so custom transit
+        # shapes were impossible. The default template values are identical to
+        # the defaults above, so only explicit user values change behaviour.
+        if "per" not in kwargs:
+            self.per = tls_constants.DEFAULT_PERIOD
+        if "rp" not in kwargs:
+            self.rp = tls_constants.DEFAULT_RP
+        if "a" not in kwargs:
+            self.a = tls_constants.DEFAULT_A
+        if "inc" not in kwargs and "b" not in kwargs:
+            self.inc = tls_constants.DEFAULT_INC
 
     elif self.transit_template == "grazing":
         self.b = tls_constants.GRAZING_B

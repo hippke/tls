@@ -91,3 +91,23 @@ def test_cleaned_array_keeps_nonpositive_times():
     t[3] = numpy.nan
     ct, cy = cleaned_array(t, y)
     assert len(ct) == 10
+
+def test_user_template_parameters_not_overwritten():
+    t = numpy.linspace(0, 30, 3000)
+    y = numpy.ones_like(t)
+    m = TLS(t, y, verbose=False)
+    from transitleastsquares.validate import validate_args
+
+    validate_args(m, dict(rp=0.1, a=10.0, per=5.0, inc=88.0))
+    assert (m.rp, m.a, m.per, m.inc) == (0.1, 10.0, 5.0, 88.0)
+    m = TLS(t, y, verbose=False)
+    validate_args(m, dict(a=10.0, b=0.5))
+    numpy.testing.assert_almost_equal(m.inc, numpy.degrees(numpy.arccos(0.5 / 10.0)))
+    m = TLS(t, y, verbose=False)
+    validate_args(m, {})  # defaults unchanged
+    assert (m.rp, m.a, m.per, m.inc) == (
+        tls_constants.DEFAULT_RP,
+        tls_constants.DEFAULT_A,
+        tls_constants.DEFAULT_PERIOD,
+        tls_constants.DEFAULT_INC,
+    )
