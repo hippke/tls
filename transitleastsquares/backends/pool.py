@@ -2,7 +2,10 @@
 
 The search data are handed to each worker once (pool initializer; with the
 default "fork" start method they are inherited without pickling), and the
-periods are sent in chunks. TLS <= 1.33 pickled all arrays for every period.
+periods are sent in chunks. The initializer also receives a snapshot of
+tls_constants and the TLS_* environment, so fresh pools behave the same
+under every start method (Linux Python >= 3.14 defaults to "forkserver").
+TLS <= 1.33 pickled all arrays for every period.
 
 One pool serves all search tasks of a power() call (the unbinned light curve
 and its pre-binned copies, see main._search_plan): starting and stopping a
@@ -40,8 +43,13 @@ _WORKER = None
 _CACHE = None  # in a persistent worker: (token, backend, states)
 
 
-def _init_worker(backend, states):
+def _init_worker(backend, states, config=None):
     global _WORKER
+    if config is not None:
+        # Fresh (non-persistent) pools: with "fork" the workers inherit the
+        # parent's memory anyway; with "spawn"/"forkserver" they re-import TLS,
+        # so the call-time constants and TLS_* variables must be shipped.
+        _apply_config(config)
     _WORKER = (backend, states)
 
 
@@ -348,7 +356,7 @@ class ProcessPoolBackend(SearchBackend):
             pool = ctx.Pool(
                 processes=use_threads,
                 initializer=_init_worker,
-                initargs=(self, states),
+                initargs=(self, states, _config_snapshot()),
             )
             joined = False
             try:
