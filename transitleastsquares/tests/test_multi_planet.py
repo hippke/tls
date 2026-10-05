@@ -11,6 +11,9 @@ def loadfile(filename):
 
 
 if __name__ == "__main__":
+    # Reference values updated for TLS 1.33: PR #112 changed the chi2 of
+    # "no fit" periods from len(y) to sum((y-1)^2/dy^2), which shifts power/SDE
+    # slightly. The test was not updated upstream and failed on 1.33.
     print("Starting test: Multi-planet...", end="")
     t, y = loadfile("EPIC201367065.csv")
     trend = scipy.signal.medfilt(y, 25)
@@ -19,13 +22,13 @@ if __name__ == "__main__":
     model = transitleastsquares(t, y_filt)
     results = model.power()
 
-    numpy.testing.assert_almost_equal(max(results.power), 45.49085809486116, decimal=3)
+    numpy.testing.assert_almost_equal(max(results.power), 45.185902962942706, decimal=3)
     numpy.testing.assert_almost_equal(
-        max(results.power_raw), 42.93056655774114, decimal=3
+        max(results.power_raw), 42.10612241872027, decimal=3
     )
-    numpy.testing.assert_almost_equal(min(results.power), -0.6175100139942546, decimal=3)
+    numpy.testing.assert_almost_equal(min(results.power), -0.6113463157599826, decimal=3)
     numpy.testing.assert_almost_equal(
-        min(results.power_raw), -0.3043720539933344, decimal=3
+        min(results.power_raw), -0.4961035632387514, decimal=3
     )
     print("Detrending of power spectrum from power_raw passed")
 
@@ -42,10 +45,10 @@ if __name__ == "__main__":
         results_second_run.duration, 0.15061016994013998, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results_second_run.SDE, 34.9911304598618, decimal=3
+        results_second_run.SDE, 34.987371359756565, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results_second_run.rp_rs, 0.025852178872027086, decimal=3
+        results_second_run.rp_rs, 0.025480893577558485, decimal=3
     )
 
     print("Passed")
