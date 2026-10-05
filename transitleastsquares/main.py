@@ -347,17 +347,21 @@ class transitleastsquares(object):
             all_flux_intransit = numpy.concatenate(
                 [all_flux_intransit_odd, all_flux_intransit_even]
             )
+            # BUGFIX: `duration` is a *fraction of the period* here, but
+            # transit_mask expects days. The out-of-transit mask was therefore
+            # far too narrow (2*0.0x days), in-transit points leaked into the
+            # out-of-transit noise estimate and SNR was underestimated.
             snr_per_transit, snr_pink_per_transit = snr_stats(
                 t=self.t,
                 y=self.y,
                 period=period,
-                duration=duration,
+                duration=transit_duration_in_days,
                 T0=T0,
                 transit_times=transit_times,
                 transit_duration_in_days=transit_duration_in_days,
                 per_transit_count=per_transit_count,
             )
-            intransit = transit_mask(self.t, period, 2 * duration, T0)
+            intransit = transit_mask(self.t, period, 2 * transit_duration_in_days, T0)
             flux_ootr = self.y[~intransit]
             depth_mean = numpy.mean(all_flux_intransit)
             depth_mean_std = numpy.std(all_flux_intransit) / numpy.sum(

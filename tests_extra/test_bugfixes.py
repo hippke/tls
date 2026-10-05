@@ -61,3 +61,13 @@ def test_final_T0_fit_does_not_modify_inputs():
     dy0 = dy.copy()
     final_T0_fit(numpy.full(20, 0.5), 0.999, t, y, dy, 4.0, 0.01, False, False)
     numpy.testing.assert_array_equal(dy, dy0)
+
+def test_snr_uses_out_of_transit_noise():
+    rng = numpy.random.default_rng(4)
+    t = numpy.arange(0, 90, 0.02)
+    sigma, depth = 1e-4, 1e-3
+    y = box_lc(t, 7.3, 2.0, 0.25, depth) + rng.normal(0, sigma, len(t))
+    r = TLS(t, y).power(period_min=7, period_max=7.6, use_threads=1, **QUIET)
+    n_in = numpy.sum(r.per_transit_count)
+    snr_expected = depth / sigma * numpy.sqrt(n_in)
+    assert abs(r.snr / snr_expected - 1) < 0.15, (r.snr, snr_expected)

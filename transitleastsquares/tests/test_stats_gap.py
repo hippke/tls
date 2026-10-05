@@ -123,11 +123,17 @@ if __name__ == "__main__":
     numpy.testing.assert_almost_equal(results.transit_count, 3, decimal=3)
     numpy.testing.assert_almost_equal(results.distinct_transit_count, 2, decimal=3)
     numpy.testing.assert_almost_equal(results.empty_transit_count, 1, decimal=3)
+    # SNR values changed after the bug fix in main.py/snr_stats: the
+    # out-of-transit mask used the duration as a fraction of the period instead
+    # of days, so it masked 0 points and in-transit flux inflated the noise
+    # estimate (std 5.71 ppm instead of 4.97 ppm; injected noise: 5 ppm).
+    # Old (buggy) values: snr_per_transit [0, 37.052, 36.558], snr 52.050,
+    # snr_pink_per_transit [0, 45.477, 44.871]
     numpy.testing.assert_almost_equal(
-        results.snr_per_transit, [0., 37.052, 36.558], decimal=3
+        results.snr_per_transit, [0., 42.641, 42.072], decimal=3
     )
-    numpy.testing.assert_almost_equal(results.snr, 52.050323372452034, decimal=3)
+    numpy.testing.assert_almost_equal(results.snr, 59.90114533765367, decimal=3)
     numpy.testing.assert_almost_equal(
-        results.snr_pink_per_transit, [0., 45.477, 44.871], decimal=3
+        results.snr_pink_per_transit, [0., 45.794, 45.184], decimal=3
     )
     print("passed")
