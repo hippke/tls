@@ -1,5 +1,6 @@
 """Helper functions (cleaning, masking, running statistics)."""
 
+import numba
 import numpy
 from numpy import arccos, degrees
 
@@ -71,8 +72,58 @@ def running_mean_equal_length(data, width_signal):
     return _pad_to_length(med, len(data))
 
 
+@numba.njit(cache=True)
+def _running_median_odd(data, kernel, out):
+    """Sliding median for an odd window: the middle element of a sorted copy
+    of the window, updated by one deletion and one insertion per step. For an
+    odd number of values numpy.median returns exactly this element, so the
+    result is identical to the index-matrix version, in O(n * kernel) moves
+    instead of an n x kernel temporary plus a partition per row."""
+    window = numpy.sort(data[:kernel])
+    half = kernel // 2
+    out[0] = window[half]
+    for i in range(1, len(data) - kernel + 1):
+        old = data[i - 1]
+        new = data[i + kernel - 1]
+        # position of (one copy of) the outgoing value
+        lo, hi = 0, kernel
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if window[mid] < old:
+                lo = mid + 1
+            else:
+                hi = mid
+        j = lo
+        # move the hole to the insertion position of the incoming value
+        if new >= old:
+            while j + 1 < kernel and window[j + 1] < new:
+                window[j] = window[j + 1]
+                j += 1
+        else:
+            while j > 0 and window[j - 1] > new:
+                window[j] = window[j - 1]
+                j -= 1
+        window[j] = new
+        out[i] = window[half]
+
+
 def running_median(data, kernel):
     """Returns sliding median of width 'kernel' and same length as data"""
+    data = numpy.asarray(data)
+    n_out = len(data) - kernel + 1
+    if (
+        float(kernel).is_integer()
+        and int(kernel) % 2 == 1
+        and n_out >= 1
+        and data.dtype == numpy.float64
+        and data.ndim == 1
+        and not numpy.isnan(data).any()
+    ):
+        # fast exact path (odd integer window, no NaN)
+        kernel = int(kernel)
+        med = numpy.empty(n_out)
+        _running_median_odd(numpy.ascontiguousarray(data), kernel, med)
+        return _pad_to_length(med, len(data))
     idx = numpy.arange(kernel) + numpy.arange(len(data) - kernel + 1)[:, None]
     idx = idx.astype(numpy.int64)  # needed if oversampling_factor is not int
     med = numpy.median(data[idx], axis=1)

@@ -25,9 +25,27 @@ def model_flux(t, per, rp, a, inc, ecc, w, u, limb_dark):
     return light_curve(t, 0, per, rp, a, inc, ecc, w, u, limb_dark)
 
 
-def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
-    """Returns a transit template of width 1 (first to last contact) and depth 1,
-    sampled with `samples` points (1 = nominal flux, 0 = transit bottom)."""
+_SUPERSAMPLED = {}  # (parameters) -> (t, flux), see _supersampled_transit
+_SUPERSAMPLED_MAX = 8
+
+
+def _supersampled_transit(per, rp, a, inc, ecc, w, u, limb_dark):
+    """The supersampled model transit behind reference_transit (independent
+    of `samples`). One power() call needs it for the template cache, each
+    pre-binned copy and twice for the statistics; the values are identical,
+    so they are computed once per parameter set (small LRU-like dict; the
+    arrays are read-only)."""
+    try:
+        key = (
+            per, rp, a, inc, ecc, w,
+            tuple(numpy.ravel(numpy.asarray(u, dtype=float)).tolist()),
+            limb_dark, tls_constants.TRANSIT_MODEL, tls_constants.SUPERSAMPLE_SIZE,
+        )
+        hash(key)
+    except (TypeError, ValueError):
+        key = None
+    if key is not None and key in _SUPERSAMPLED:
+        return _SUPERSAMPLED[key]
     duration = 1  # time window in days, widened for long transits
     while True:
         t = numpy.linspace(
@@ -39,6 +57,20 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
             duration *= 2
             continue
         break
+    if key is not None:
+        t.flags.writeable = False
+        flux = numpy.asarray(flux)
+        flux.flags.writeable = False
+        if len(_SUPERSAMPLED) >= _SUPERSAMPLED_MAX:
+            _SUPERSAMPLED.pop(next(iter(_SUPERSAMPLED)))
+        _SUPERSAMPLED[key] = (t, flux)
+    return t, flux
+
+
+def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
+    """Returns a transit template of width 1 (first to last contact) and depth 1,
+    sampled with `samples` points (1 = nominal flux, 0 = transit bottom)."""
+    t, flux = _supersampled_transit(per, rp, a, inc, ecc, w, u, limb_dark)
     if numpy.all(flux >= 1):
         raise ValueError("Transit template parameters yield no transit")
 

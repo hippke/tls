@@ -71,15 +71,48 @@ def rp_rs_from_depth(depth, law, params):
 
 @numba.njit(cache=True)
 def _pink_noise(data, width):
+    """Windows are evaluated four at a time with independent accumulators
+    (instruction-level parallelism); each window's sums run in the same
+    order as before and the per-window terms are added to the total in
+    window order, so the result is bit-identical to the one-window loop."""
     total = 0.0
     datapoints = len(data) - width + 1
-    for i in range(datapoints):
+    i = 0
+    while i + 4 <= datapoints:
+        m0 = 0.0
+        m1 = 0.0
+        m2 = 0.0
+        m3 = 0.0
+        for j in range(width):
+            m0 += data[i + j]
+            m1 += data[i + 1 + j]
+            m2 += data[i + 2 + j]
+            m3 += data[i + 3 + j]
+        m0 /= width
+        m1 /= width
+        m2 /= width
+        m3 /= width
+        v0 = 0.0
+        v1 = 0.0
+        v2 = 0.0
+        v3 = 0.0
+        for j in range(width):
+            v0 += (data[i + j] - m0) ** 2
+            v1 += (data[i + 1 + j] - m1) ** 2
+            v2 += (data[i + 2 + j] - m2) ** 2
+            v3 += (data[i + 3 + j] - m3) ** 2
+        total += numpy.sqrt(v0 / width) / width**0.5
+        total += numpy.sqrt(v1 / width) / width**0.5
+        total += numpy.sqrt(v2 / width) / width**0.5
+        total += numpy.sqrt(v3 / width) / width**0.5
+        i += 4
+    for k in range(i, datapoints):
         mean = 0.0
-        for j in range(i, i + width):
+        for j in range(k, k + width):
             mean += data[j]
         mean /= width
         var = 0.0
-        for j in range(i, i + width):
+        for j in range(k, k + width):
             var += (data[j] - mean) ** 2
         total += numpy.sqrt(var / width) / width**0.5
     return total / datapoints
@@ -367,6 +400,22 @@ def calculate_fill_factor(t):
     return (len(t) - 1) / theoretical_cadences
 
 
+def _is_sorted(t):
+    return bool(len(t) < 2 or numpy.all(t[1:] >= t[:-1]))
+
+
+def _between(t, lo, hi, t_sorted):
+    """Index selecting the points with lo < t < hi, in time order: a slice
+    found by binary search if t is sorted (same points, same order as the
+    boolean mask, so identical values downstream), else the boolean mask."""
+    if t_sorted:
+        return slice(
+            int(numpy.searchsorted(t, lo, side="right")),
+            int(numpy.searchsorted(t, hi, side="left")),
+        )
+    return (t > lo) & (t < hi)
+
+
 def count_stats(t, y, transit_times, transit_duration_in_days):
     """Return:
     * in_transit_count:     Number of data points in transit (phase-folded)
@@ -379,6 +428,13 @@ def count_stats(t, y, transit_times, transit_duration_in_days):
     after_transit_count = 0
     before_transit_count = 0
     t_min, t_max = numpy.min(t), numpy.max(t)
+    t_sorted = _is_sorted(t)
+
+    def count(lo, hi):
+        sel = _between(t, lo, hi, t_sorted)
+        if t_sorted:
+            return max(0, sel.stop - sel.start)
+        return numpy.count_nonzero(sel)
 
     for mid_transit in transit_times:
         T0 = mid_transit - 1.5 * transit_duration_in_days  # 1 duration before ingress
@@ -387,9 +443,9 @@ def count_stats(t, y, transit_times, transit_duration_in_days):
         T5 = mid_transit + 1.5 * transit_duration_in_days  # 1 duration after egress
 
         if T0 > t_min and T5 < t_max:  # inside time
-            in_transit_count += numpy.count_nonzero((t > T1) & (t < T4))
-            before_transit_count += numpy.count_nonzero((t > T0) & (t < T1))
-            after_transit_count += numpy.count_nonzero((t > T4) & (t < T5))
+            in_transit_count += count(T1, T4)
+            before_transit_count += count(T0, T1)
+            after_transit_count += count(T4, T5)
 
     return in_transit_count, after_transit_count, before_transit_count
 
@@ -406,6 +462,7 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
     depth_mean_even = numpy.nan
     depth_mean_odd_std = numpy.nan
     depth_mean_even_std = numpy.nan
+    t_sorted = _is_sorted(t)
 
     for i, mid_transit in enumerate(transit_times):
         tmin = mid_transit - 0.5 * transit_duration_in_days
@@ -413,7 +470,7 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
         if numpy.isnan(tmin) or numpy.isnan(tmax):
             flux_intransit = numpy.array([])
         else:
-            flux_intransit = y[(t > tmin) & (t < tmax)]
+            flux_intransit = y[_between(t, tmin, tmax, t_sorted)]
         intransit_points = numpy.size(flux_intransit)
         if intransit_points > 0:
             transit_depths[i] = numpy.mean(flux_intransit)
@@ -485,6 +542,7 @@ def snr_stats(
     # Estimate SNR and pink SNR
     # Second run because now the out of transit points are known
     std = numpy.std(flux_ootr) if len(flux_ootr) > 0 else numpy.nan
+    t_sorted = _is_sorted(t)
     for i, mid_transit in enumerate(transit_times):
         tmin = mid_transit - 0.5 * transit_duration_in_days
         tmax = mid_transit + 0.5 * transit_duration_in_days
@@ -492,7 +550,7 @@ def snr_stats(
             intransit_points = 0
             mean_flux = numpy.nan
         else:
-            flux_in = y[(t > tmin) & (t < tmax)]
+            flux_in = y[_between(t, tmin, tmax, t_sorted)]
             intransit_points = numpy.size(flux_in)
             mean_flux = numpy.mean(flux_in) if intransit_points > 0 else numpy.nan
 

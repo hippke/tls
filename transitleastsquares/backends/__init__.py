@@ -91,6 +91,18 @@ class SearchBackend:
     ) -> SearchResult:
         raise NotImplementedError
 
+    def search_many(self, tasks, use_threads=1, progress=None, defer_join=False):
+        """Search several problems [(problem, periods)] -> [SearchResult].
+        The default calls search() per task; ProcessPoolBackend runs all
+        tasks in one process pool. defer_join is a hint (see finish())."""
+        return [
+            self.search(problem, periods, use_threads=use_threads, progress=progress)
+            for problem, periods in tasks
+        ]
+
+    def finish(self):
+        """Release resources kept after search_many(defer_join=True)."""
+
     def fit_T0(
         self, signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar, verbose
     ) -> float:

@@ -71,6 +71,10 @@ def ensure_compiled(backend=None, verbose=True):
         show_progress_bar=False,
         verbose=False,
     )
+    # statistics helpers not reached by the tiny search above (short spectrum)
+    from transitleastsquares.helpers import running_median
+
+    running_median(numpy.linspace(0.0, 1.0, 9), 3)
     if cold and verbose:
         print(f"...done ({time.perf_counter() - t_start:.1f} s).", flush=True)
 

@@ -178,14 +178,25 @@ class transitleastsquares:
             )
             pbar = tqdm(total=numpy.size(periods), smoothing=0.3, bar_format=bar_format)
         try:
-            parts = []
-            for problem, sel, offset, row_map in tasks:
-                found = backend.search(
-                    problem,
-                    self._search_order(sel),
-                    use_threads=self.use_threads,
-                    progress=pbar.update if pbar is not None else None,
+            # one call for all tasks: one process pool for the unbinned light
+            # curve and its binned copies; the pool's final join is deferred
+            # until the statistics are done (power() calls backend.finish())
+            jobs = [(problem, self._search_order(sel)) for problem, sel, _, _ in tasks]
+            progress = pbar.update if pbar is not None else None
+            if hasattr(backend, "search_many"):
+                found_all = backend.search_many(
+                    jobs, use_threads=self.use_threads, progress=progress,
+                    defer_join=True,
                 )
+            else:  # duck-typed backend with search() only
+                found_all = [
+                    backend.search(
+                        p, s, use_threads=self.use_threads, progress=progress
+                    )
+                    for p, s in jobs
+                ]
+            parts = []
+            for (_, _, offset, row_map), found in zip(tasks, found_all):
                 rows = found.rows if row_map is None else row_map[found.rows]
                 parts.append((found.periods, found.chi2 + offset, rows, found.depths))
         finally:
@@ -221,8 +232,13 @@ class transitleastsquares:
                 f"Using {self.use_threads} of {multiprocessing.cpu_count()} CPU threads"
             )
 
-        found = self._search(backend, periods, lc_cache_overview, lc_arr)
-        return self._results(found, durations, lc_cache_overview, lc_arr, backend)
+        try:
+            found = self._search(backend, periods, lc_cache_overview, lc_arr)
+            return self._results(found, durations, lc_cache_overview, lc_arr, backend)
+        finally:
+            finish = getattr(backend, "finish", None)
+            if finish is not None:
+                finish()  # join the search's worker processes (deferred)
 
     # ---------------------------------------------------------------- results
     def _results(self, found, durations, lc_cache_overview, lc_arr, backend):
