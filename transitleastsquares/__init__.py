@@ -22,6 +22,7 @@ from transitleastsquares.helpers import cleaned_array, resample, transit_mask
 from transitleastsquares.main import transitleastsquares
 from transitleastsquares.stats import FAP
 from transitleastsquares.version import __version__
+from transitleastsquares.warmup import warmup
 
 __all__ = [
     "__version__",
@@ -38,4 +39,5 @@ __all__ = [
     "available_backends",
     "get_backend",
     "register_backend",
+    "warmup",
 ]

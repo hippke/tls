@@ -28,6 +28,7 @@ from transitleastsquares.stats import (
 )
 from transitleastsquares.transit import fractional_transit, get_cache
 from transitleastsquares.validate import validate_args, validate_inputs
+from transitleastsquares.warmup import ensure_compiled
 
 DEGREES_OF_FREEDOM = 4  # period, T0, duration, depth
 
@@ -105,15 +106,15 @@ class transitleastsquares:
             return numpy.random.default_rng().permutation(periods)
         raise ValueError("Unknown PERIODS_SEARCH_ORDER")
 
-    def _search(self, backend, periods, lc_cache_overview, lc_arr):
+    def _problem(self, t, y, dy, lc_cache_overview, lc_arr):
         # masses paired with R_star_min / R_star_max (BUGS.md F1)
         m_short, m_long = duration_limit_masses(
             self.R_star_min, self.R_star_max, self.M_star_min, self.M_star_max
         )
-        problem = SearchProblem(
-            t=self.t,
-            y=self.y,
-            dy=self.dy,
+        return SearchProblem(
+            t=t,
+            y=y,
+            dy=dy,
             lc_arr=lc_arr,
             lc_cache_overview=lc_cache_overview,
             transit_depth_min=self.transit_depth_min,
@@ -123,6 +124,52 @@ class transitleastsquares:
             M_star_max=m_long,
             T0_search_margin=self.T0_search_margin,
         )
+
+    def _search_plan(self, backend, periods, lc_cache_overview, lc_arr):
+        """Search tasks [(problem, periods, chi2 offset, row map)]: the
+        unbinned light curve, plus binned copies for the periods whose
+        shortest trial duration allows it (pre-binning, binning.py)."""
+        from transitleastsquares import binning
+
+        periods = numpy.asarray(periods)
+        base = self._problem(self.t, self.y, self.dy, lc_cache_overview, lc_arr)
+        # pre-binning is an approximation: only for approximate backends
+        fraction = 0.0 if getattr(backend, "exact", True) else binning.bin_fraction()
+        cad = binning.cadence(self.t)
+        k = binning.bin_factors(
+            periods, cad, base.R_star_min, base.M_star_min, fraction
+        )
+        tasks = []
+        for kk in numpy.unique(k):
+            sel = periods[k == kk]
+            if kk == 1:
+                tasks.append((base, sel, 0.0, None))
+                continue
+            tb, yb, dyb, offset = binning.bin_lightcurve(
+                self.t, self.y, self.dy, int(kk), cad
+            )
+            maxwidth = int(numpy.max(lc_cache_overview["duration"]) * len(yb))
+            maxwidth += maxwidth % 2
+            ov_b, lc_b = get_cache(
+                durations=lc_cache_overview["duration"],
+                maxwidth_in_samples=maxwidth,
+                verbose=False,
+                **self._template_params(),
+            )
+            # rows of the binned cache -> rows of the unbinned cache
+            index = {d: i for i, d in enumerate(lc_cache_overview["duration"])}
+            row_map = numpy.array([index[d] for d in ov_b["duration"]])
+            problem = self._problem(tb, yb, dyb, ov_b, lc_b)
+            tasks.append((problem, sel, offset, row_map))
+            self._log(
+                f"  {len(sel)} periods on {len(yb)} points (bins of {kk} cadences)"
+            )
+        return tasks
+
+    def _search(self, backend, periods, lc_cache_overview, lc_arr):
+        from transitleastsquares.backends import SearchResult
+
+        tasks = self._search_plan(backend, periods, lc_cache_overview, lc_arr)
         pbar = None
         if self.show_progress_bar:
             bar_format = (
@@ -131,21 +178,33 @@ class transitleastsquares:
             )
             pbar = tqdm(total=numpy.size(periods), smoothing=0.3, bar_format=bar_format)
         try:
-            return backend.search(
-                problem,
-                self._search_order(periods),
-                use_threads=self.use_threads,
-                progress=pbar.update if pbar is not None else None,
-            )
+            parts = []
+            for problem, sel, offset, row_map in tasks:
+                found = backend.search(
+                    problem,
+                    self._search_order(sel),
+                    use_threads=self.use_threads,
+                    progress=pbar.update if pbar is not None else None,
+                )
+                rows = found.rows if row_map is None else row_map[found.rows]
+                parts.append((found.periods, found.chi2 + offset, rows, found.depths))
         finally:
             if pbar is not None:
                 pbar.close()
+        if len(parts) == 1:
+            p, c, r, d = parts[0]
+        else:
+            p, c, r, d = (numpy.concatenate(x) for x in zip(*parts))
+        return SearchResult.from_unsorted(p, c, r, d)
 
     # ------------------------------------------------------------------ power
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""
         self, kwargs = validate_args(self, kwargs)
         backend = get_backend(self.backend)
+        # numba: compile on the first run (with a message), else load the
+        # cached kernels once in this process (inherited by forked workers)
+        ensure_compiled(self.backend, verbose=self.verbose)
         self._log(tls_constants.TLS_VERSION)
 
         periods, durations = self._grids()

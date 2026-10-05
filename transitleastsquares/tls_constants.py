@@ -148,6 +148,14 @@ MINIMUM_PERIOD_GRID_SIZE = 100
 # variable TLS_BACKEND.
 DEFAULT_BACKEND = "fused-pl"
 
+# Pre-binning of dense light curves for the search stage (PERFORMANCE_LOG
+# step 35): per trial period, bins of k consecutive cadences (k a power of 2,
+# <= BIN_FACTOR_MAX) with k * cadence <= BIN_FRACTION * shortest trial
+# duration. The final T0 fit and all statistics use the unbinned data.
+# 0 disables pre-binning.
+BIN_FRACTION = 0.03
+BIN_FACTOR_MAX = 64
+
 # Warn the user if unknown **kwargs are given as parameters
 VALID_PARAMETERS = [
     "R_star",
