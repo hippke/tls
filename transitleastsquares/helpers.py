@@ -79,7 +79,17 @@ def _running_median_odd(data, kernel, out):
     odd number of values numpy.median returns exactly this element, so the
     result is identical to the index-matrix version, in O(n * kernel) moves
     instead of an n x kernel temporary plus a partition per row."""
-    window = numpy.sort(data[:kernel])
+    # the first window sorted by insertion (kernel is a few hundred at most):
+    # numpy.sort would pull in numba's quicksort, ~0.9 s of first-run
+    # compilation (round 12); the sorted values are the same
+    window = numpy.empty(kernel)
+    for j in range(kernel):
+        v = data[j]
+        q = j - 1
+        while q >= 0 and window[q] > v:
+            window[q + 1] = window[q]
+            q -= 1
+        window[q + 1] = v
     half = kernel // 2
     out[0] = window[half]
     for i in range(1, len(data) - kernel + 1):

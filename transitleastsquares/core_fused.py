@@ -1080,8 +1080,11 @@ def search_period_fused(
     # Physically plausible template widths for this period
     # M_star_min / M_star_max are the masses paired with R_star_min (shortest
     # duration) and R_star_max (longest), see grid.duration_limit_masses
-    duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
-    duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
+    # numpy.bool_: the same (non-literal) T14 specialization as the Python
+    # callers in grid.py, instead of one compilation per literal (round 12)
+    small_no, small_yes = numpy.bool_(False), numpy.bool_(True)
+    duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=small_no)
+    duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=small_yes)
     transits_naive = time_span / period
     correction_factor = (transits_naive + 1) / transits_naive
     width_min = int(numpy.floor(duration_min * n))
@@ -1277,7 +1280,10 @@ def search_period_fused(
                         win_lo[n_win] = lo
                         win_hi[n_win] = hi
                         n_win += 1
-                n_win = _dedup_windows(win_lo, win_hi, n_win, xc, pc_lo, pc_hi)
+                # numpy.int64(): no extra compilation for a literal-typed count
+                n_win = _dedup_windows(
+                    win_lo, win_hi, numpy.int64(n_win), xc, pc_lo, pc_hi
+                )
             for pass_ in range(3 if xc > xth else 1):
                 for wdx in range(n_win if pass_ == 0 else 1):
                     lo, hi, st = win_lo[wdx], win_hi[wdx], xc
@@ -1502,7 +1508,7 @@ def _greedy_knots(a, tol):
                 c = n - 1
             if c <= good:
                 break
-            if _segment_ok(a, b, c, tol):
+            if _segment_ok(a, numpy.int64(b), c, tol):  # b never literal-typed
                 good = c
                 if c == n - 1:
                     break
@@ -1513,7 +1519,7 @@ def _greedy_knots(a, tol):
         if bad > 0:
             while bad - good > 1:
                 c = (good + bad) // 2
-                if _segment_ok(a, b, c, tol):
+                if _segment_ok(a, numpy.int64(b), c, tol):
                     good = c
                 else:
                     bad = c
