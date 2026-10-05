@@ -717,6 +717,55 @@ def _input_means(y, inv_dy2):
     return mu_rw / len(y), mu_w / len(y)
 
 
+@numba.njit(cache=True)
+def _dedup_windows(win_lo, win_hi, n_win, xc, pc_lo, pc_hi):
+    """Rewrite the shift windows [win_lo, win_hi) of a non-scout duration so
+    that shifts covered by an earlier window are skipped (step 58), keeping
+    the order of the remaining shifts. Re-evaluating a shift never changes
+    the result (gains replace the incumbents only on a strict increase, and
+    the pruning incumbents only grow, so a shift pruned once stays pruned),
+    so the search result is identical. All windows lie on the grid of
+    multiples of xc. pc_lo/pc_hi: work arrays. Returns the new count."""
+    n_p = 0
+    for wq in range(n_win):
+        s0 = n_p
+        pc_lo[n_p] = win_lo[wq]
+        pc_hi[n_p] = win_hi[wq]
+        n_p += 1
+        for pq in range(wq):
+            a0 = win_lo[pq]
+            b0 = win_hi[pq]
+            e0 = n_p
+            for z in range(s0, e0):
+                lz = pc_lo[z]
+                hz = pc_hi[z]
+                if hz <= lz or hz <= a0 or lz >= b0:
+                    continue
+                right = ((b0 + xc - 1) // xc) * xc
+                pc_hi[z] = a0 if a0 > lz else lz
+                if right < hz:
+                    pc_lo[n_p] = right
+                    pc_hi[n_p] = hz
+                    n_p += 1
+        for z in range(s0 + 1, n_p):
+            zl = pc_lo[z]
+            zh = pc_hi[z]
+            y = z - 1
+            while y >= s0 and pc_lo[y] > zl:
+                pc_lo[y + 1] = pc_lo[y]
+                pc_hi[y + 1] = pc_hi[y]
+                y -= 1
+            pc_lo[y + 1] = zl
+            pc_hi[y + 1] = zh
+    n_win = 0
+    for z in range(n_p):
+        if pc_hi[z] > pc_lo[z]:
+            win_lo[n_win] = pc_lo[z]
+            win_hi[n_win] = pc_hi[z]
+            n_win += 1
+    return n_win
+
+
 @numba.njit(fastmath=True, cache=True)
 def search_period_fused(
     period,
@@ -1101,8 +1150,10 @@ def search_period_fused(
     use_scouts = scout_every > 1 and n_allowed > scout_every and n >= SCOUT_MIN_N
     cand_c = numpy.empty(len(widths) + 1, dtype=numpy.int64)
     n_cand = 0
-    win_lo = numpy.empty(2 * len(widths) + 2, dtype=numpy.int64)
-    win_hi = numpy.empty(2 * len(widths) + 2, dtype=numpy.int64)
+    win_lo = numpy.empty((2 * len(widths) + 2) ** 2, dtype=numpy.int64)
+    win_hi = numpy.empty((2 * len(widths) + 2) ** 2, dtype=numpy.int64)
+    pc_lo = numpy.empty((2 * len(widths) + 2) ** 2, dtype=numpy.int64)
+    pc_hi = numpy.empty((2 * len(widths) + 2) ** 2, dtype=numpy.int64)
     for upass in range(2 if use_scouts else 1):
         ordinal = -1
         for u in range(len(widths)):
@@ -1226,6 +1277,7 @@ def search_period_fused(
                         win_lo[n_win] = lo
                         win_hi[n_win] = hi
                         n_win += 1
+                n_win = _dedup_windows(win_lo, win_hi, n_win, xc, pc_lo, pc_hi)
             for pass_ in range(3 if xc > xth else 1):
                 for wdx in range(n_win if pass_ == 0 else 1):
                     lo, hi, st = win_lo[wdx], win_hi[wdx], xc

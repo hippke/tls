@@ -187,3 +187,10 @@ VALID_PARAMETERS = [
     "verbose",
     "backend",
 ]
+
+# Worker processes (use_threads > 1) are kept alive between power() calls and
+# shut down after this many idle seconds (and at interpreter exit). Starting a
+# pool costs ~15 ms with "fork", but ~3 s with "spawn" (macOS, Windows) and
+# "forkserver" (Linux from Python 3.14): every worker imports TLS and loads the
+# numba kernels. 0 (or environment TLS_PERSISTENT_POOL=0): a new pool per call.
+WORKER_IDLE_TIMEOUT = 300.0

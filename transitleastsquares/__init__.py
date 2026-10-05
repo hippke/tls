@@ -15,6 +15,7 @@ from transitleastsquares.backends import (
     get_backend,
     register_backend,
 )
+from transitleastsquares.backends.pool import shutdown_workers
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.core import fold
 from transitleastsquares.grid import duration_grid, period_grid
@@ -40,4 +41,5 @@ __all__ = [
     "get_backend",
     "register_backend",
     "warmup",
+    "shutdown_workers",
 ]

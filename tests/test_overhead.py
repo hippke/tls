@@ -162,3 +162,77 @@ def test_dense_cadence_binned_copies_threads_identical():
     numpy.testing.assert_array_equal(a.chi2, b.chi2)
     numpy.testing.assert_array_equal(a.power, b.power)
     assert a.T0 == b.T0 and a.SDE == b.SDE
+
+
+# --- persistent worker pool (round 11) ---------------------------------------
+
+
+def _run(t, y, **kw):
+    return transitleastsquares(t, y).power(
+        period_min=3, period_max=3.6, use_threads=3, backend="fused-pl", **Q, **kw
+    )
+
+
+def test_persistent_pool_identical_and_reused(monkeypatch):
+    from transitleastsquares.backends import pool as P
+
+    t, y = lc()
+    monkeypatch.setenv("TLS_PERSISTENT_POOL", "0")
+    fresh = _run(t, y)
+    monkeypatch.delenv("TLS_PERSISTENT_POOL")
+    a = _run(t, y)
+    first = P._Persistent.pool
+    b = _run(t, y)
+    assert first is not None and P._Persistent.pool is first  # reused
+    for r in (a, b):
+        numpy.testing.assert_array_equal(fresh.chi2, r.chi2)
+        numpy.testing.assert_array_equal(fresh.power, r.power)
+        assert fresh.T0 == r.T0 and fresh.SDE == r.SDE
+    P.shutdown_workers()
+    assert P._Persistent.pool is None
+
+
+def test_persistent_pool_sees_current_constants(monkeypatch):
+    """Workers started earlier must use the parent's constants at call time."""
+    from transitleastsquares import tls_constants
+
+    t, y = lc()
+    _run(t, y)  # start the persistent workers
+    monkeypatch.setattr(tls_constants, "SIGNAL_DEPTH", 0.4)
+    persistent = _run(t, y)
+    monkeypatch.setenv("TLS_PERSISTENT_POOL", "0")
+    fresh = _run(t, y)
+    numpy.testing.assert_array_equal(fresh.chi2, persistent.chi2)
+
+
+def test_persistent_pool_idle_timeout(monkeypatch):
+    import time
+
+    from transitleastsquares import tls_constants
+    from transitleastsquares.backends import pool as P
+
+    monkeypatch.setattr(tls_constants, "WORKER_IDLE_TIMEOUT", 0.2)
+    t, y = lc()
+    _run(t, y)
+    assert P._Persistent.pool is not None
+    time.sleep(1.0)
+    assert P._Persistent.pool is None
+
+
+def test_persistent_pool_spawn(monkeypatch):
+    import glob
+    import tempfile
+
+    from transitleastsquares.backends import pool as P
+
+    t, y = lc()
+    monkeypatch.setenv("TLS_PERSISTENT_POOL", "0")
+    ref = _run(t, y)
+    monkeypatch.delenv("TLS_PERSISTENT_POOL")
+    monkeypatch.setenv("TLS_MP_START_METHOD", "spawn")
+    a = _run(t, y)
+    b = _run(t, y)
+    numpy.testing.assert_array_equal(ref.chi2, a.chi2)
+    numpy.testing.assert_array_equal(ref.chi2, b.chi2)
+    P.shutdown_workers()
+    assert not glob.glob(tempfile.gettempdir() + "/tls_search_*.pkl")
