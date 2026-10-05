@@ -11,14 +11,25 @@ class FusedBackend(ProcessPoolBackend):
     dtype = "float64"  # dot-product precision
     pl = (0,)  # piecewise-linear templates (L3): (min_length, max_stride, eps)
     a2_spread_max = 0.0  # U2 (A2 from the window-mean weight) if spread <= this
+    t0_coarsen = 1  # L5: coarse T0 grid with local refinement (1: off)
 
     def prepare(self, problem):
         fp = FusedProblem(problem)
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl_config(), a2_approx=self.use_a2_approx(fp))
+        fp.set_pl(
+            *self.pl_config(),
+            a2_approx=self.use_a2_approx(fp),
+            t0_coarsen=self.coarsen(),
+        )
         return fp
+
+    def coarsen(self):
+        """Coarse T0 grid factor (idea L5); environment TLS_T0_COARSEN."""
+        import os
+
+        return int(os.environ.get("TLS_T0_COARSEN", self.t0_coarsen))
 
     def pl_config(self):
         """(min_length, max_stride, eps); eps can be overridden for
@@ -62,7 +73,11 @@ class FusedThreadsBackend(FusedBackend):
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl_config(), a2_approx=self.use_a2_approx(fp))
+        fp.set_pl(
+            *self.pl_config(),
+            a2_approx=self.use_a2_approx(fp),
+            t0_coarsen=self.coarsen(),
+        )
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -137,3 +152,4 @@ class FusedPLBackend(FusedBackend):
     exact = False
     pl = (64, 1 << 62, 2e-2)  # eps 2e-2: PERFORMANCE_LOG step 23
     a2_spread_max = 0.1  # U2 for nearly uniform weights (PERFORMANCE_LOG step 21)
+    t0_coarsen = 3  # L5: 3x coarser T0 grid + local refinement (step 24)

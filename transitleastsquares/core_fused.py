@@ -228,6 +228,7 @@ def search_period_fused(
     pl_sum2,
     pl_a2_approx,
     pl_w_max,
+    t0_coarsen,
     fbuf,
     ibuf,
     vbuf,
@@ -248,6 +249,9 @@ def search_period_fused(
     pl_a2_approx (non-uniform weights, PL templates only; idea U2): A2 from
     the window-mean weight, sum(a^2) * mean(w over the window), instead of
     the second PL correlation; pruning then uses A2_true <= sum(a^2) * w_max.
+    t0_coarsen = c > 1 (idea L5, approximate): shifts on a c times coarser
+    grid (where int(c * margin * width) >= 2), then the c - 1 fine-grid
+    shifts on each side of the best coarse shift of every duration.
 
     prune: skip shifts whose gain provably cannot beat the best gain so far.
     With R2 = sum r^2 w over the window and Cauchy-Schwarz AR <= sqrt(A2 R2),
@@ -404,6 +408,7 @@ def search_period_fused(
             if T0_search_margin > 0 and d > T0_search_margin:
                 xth = max(1, int(d / (1 / T0_search_margin)))
             n_shifts = min(m - d + 1, n) if xth == 1 else m - d + 1
+            xth = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
             best_i = -1
             best_mean = transit_depth_min
             for i in range(0, n_shifts, xth):
@@ -498,61 +503,95 @@ def search_period_fused(
             rem0 = nb * bs
             prem = prof[rem0:]
 
-        for i in range(0, n_shifts, xth):
-            mean = 1 - (cum[i + d] - cum[i]) / d
-            if mean > transit_depth_min:
-                target_depth = mean * ov
-                k = 1 / (signal_depth / target_depth)
-                if prune and length >= PRUNE_MIN_LENGTH:
-                    r2 = cum_r2[i + length] - cum_r2[i]
-                    if uniform_weights:  # A2 known exactly
-                        bound = 2 * k * numpy.sqrt(a2_const * r2) - k * k * a2_const
-                    elif a2_win:  # approximate A2 (U2); AR <= sqrt(A2_max R2)
-                        a2e = a2_unit * (cum_w[i + length] - cum_w[i])
-                        bound = 2 * k * numpy.sqrt(a2_wmax * r2) - k * k * a2e
-                    else:  # 0 <= A2 <= a2b; maximum of the concave bound
-                        a2b = amax2 * (cum_w[i + length] - cum_w[i])
-                        if a2b * k * k >= r2:
-                            bound = r2
-                        else:
-                            bound = 2 * k * numpy.sqrt(a2b * r2) - k * k * a2b
-                    if bound * (1 + 1e-9) <= best_gain or bound < threshold:
-                        continue
-                if npl > 0:
-                    ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
-                    if uniform_weights:
-                        a2 = a2_const
-                    elif a2_win:
-                        a2 = a2_unit * (cum_w[i + length] - cum_w[i])
-                    else:
-                        a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
-                elif nb > 0:
-                    if multirow:
-                        q = (i % bs) * q_row + i // bs
-                    else:
-                        q = i // bs
-                    ar = _dot1(ab, brw[q : q + nb])
-                    if uniform_weights:
-                        ar += _dot1(prem, rw[i + rem0 : i + length])
-                        a2 = a2_const
-                    else:
-                        ar2, a22 = _dot2(
-                            prem, rw[i + rem0 : i + length], w[i + rem0 : i + length]
-                        )
-                        ar += ar2
-                        a2 = _dot1(a2bin, bw[q : q + nb]) + a22
-                elif uniform_weights:
-                    ar = _dot1(prof, rw[i : i + length])
-                    a2 = a2_const
+        # coarse grid (stride xc) plus refinement around the best coarse shift
+        xc = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
+        dur_gain = -1e300
+        dur_i = -1
+        i_star = -1
+        for pass_ in range(3 if xc > xth else 1):
+            lo, hi, st = 0, n_shifts, xc
+            if pass_ > 0:  # fine shifts left (1) and right (2) of i_star
+                if dur_i < 0:
+                    break
+                if pass_ == 1:
+                    i_star = dur_i
+                    lo = max(0, i_star - (xc - xth))
+                    hi = i_star
                 else:
-                    ar, a2 = _dot2(prof, rw[i : i + length], w[i : i + length])
-                gain = 2 * k * ar - k * k * a2
-                if gain > best_gain:
-                    best_gain = gain
-                    best_row = row
-                    best_depth = 1 - target_depth
+                    lo = i_star + xth
+                    hi = min(n_shifts, i_star + (xc - xth) + 1)
+                st = xth
+            for i in range(lo, hi, st):
+                mean = 1 - (cum[i + d] - cum[i]) / d
+                if mean > transit_depth_min:
+                    target_depth = mean * ov
+                    k = 1 / (signal_depth / target_depth)
+                    if prune and length >= PRUNE_MIN_LENGTH:
+                        r2 = cum_r2[i + length] - cum_r2[i]
+                        if uniform_weights:  # A2 known exactly
+                            bound = (
+                                2 * k * numpy.sqrt(a2_const * r2) - k * k * a2_const
+                            )
+                        elif a2_win:  # approximate A2 (U2); AR <= sqrt(A2_max R2)
+                            a2e = a2_unit * (cum_w[i + length] - cum_w[i])
+                            bound = 2 * k * numpy.sqrt(a2_wmax * r2) - k * k * a2e
+                        else:  # 0 <= A2 <= a2b; maximum of the concave bound
+                            a2b = amax2 * (cum_w[i + length] - cum_w[i])
+                            if a2b * k * k >= r2:
+                                bound = r2
+                            else:
+                                bound = 2 * k * numpy.sqrt(a2b * r2) - k * k * a2b
+                        if bound * (1 + 1e-9) <= best_gain or bound < threshold:
+                            continue
+                    if npl > 0:
+                        ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
+                        if uniform_weights:
+                            a2 = a2_const
+                        elif a2_win:
+                            a2 = a2_unit * (cum_w[i + length] - cum_w[i])
+                        else:
+                            a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
+                    elif nb > 0:
+                        if multirow:
+                            q = (i % bs) * q_row + i // bs
+                        else:
+                            q = i // bs
+                        ar = _dot1(ab, brw[q : q + nb])
+                        if uniform_weights:
+                            ar += _dot1(prem, rw[i + rem0 : i + length])
+                            a2 = a2_const
+                        else:
+                            ar2, a22 = _dot2(
+                                prem,
+                                rw[i + rem0 : i + length],
+                                w[i + rem0 : i + length],
+                            )
+                            ar += ar2
+                            a2 = _dot1(a2bin, bw[q : q + nb]) + a22
+                    elif uniform_weights:
+                        ar = _dot1(prof, rw[i : i + length])
+                        a2 = a2_const
+                    else:
+                        ar, a2 = _dot2(prof, rw[i : i + length], w[i : i + length])
+                    gain = 2 * k * ar - k * k * a2
+                    if gain > dur_gain:
+                        dur_gain = gain
+                        dur_i = i
+                    if gain > best_gain:
+                        best_gain = gain
+                        best_row = row
+                        best_depth = 1 - target_depth
 
     return total - best_gain, best_row, best_depth
+
+
+@numba.njit(cache=True)
+def _coarse_stride(d, xth, margin, c):
+    """Shift stride of the coarse T0 grid (idea L5): c * xth if
+    int(c * margin * d) >= 2, else xth (unchanged)."""
+    if c > 1 and int(c * margin * d) >= 2:
+        return c * xth
+    return xth
 
 
 def shift_stride(width, margin):
@@ -787,11 +826,12 @@ class FusedProblem:
         self.set_binning(0)
         self.set_pl(0)
 
-    def set_pl(self, min_length, max_stride=4, eps=1e-2, a2_approx=False):
+    def set_pl(self, min_length, max_stride=4, eps=1e-2, a2_approx=False, t0_coarsen=1):
         """Piecewise-linear templates (idea L3, see pl_templates) for
         templates with length >= min_length and shift stride < max_stride;
         min_length <= 0: off. a2_approx: A2 from the window-mean weight
-        (idea U2, approximate; for nearly uniform weights)."""
+        (idea U2, approximate; for nearly uniform weights). t0_coarsen: coarse
+        T0 grid with local refinement (idea L5, approximate; 1: off)."""
         self.pl_args = (min_length, max_stride, eps, a2_approx)
         if min_length <= 0:
             min_length = 1 << 62
@@ -801,7 +841,7 @@ class FusedProblem:
             min_length,
             max_stride,
             eps,
-        ) + (bool(a2_approx), float(numpy.max(self.inv_dy2)))
+        ) + (bool(a2_approx), float(numpy.max(self.inv_dy2)), int(t0_coarsen))
 
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
@@ -919,6 +959,7 @@ def search_periods_fused_parallel(
     pl_sum2,
     pl_a2_approx,
     pl_w_max,
+    t0_coarsen,
     n_chunks,
 ):
     """search_period_fused for many periods, numba threads (prange over
@@ -974,6 +1015,7 @@ def search_periods_fused_parallel(
                 pl_sum2,
                 pl_a2_approx,
                 pl_w_max,
+                t0_coarsen,
                 fbuf,
                 ibuf,
                 vbuf,
