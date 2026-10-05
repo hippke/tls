@@ -138,12 +138,17 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
             limb_dark=limb_dark,
             cached_reference_transit=cached_reference_transit,
         )
-        lc_cache_overview["duration"][row] = duration
         used_samples = int((duration / numpy.max(durations)) * maxwidth_in_samples)
-        lc_cache_overview["width_in_samples"][row] = used_samples
         full_values = numpy.where(
             scaled_transit < (1 - tls_constants.NUMERICAL_STABILITY_CUTOFF)
         )
+        # BUGFIX: for short data sets (few hundred points) the shortest trial
+        # durations are < 1 sample wide; the template was then empty and
+        # numpy.min() crashed ("zero-size array"). Skip such durations.
+        if used_samples < 1 or numpy.size(full_values) == 0:
+            continue
+        lc_cache_overview["duration"][row] = duration
+        lc_cache_overview["width_in_samples"][row] = used_samples
         first_sample = numpy.min(full_values)
         last_sample = numpy.max(full_values) + 1
         signal = scaled_transit[first_sample:last_sample]
@@ -156,5 +161,12 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
         lc_cache_overview["overshoot"][row] = 1 / (2 - overshoot)
         row += +1
 
-    lc_arr = numpy.array(lc_arr, dtype=object)
+    if row == 0:
+        raise ValueError("Too few data points to create any transit template")
+    lc_cache_overview = lc_cache_overview[:row]
+    # Always a 1-D object array: one (variable length) template per row
+    lc_arr_obj = numpy.empty(len(lc_arr), dtype=object)
+    for i, signal in enumerate(lc_arr):
+        lc_arr_obj[i] = signal
+    lc_arr = lc_arr_obj
     return lc_cache_overview, lc_arr

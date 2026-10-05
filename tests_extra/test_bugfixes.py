@@ -131,3 +131,11 @@ def test_duration_grid_honours_stellar_limits():
     # defaults unchanged vs. the repo test (test_duration_grid.py)
     d = duration_grid(period_grid(1, 1, 20, 0, 999, 3), log_step=1.05, shortest=2)
     assert len(d) == 69
+
+@pytest.mark.parametrize("n", [50, 100, 200])
+def test_short_light_curves_do_not_crash(n):
+    rng = numpy.random.default_rng(1)
+    t = numpy.linspace(0, 20, n)
+    y = box_lc(t, 5.0, 0.1, 0.4, 5e-3) + rng.normal(0, 1e-3, n)
+    r = TLS(t, y).power(use_threads=1, **QUIET)
+    assert numpy.isfinite(r.SDE)
