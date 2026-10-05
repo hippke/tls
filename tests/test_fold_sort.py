@@ -104,3 +104,23 @@ def test_sort_workspace_capacity_boundary():
         dtype = sort_index_dtype(n)
         assert int(dtype(n)) == n
         assert numpy.dtype(dtype).itemsize == (4 if n <= limit else 8)
+
+
+@pytest.mark.parametrize("case", list(CASES))
+@pytest.mark.parametrize("dtype", [numpy.int32, numpy.int64])
+@pytest.mark.parametrize("folded", [False, True])
+def test_fold_order_matches_stable_argsort(case, dtype, folded):
+    """Delayed gathers need the exact permutation, including ties and fallback."""
+    from transitleastsquares.core_fused import fold_order_into
+
+    t = CASES[case](numpy.random.default_rng(405))
+    n = len(t)
+    counts = numpy.empty(n + 1, dtype=dtype)
+    order = numpy.empty(n, dtype=dtype)
+    keys = numpy.empty(n)
+    for period in [0.37, 1.0, 41.0]:
+        phases = foldfast(t, period) if folded else numpy.empty(n)
+        fold_order_into(t, period, phases, counts, order, keys, folded)
+        numpy.testing.assert_array_equal(
+            order, numpy.argsort(foldfast(t, period), kind="mergesort")
+        )

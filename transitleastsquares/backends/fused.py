@@ -29,6 +29,8 @@ class FusedBackend(ProcessPoolBackend):
             scout_every=self.scouts(),
             ls_depth=self.ls_depth or os.environ.get("TLS_LS_DEPTH") == "1",
         )
+        if self.exact:
+            fp.set_screen()
         return fp
 
     def coarsen(self):
@@ -92,6 +94,8 @@ class FusedThreadsBackend(FusedBackend):
             scout_every=self.scouts(),
             ls_depth=self.ls_depth or os.environ.get("TLS_LS_DEPTH") == "1",
         )
+        if self.exact:
+            fp.set_screen()
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -122,6 +126,7 @@ class FusedThreadsBackend(FusedBackend):
                         int(min(use_threads, numba.config.NUMBA_NUM_THREADS)),
                         fp.invariants,
                         fp.index_dtype,
+                        fp.screen,
                     )
                 )
                 if progress is not None:

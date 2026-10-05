@@ -149,11 +149,16 @@ def test_fused_kernel_matches_brute_force(seed, T0_fit_margin, with_dy, template
     )
     fused_pl.set_pl(2, 1 << 62, 0.0)
     assert numpy.sum(fused_pl.pl[0] > 0) > 0
+    fused_screen = FusedProblem(
+        SearchProblem(t, y, dy, lc_arr, ov, 1e-5, *lim, T0_fit_margin)
+    )
+    fused_screen.set_screen(min_length=48)
+    assert fused_screen.screen is not None
     for period in [2.3, 1.7, 4.11, 0.93, 0.61]:
         b_chi2, b_row, b_depth = brute_force_period(
             period, t, y, dy, 1e-5, lc_arr, ov, *lim, T0_fit_margin
         )
-        for fp, rtol in [(fused, 1e-9), (fused_pl, 1e-8)]:
+        for fp, rtol in [(fused, 1e-9), (fused_pl, 1e-8), (fused_screen, 1e-9)]:
             _, chi2, row, depth = fp.search(period)
             numpy.testing.assert_allclose(chi2, b_chi2, rtol=rtol)
             assert row == b_row

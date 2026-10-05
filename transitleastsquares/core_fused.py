@@ -59,7 +59,7 @@ def _foldfast_into(t, period, out):
 
 @numba.njit(cache=True)
 def fold_sort_into(
-    t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w, move_w
+    t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w, move_w, folded=False
 ):
     """Phase-fold and write flux and weights sorted by phase (stable order)
     into `flux` and `w` (work arrays: phases, keys: n; counts: n+1; bucket: n).
@@ -72,7 +72,8 @@ def fold_sort_into(
     phases are strongly clustered (insertion work > 8 N).
     """
     n = len(t)
-    _foldfast_into(t, period, phases)  # same folding as core.search_period
+    if not folded:
+        _foldfast_into(t, period, phases)
     for k in range(n + 1):
         counts[k] = 0
     for i in range(n):
@@ -116,6 +117,50 @@ def fold_sort_into(
                     flux[q] = y[order[q]]
                     if move_w:
                         w[q] = inv_dy2[order[q]]
+                return
+
+
+@numba.njit(cache=True)
+def fold_order_into(t, period, phases, counts, order, keys, folded=False):
+    """Stable phase permutation, delaying flux/weight gathers until prefixing.
+
+    Recompute bucket IDs during scatter so the integer buffer can hold output
+    indices instead of input bucket IDs. No flux or weight payload is scattered.
+    folded=True reuses phases from an unsuccessful few-run merge attempt.
+    """
+    n = len(t)
+    if not folded:
+        _foldfast_into(t, period, phases)
+    for k in range(n + 1):
+        counts[k] = 0
+    for i in range(n):
+        k = min(n - 1, max(0, int(phases[i] * n)))
+        counts[k + 1] += 1
+    for k in range(n):
+        counts[k + 1] += counts[k]
+    for i in range(n):
+        k = min(n - 1, max(0, int(phases[i] * n)))
+        pos = counts[k]
+        counts[k] = pos + 1
+        keys[pos] = phases[i]
+        order[pos] = i
+    work = 0
+    for i in range(1, n):
+        kv = keys[i]
+        if kv < keys[i - 1]:
+            iv = order[i]
+            j = i - 1
+            while j >= 0 and keys[j] > kv:
+                keys[j + 1] = keys[j]
+                order[j + 1] = order[j]
+                j -= 1
+            keys[j + 1] = kv
+            order[j + 1] = iv
+            work += i - 1 - j
+            if work > 8 * n:
+                fallback = numpy.argsort(phases[:n], kind="mergesort")
+                for q in range(n):
+                    order[q] = fallback[q]
                 return
 
 
@@ -257,6 +302,7 @@ def search_period_fused(
     ibuf,
     vbuf,
     invariants,
+    screen=None,
 ):
     """Returns (chi2_min, template row, depth) for one trial period.
 
@@ -265,6 +311,10 @@ def search_period_fused(
 
     invariants: input means (rw, w) and per-template max(a^2), computed once
     per problem/precision rather than once per period.
+
+    screen: optional coarse-PL certificates. Only candidates whose upper gain
+    can improve the relevant incumbent receive the original full correlation.
+    None specializes this path away; the default PL backend does not use it.
 
     nbins/boff/a_bin/a2_bin: stride-binned templates (see bin_templates). With
     nbins[u] == 0 (default, exact) the full-resolution correlation is used;
@@ -329,24 +379,31 @@ def search_period_fused(
     counts = ibuf[: n + 1]
     bucket = ibuf[n + 1 : 2 * n + 1]
 
-    # Phase fold and sort (stable order, as in the reference)
-    fold_sort_into(
-        t,
-        y,
-        inv_dy2,
-        period,
-        phases,
-        counts,
-        bucket,
-        keys,
-        flux_sorted,
-        w_sorted,
-        not uniform_weights,
-    )
+    # Try a stable three-run merge only in the long-period regime.
+    folded = period * 3 >= time_span
+    runs = 4
+    h0, h1, h2 = 0, n, n
+    e0, e1 = n, n
+    if folded:
+        _foldfast_into(t, period, phases)
+        runs = 1
+        for q in range(1, n):
+            if phases[q] < phases[q - 1]:
+                if runs == 1:
+                    e0, h1 = q, q
+                elif runs == 2:
+                    e1, h2 = q, q
+                else:
+                    runs = 4
+                    break
+                runs += 1
     w0 = inv_dy2[0]
     has_pl = len(pl_c) > 0
-    # U2 obtains A2 from cum_w; only the full weighted-PL path reads dd_w.
-    has_pl_w = has_pl and not pl_a2_approx
+    if screen is not None:
+        has_pl = True
+    # U2 obtains A2 from cum_w, but screening an exact target still needs dd_w
+    # even if the U2 flag was set (it only applies to targets with npl > 0).
+    has_pl_w = has_pl and (not pl_a2_approx or screen is not None)
     # Double prefix sums for the piecewise-linear templates (in the same
     # pass; mean removed for precision, its contribution mu * sum(p) is added
     # back). The means come from the unsorted data (any constant is exact).
@@ -362,44 +419,125 @@ def search_period_fused(
     s_w = 0.0
     a_w = 0.0
     total = 0.0
-    if uniform_weights:
-        # w = w0 everywhere: no weight arrays (w, cum_w) needed
-        for k in range(m):
-            src = k if k < n else k - n
-            f = flux_sorted[src]
-            rk = (1.0 - f) * w0
-            rw[k] = rk
-            cum[k + 1] = cum[k] + f
-            cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
-            cum_rw[k + 1] = cum_rw[k] + rk
-            if k < n:
-                total += (f - 1.0) ** 2 * w0
-            if has_pl:
-                a_rw += s_rw
-                dd_rw[k + 1] = a_rw
-                s_rw += rk - mu_rw
+    if runs <= 3:
+        p0 = phases[0]
+        p1 = phases[h1] if h1 < e1 else 2.0
+        p2 = phases[h2] if h2 < n else 2.0
+        if uniform_weights:
+            # w = w0 everywhere: no weight arrays (w, cum_w) needed
+            for k in range(m):
+                if k < n:
+                    if p0 <= p1 and p0 <= p2:
+                        src = h0
+                        h0 += 1
+                        p0 = phases[h0] if h0 < e0 else 2.0
+                    elif p1 <= p2:
+                        src = h1
+                        h1 += 1
+                        p1 = phases[h1] if h1 < e1 else 2.0
+                    else:
+                        src = h2
+                        h2 += 1
+                        p2 = phases[h2] if h2 < n else 2.0
+                    f = y[src]
+                    if k < maxw:
+                        flux_sorted[k] = f
+                else:
+                    f = flux_sorted[k - n]
+                rk = (1.0 - f) * w0
+                rw[k] = rk
+                cum[k + 1] = cum[k] + f
+                cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
+                cum_rw[k + 1] = cum_rw[k] + rk
+                if k < n:
+                    total += (f - 1.0) ** 2 * w0
+                if has_pl:
+                    a_rw += s_rw
+                    dd_rw[k + 1] = a_rw
+                    s_rw += rk - mu_rw
+        else:
+            for k in range(m):
+                if k < n:
+                    if p0 <= p1 and p0 <= p2:
+                        src = h0
+                        h0 += 1
+                        p0 = phases[h0] if h0 < e0 else 2.0
+                    elif p1 <= p2:
+                        src = h1
+                        h1 += 1
+                        p1 = phases[h1] if h1 < e1 else 2.0
+                    else:
+                        src = h2
+                        h2 += 1
+                        p2 = phases[h2] if h2 < n else 2.0
+                    f = y[src]
+                    if k < maxw:
+                        flux_sorted[k] = f
+                else:
+                    f = flux_sorted[k - n]
+                if k < n:
+                    wk = inv_dy2[src]
+                    if k < maxw:
+                        w_sorted[k] = wk
+                else:
+                    wk = w_sorted[k - n]
+                rk = (1.0 - f) * wk
+                w[k] = wk
+                rw[k] = rk
+                cum[k + 1] = cum[k] + f
+                cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
+                cum_w[k + 1] = cum_w[k] + wk
+                cum_rw[k + 1] = cum_rw[k] + rk
+                if k < n:
+                    total += (f - 1.0) ** 2 * wk
+                if has_pl:
+                    a_rw += s_rw
+                    dd_rw[k + 1] = a_rw
+                    s_rw += rk - mu_rw
+                if has_pl_w:
+                    a_w += s_w
+                    dd_w[k + 1] = a_w
+                    s_w += wk - mu_w
     else:
-        for k in range(m):
-            src = k if k < n else k - n
-            f = flux_sorted[src]
-            wk = w_sorted[src]
-            rk = (1.0 - f) * wk
-            w[k] = wk
-            rw[k] = rk
-            cum[k + 1] = cum[k] + f
-            cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
-            cum_w[k + 1] = cum_w[k] + wk
-            cum_rw[k + 1] = cum_rw[k] + rk
-            if k < n:
-                total += (f - 1.0) ** 2 * wk
-            if has_pl:
-                a_rw += s_rw
-                dd_rw[k + 1] = a_rw
-                s_rw += rk - mu_rw
-            if has_pl_w:
-                a_w += s_w
-                dd_w[k + 1] = a_w
-                s_w += wk - mu_w
+        fold_order_into(t, period, phases, counts, bucket, keys, folded)
+        if uniform_weights:
+            # w = w0 everywhere: no weight arrays (w, cum_w) needed
+            for k in range(m):
+                src = bucket[k if k < n else k - n]
+                f = y[src]
+                rk = (1.0 - f) * w0
+                rw[k] = rk
+                cum[k + 1] = cum[k] + f
+                cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
+                cum_rw[k + 1] = cum_rw[k] + rk
+                if k < n:
+                    total += (f - 1.0) ** 2 * w0
+                if has_pl:
+                    a_rw += s_rw
+                    dd_rw[k + 1] = a_rw
+                    s_rw += rk - mu_rw
+        else:
+            for k in range(m):
+                src = bucket[k if k < n else k - n]
+                f = y[src]
+                wk = inv_dy2[src]
+                rk = (1.0 - f) * wk
+                w[k] = wk
+                rw[k] = rk
+                cum[k + 1] = cum[k] + f
+                cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
+                cum_w[k + 1] = cum_w[k] + wk
+                cum_rw[k + 1] = cum_rw[k] + rk
+                if k < n:
+                    total += (f - 1.0) ** 2 * wk
+                if has_pl:
+                    a_rw += s_rw
+                    dd_rw[k + 1] = a_rw
+                    s_rw += rk - mu_rw
+                if has_pl_w:
+                    a_w += s_w
+                    dd_w[k + 1] = a_w
+                    s_w += wk - mu_w
     dd_rw[m + 1] = a_rw + s_rw
     dd_w[m + 1] = a_w + s_w
 
@@ -554,6 +692,20 @@ def search_period_fused(
 
             # coarse grid (stride xc) plus refinement around the best coarse shift
             xc = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
+            sn = 0
+            if screen is not None:
+                sn, so = screen[0][u], screen[1][u]
+                sn2, so2 = screen[2][u], screen[3][u]
+                sc = screen[5][so : so + sn]
+                sp = screen[4][so : so + sn]
+                sc2 = screen[5][so2 : so2 + sn2]
+                sp2 = screen[4][so2 : so2 + sn2]
+                ss, ss2 = screen[6][u] * mu_rw, screen[7][u] * mu_w
+                se, se2 = screen[8][u] * pl_w_max, screen[9][u]
+                sr, sr2, srr = screen[10][u], screen[11][u], screen[12]
+            # A duration's best phase can guide later searches even when its
+            # gain is below the global incumbent. Preserve these anchors too.
+            preserve_anchor = (is_scout and use_scouts) or xc > xth
             dur_gain = -1e300
             dur_i = -1
             i_star = -1
@@ -633,6 +785,38 @@ def search_period_fused(
                                         )
                                 if bound * (1 + 1e-9) <= best_gain or bound < threshold:
                                     continue
+                            if (
+                                screen is not None
+                                and sn > 0
+                                and prune
+                                and not ls_depth
+                                and nb == 0
+                                and length >= PRUNE_MIN_LENGTH
+                                and k > 0
+                            ):
+                                cutoff = dur_gain if preserve_anchor else best_gain
+                                if cutoff >= 0:
+                                    proxy_ar = _pl_eval(sc, sp, dd_rw[i:]) + ss
+                                    ar_upper = (
+                                        proxy_ar + sr
+                                        + numpy.sqrt(max(0.0, se * (r2 + srr)))
+                                    )
+                                    if uniform_weights:
+                                        lower_a2 = a2_const
+                                    elif a2_win:
+                                        lower_a2 = a2_unit * (
+                                            cum_w[i + length] - cum_w[i]
+                                        )
+                                    else:
+                                        lower_a2 = (
+                                            _pl_eval(sc2, sp2, dd_w[i:]) + ss2
+                                            - se2 * (cum_w[i + length] - cum_w[i])
+                                            - sr2
+                                        )
+                                    proxy_bound = 2 * k * ar_upper - k * k * lower_a2
+                                    padding = 1e-9 * (abs(proxy_bound) + cutoff)
+                                    if proxy_bound + padding <= cutoff:
+                                        continue
                             if npl > 0:
                                 ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
                                 if uniform_weights:
@@ -917,6 +1101,92 @@ def pl_templates(templates, margin, min_length, max_stride, eps):
     )
 
 
+def screen_round_budget(y, w, means, maxw):
+    """Conservative allowances for both prefix levels and window differences.
+
+    Global data mass protects small windows following large outliers, where
+    a window-relative error allowance alone underestimates cancellation.
+    The factor includes wrapping and error propagation through both scans.
+    """
+    n = len(y)
+    maxw = int(maxw) + int(maxw) % 2
+    m = n + maxw + 1
+    eps = 16 * numpy.finfo(numpy.float64).eps
+    r = 1 - y
+    mass_rw = numpy.sum(numpy.abs(r * w)) + n * abs(means[0])
+    mass_w = numpy.sum(w)
+    return (
+        eps * m * m * mass_rw,
+        eps * m * m * (mass_w + n * abs(means[1])),
+        eps * m * numpy.sum(r * r * w),
+        eps * m * mass_w,
+    )
+
+
+def screen_templates(
+    templates, pl, eps, weighted, proxy_eps=0.1, min_length=128, round_budget=None
+):
+    """Cheap PL proxies with certificates for the unchanged target statistic.
+
+    |AR - AR_proxy| <= sqrt(w_max * ||target - proxy||² * R2).
+    |A2 - A2_proxy| <= max|target_A2 - proxy2| * sum(w).
+    For a PL target, fit its actual evaluated shape (and its separate A2 fit).
+    Use measured residual norms, not the nominal knot-fitting tolerance.
+    """
+    widths, rows, offsets, lengths, profile, overshoot, sum_a2 = templates
+    nu = len(widths)
+    ns = numpy.zeros(nu, dtype=numpy.int64)
+    off = ns.copy()
+    ns2, off2 = ns.copy(), ns.copy()
+    sums, sums2, err, err2 = [numpy.zeros(nu) for _ in range(4)]
+    positions = [numpy.zeros(0, dtype=numpy.int64)]
+    coefficients = [numpy.zeros(0)]
+    offset = 0
+    ar_round, a2_round = numpy.zeros(nu), numpy.zeros(nu)
+    r2_round = 0.0 if round_budget is None else round_budget[2]
+    for u in range(nu):
+        if lengths[u] < min_length:
+            continue
+        a = profile[offsets[u] : offsets[u] + lengths[u]]
+        target = pl_fit(a, eps)[3] if pl[0][u] > 0 else a
+        pos, c, sm, proxy = pl_fit(target, proxy_eps)
+        if len(c) >= (pl[0][u] if pl[0][u] else lengths[u]):
+            continue
+        ns[u], off[u], sums[u] = len(c), offset, sm
+        # Include a floating-point allowance even for zero-error proxy fits.
+        err[u] = (
+            numpy.linalg.norm(target - proxy) + 1e-8 * numpy.linalg.norm(target)
+        ) ** 2
+        positions.append(pos)
+        coefficients.append(c)
+        offset += len(c)
+        if round_budget is not None:
+            ar_round[u] = round_budget[0] * numpy.sum(numpy.abs(c))
+        if weighted:
+            target2 = pl_fit(a * a, eps)[3] if pl[0][u] > 0 else a * a
+            pos, c, sm, proxy = pl_fit(target2, proxy_eps)
+            ns2[u], off2[u], sums2[u] = len(c), offset, sm
+            err2[u] = (
+                numpy.max(numpy.abs(target2 - proxy))
+                + 1e-8 * numpy.max(numpy.abs(target2))
+            )
+            positions.append(pos)
+            coefficients.append(c)
+            offset += len(c)
+            if round_budget is not None:
+                a2_round[u] = (
+                    round_budget[1] * numpy.sum(numpy.abs(c))
+                    + err2[u] * round_budget[3]
+                )
+    if offset == 0:
+        return None
+    return (
+        ns, off, ns2, off2,
+        numpy.concatenate(positions), numpy.concatenate(coefficients),
+        sums, sums2, err, err2, ar_round, a2_round, r2_round,
+    )
+
+
 class FusedProblem:
     """Precomputed, numba-friendly view of a backends.SearchProblem."""
 
@@ -967,10 +1237,28 @@ class FusedProblem:
             int(scout_every),
             bool(ls_depth),
         )
+        self.screen = None
+
+    def set_screen(self, proxy_eps=0.1, min_length=128):
+        """Enable certified correlation screening without changing the target.
+
+        The exact backends enable this after configuration. The already-cheap
+        default PL correlations are faster without another screening stage.
+        """
+        self.screen = None
+        if self.dtype == numpy.float64 and self.prune and not self.pl[-1]:
+            budget = screen_round_budget(
+                self.y, self.inv_dy2, self.input_means, self.templates[0][-1]
+            )
+            self.screen = screen_templates(
+                self.templates_kernel, self.pl, self.pl_args[2],
+                not self.uniform_weights, proxy_eps, min_length, budget,
+            )
 
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
         self.dtype = numpy.dtype(dtype).type
+        self.screen = None
         self._ws = None
         self.set_binning(self.min_stride, getattr(self, "pieces", 0))
 
@@ -1038,6 +1326,7 @@ class FusedProblem:
             *self.pl,
             *self.workspace(),
             self.invariants,
+            self.screen,
         )
         return period, chi2, row, depth
 
@@ -1102,6 +1391,7 @@ def search_periods_fused_parallel(
     n_chunks,
     invariants,
     index_dtype,
+    screen=None,
 ):
     """search_period_fused for many periods, numba threads (prange over
     n_chunks chunks, each with its own work buffers)."""
@@ -1163,6 +1453,7 @@ def search_periods_fused_parallel(
                 ibuf,
                 vbuf,
                 invariants,
+                screen,
             )
             chi2[p] = c
             row[p] = r
