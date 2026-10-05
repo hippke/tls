@@ -124,3 +124,33 @@ def test_fold_order_matches_stable_argsort(case, dtype, folded):
         numpy.testing.assert_array_equal(
             order, numpy.argsort(foldfast(t, period), kind="mergesort")
         )
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 7, 64, 1000, 4097])
+def test_stable_argsort_matches_mergesort(n):
+    """Own merge sort for the clustered fallback (step 52) = numpy mergesort,
+    including ties (equal keys keep index order)."""
+    from transitleastsquares.core_fused import _stable_argsort_into
+
+    rng = numpy.random.default_rng(n)
+    for keys in (rng.random(n), rng.integers(0, 5, n).astype(float)):
+        for dtype in (numpy.int32, numpy.int64):
+            order = numpy.empty(n, dtype=dtype)
+            _stable_argsort_into(keys, order, numpy.empty(n, dtype=dtype))
+            expected = numpy.argsort(keys, kind="mergesort")
+            numpy.testing.assert_array_equal(order, expected)
+
+
+def test_fold_order_into_clustered_fallback():
+    from transitleastsquares.core_fused import fold_order_into
+
+    rng = numpy.random.default_rng(3)
+    t = rng.uniform(0, 1e-5, 5000)
+    n = len(t)
+    phases = numpy.empty(n)
+    order = numpy.empty(n, dtype=numpy.int32)
+    work = fold_order_into(
+        t, 1.7, phases, numpy.empty(n + 1, dtype=numpy.int32), order, numpy.empty(0)
+    )
+    assert work > 8 * n  # the fallback was taken
+    numpy.testing.assert_array_equal(order, numpy.argsort(phases, kind="mergesort"))

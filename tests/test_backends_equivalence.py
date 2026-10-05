@@ -62,3 +62,30 @@ def test_approximate_backend_close(backend, name):
         numpy.testing.assert_allclose(a, b, rtol=1e-9, equal_nan=True, err_msg=key)
     if numpy.isfinite(ref.SDE) and ref.SDE > 0:
         assert abs(cur.SDE - ref.SDE) < 0.02 * ref.SDE + 0.05
+
+
+def test_ls_depth_option_runs_and_never_fits_worse():
+    """ls_depth (experimental, specialized away unless enabled): the least-
+    squares depth maximizes the gain per shift, so with the exact search its
+    chi2 is never higher than with TLS's box depth."""
+    import numpy
+    from test_core_oracle import cache
+
+    from transitleastsquares import tls_constants as C
+    from transitleastsquares.backends import SearchProblem
+    from transitleastsquares.core_fused import FusedProblem
+
+    rng = numpy.random.default_rng(11)
+    t = numpy.arange(3000) * 0.01
+    y = 1 + rng.normal(0, 1e-3, len(t))
+    y[(t % 3.3) < 0.08] -= 2e-3
+    dy = numpy.ones(len(t))
+    ov, lc = cache(t, y, "default")
+    problem = SearchProblem(
+        t, y, dy, lc, ov, 1e-5,
+        C.R_STAR_MIN, C.R_STAR_MAX, C.M_STAR_MIN, C.M_STAR_MAX, 0.01,
+    )
+    box, ls = FusedProblem(problem), FusedProblem(problem)
+    ls.set_pl(0, ls_depth=True)
+    for p in (1.1, 2.0, 3.3, 7.7):
+        assert ls.search(p)[1] <= box.search(p)[1] * (1 + 1e-12)

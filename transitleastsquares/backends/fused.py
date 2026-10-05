@@ -132,7 +132,7 @@ class FusedThreadsBackend(FusedBackend):
                         float(p.T0_search_margin),
                         float(tls_constants.SIGNAL_DEPTH),
                         fp.prune,
-                        *fp.binning,
+                        fp.binning,
                         *fp.pl,
                         int(min(use_threads, numba.config.NUMBA_NUM_THREADS)),
                         fp.invariants,

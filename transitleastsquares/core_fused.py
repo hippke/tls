@@ -60,6 +60,75 @@ def _foldfast_into(t, period, out):
 
 
 @numba.njit(cache=True)
+def _stable_argsort_into(keys, order, tmp):
+    """order = numpy.argsort(keys, kind="mergesort") (stable: equal keys keep
+    index order): insertion-sorted runs of 32, then bottom-up merges; tmp:
+    work buffer of len(order). Used for the rare clustered-phase fallback
+    instead of numpy's mergesort, whose numba implementation costs ~0.6 s of
+    first-run compilation (step 52)."""
+    n = len(order)
+    run = 32
+    for lo in range(0, n, run):
+        hi = min(lo + run, n)
+        order[lo] = lo
+        for i in range(lo + 1, hi):
+            kv = keys[i]
+            j = i - 1
+            while j >= lo and keys[order[j]] > kv:
+                order[j + 1] = order[j]
+                j -= 1
+            order[j + 1] = i
+    src = order
+    dst = tmp
+    in_order = True  # src is `order`
+    width = run
+    while width < n:
+        for lo in range(0, n, 2 * width):
+            mid = min(lo + width, n)
+            hi = min(lo + 2 * width, n)
+            i = lo
+            j = mid
+            k = lo
+            if mid < hi and keys[src[mid - 1]] <= keys[src[mid]]:
+                # already in order: copy
+                for q in range(lo, hi):
+                    dst[q] = src[q]
+                continue
+            if i < mid and j < hi:
+                ki = keys[src[i]]
+                kj = keys[src[j]]
+                while True:
+                    if kj < ki:
+                        dst[k] = src[j]
+                        k += 1
+                        j += 1
+                        if j == hi:
+                            break
+                        kj = keys[src[j]]
+                    else:
+                        dst[k] = src[i]
+                        k += 1
+                        i += 1
+                        if i == mid:
+                            break
+                        ki = keys[src[i]]
+            while i < mid:
+                dst[k] = src[i]
+                i += 1
+                k += 1
+            while j < hi:
+                dst[k] = src[j]
+                j += 1
+                k += 1
+        src, dst = dst, src
+        in_order = not in_order
+        width *= 2
+    if not in_order:
+        for i in range(n):
+            order[i] = src[i]
+
+
+@numba.njit(cache=True)
 def fold_sort_into(
     t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w, move_w, folded=False
 ):
@@ -114,7 +183,8 @@ def fold_sort_into(
                 w[j + 1] = wv
             work += i - 1 - j
             if work > 8 * n:  # clustered phases: use the O(N log N) sort
-                order = numpy.argsort(phases[:n], kind="mergesort")
+                order = numpy.empty(n, dtype=bucket.dtype)
+                _stable_argsort_into(phases[:n], order, bucket)
                 for q in range(n):
                     flux[q] = y[order[q]]
                     if move_w:
@@ -163,10 +233,8 @@ def fold_order_into(t, period, phases, counts, order, keys, folded=False):
             work += i - 1 - j
         else:
             prev = kv
-            if work > 8 * n:
-                fallback = numpy.argsort(phases[:n], kind="mergesort")
-                for q in range(n):
-                    order[q] = fallback[q]
+            if work > 8 * n:  # clustered phases: O(N log N) stable sort
+                _stable_argsort_into(phases[:n], order, counts[:n])
                 return work
     return work
 
@@ -604,11 +672,7 @@ def search_period_fused(
     T0_search_margin,
     signal_depth,
     prune,
-    nbins,
-    bsize,
-    boff,
-    a_bin,
-    a2_bin,
+    bins,
     pl_n,
     pl_off,
     pl_n2,
@@ -651,9 +715,10 @@ def search_period_fused(
     P >= P* the stable phase order comes from the walk instead of the
     counting scatter; the permutation is identical. None: never walk.
 
-    nbins/boff/a_bin/a2_bin: stride-binned templates (see bin_templates). With
-    nbins[u] == 0 (default, exact) the full-resolution correlation is used;
-    otherwise the approximate stride-binned correlation (idea B1).
+    bins: None (default and exact backends: the binned code is specialized
+    away, which shortens compilation), or (nbins, bsize, boff, a_bin, a2_bin),
+    stride-binned templates (see bin_templates): where nbins[u] > 0 the
+    approximate stride-binned correlation (idea B1) is used.
 
     pl_*: piecewise-linear templates (see pl_templates, idea L3). If
     pl_n[u] > 0, AR (and A2 for non-uniform weights) of template u come from
@@ -668,7 +733,8 @@ def search_period_fused(
     scout_every = s > 0 (idea L8, approximate): only every s-th allowed
     duration (and the longest) scans all phases; the others scan windows of
     +- one duration around the best centres found by these scouts.
-    ls_depth (idea B6/L9, statistic change): depth by least squares per shift,
+    ls_depth (idea B6/L9, statistic change; None = off and specialized away,
+    True = on): depth by least squares per shift,
     k = AR / A2 and gain = AR^2 / A2 (shifts with AR <= 0 skipped), instead
     of TLS's box mean * overshoot. The box-depth threshold still selects
     the shifts. Pruning: gain <= R2 (Cauchy-Schwarz; scaled by A2_max / A2
@@ -735,7 +801,6 @@ def search_period_fused(
     w0 = inv_dy2[0]
     # cum_rw is read only by stride-binned correlations: skip its chain and
     # store otherwise (less memory traffic per period; step 49).
-    has_bins = len(a_bin) > 0
     has_pl = len(pl_c) > 0
     if screen is not None:
         has_pl = True
@@ -786,7 +851,7 @@ def search_period_fused(
                 rw[k] = rk
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
-                if has_bins:
+                if bins is not None:
                     cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * w0
@@ -826,7 +891,7 @@ def search_period_fused(
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
                 cum_w[k + 1] = cum_w[k] + wk
-                if has_bins:
+                if bins is not None:
                     cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * wk
@@ -861,7 +926,7 @@ def search_period_fused(
                 rw[k] = rk
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
-                if has_bins:
+                if bins is not None:
                     cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * w0
@@ -880,7 +945,7 @@ def search_period_fused(
                 cum[k + 1] = cum[k] + f
                 cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
                 cum_w[k + 1] = cum_w[k] + wk
-                if has_bins:
+                if bins is not None:
                     cum_rw[k + 1] = cum_rw[k] + rk
                 if k < n:
                     total += (f - 1.0) ** 2 * wk
@@ -999,7 +1064,6 @@ def search_period_fused(
             if xth == 1 and n_shifts > n:
                 n_shifts = n  # shifts >= n repeat shifts already tested
 
-            # Stride-binned correlation (approximate, only if nbins[u] > 0)
             npl = pl_n[u]
             pc = pl_c[pl_off[u] : pl_off[u] + npl]
             pp = pl_pos[pl_off[u] : pl_off[u] + npl]
@@ -1007,42 +1071,47 @@ def search_period_fused(
             pp2 = pl_pos[pl_off2[u] : pl_off2[u] + pl_n2[u]]
             psum = pl_sum[u] * mu_rw
             psum2 = pl_sum2[u] * mu_w
-            nb = nbins[u] if npl == 0 else 0
+            nb = 0
             a2_win = pl_a2_approx and npl > 0 and not uniform_weights
             a2_unit = sum_a2[u] / length
             a2_wmax = sum_a2[u] * pl_w_max
-            brw = rw[:0]
-            bw = w[:0]
-            ab = a_bin[:0]
-            a2bin = a2_bin[:0]
-            rem0 = 0
-            prem = prof
-            bs = bsize[u]
-            q_row = 0  # bins per row of the (decimated) data bin table
-            multirow = False
-            if nb > 0:
-                # Data bin sums of size bs. Row r holds the bins starting at
-                # r, r + bs, r + 2 bs, ... If all shifts are multiples of bs
-                # (aligned case, B1) only row 0 is needed.
-                multirow = xth % bs != 0
-                n_rows = bs if multirow else 1
-                q_row = m // bs + 1
-                for r in range(n_rows):
-                    base = r * q_row
-                    for kb in range(q_row):
-                        lo = r + kb * bs
-                        hi = lo + bs
-                        if hi > m:
-                            break
-                        brw_buf[base + kb] = cum_rw[hi] - cum_rw[lo]
-                        if not uniform_weights:
-                            bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
-                brw = brw_buf
-                bw = bw_buf
-                ab = a_bin[boff[u] : boff[u] + nb]
-                a2bin = a2_bin[boff[u] : boff[u] + nb]
-                rem0 = nb * bs
-                prem = prof[rem0:]
+            # Stride-binned correlation (fused-binned / fused-pieces only;
+            # bins=None specializes this code away, PERFORMANCE_LOG step 52)
+            if bins is not None:
+                nbins, bsize, boff, a_bin, a2_bin = bins
+                nb = nbins[u] if npl == 0 else 0
+                brw = rw[:0]
+                bw = w[:0]
+                ab = a_bin[:0]
+                a2bin = a2_bin[:0]
+                rem0 = 0
+                prem = prof
+                bs = bsize[u]
+                q_row = 0  # bins per row of the (decimated) data bin table
+                multirow = False
+                if nb > 0:
+                    # Data bin sums of size bs. Row r holds the bins starting
+                    # at r, r + bs, r + 2 bs, ... If all shifts are multiples
+                    # of bs (aligned case, B1) only row 0 is needed.
+                    multirow = xth % bs != 0
+                    n_rows = bs if multirow else 1
+                    q_row = m // bs + 1
+                    for r in range(n_rows):
+                        base = r * q_row
+                        for kb in range(q_row):
+                            lo = r + kb * bs
+                            hi = lo + bs
+                            if hi > m:
+                                break
+                            brw_buf[base + kb] = cum_rw[hi] - cum_rw[lo]
+                            if not uniform_weights:
+                                bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
+                    brw = brw_buf
+                    bw = bw_buf
+                    ab = a_bin[boff[u] : boff[u] + nb]
+                    a2bin = a2_bin[boff[u] : boff[u] + nb]
+                    rem0 = nb * bs
+                    prem = prof[rem0:]
 
             # coarse grid (stride xc) plus refinement around the best coarse shift
             xc = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
@@ -1110,7 +1179,7 @@ def search_period_fused(
                             k = 1 / (signal_depth / target_depth)
                             if prune and length >= PRUNE_MIN_LENGTH:
                                 r2 = cum_r2[i + length] - cum_r2[i]
-                                if ls_depth:
+                                if ls_depth is not None:
                                     bound = r2
                                     if a2_win:
                                         bound = (
@@ -1143,7 +1212,7 @@ def search_period_fused(
                                 screen is not None
                                 and sn > 0
                                 and prune
-                                and not ls_depth
+                                and ls_depth is None
                                 and nb == 0
                                 and length >= PRUNE_MIN_LENGTH
                                 and k > 0
@@ -1179,7 +1248,7 @@ def search_period_fused(
                                     a2 = a2_unit * (cum_w[i + length] - cum_w[i])
                                 else:
                                     a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
-                            elif nb > 0:
+                            elif bins is not None and nb > 0:
                                 if multirow:
                                     q = (i % bs) * q_row + i // bs
                                 else:
@@ -1203,7 +1272,7 @@ def search_period_fused(
                                 ar, a2 = _dot2(
                                     prof, rw[i : i + length], w[i : i + length]
                                 )
-                            if ls_depth:
+                            if ls_depth is not None:
                                 if ar <= 0 or a2 <= 0:
                                     continue
                                 k = ar / a2
@@ -1650,7 +1719,7 @@ class FusedProblem:
             float(numpy.max(self.inv_dy2)),
             int(t0_coarsen),
             int(scout_every),
-            bool(ls_depth),
+            True if ls_depth else None,  # None specializes the branch away
         )
         self.screen = None
 
@@ -1701,13 +1770,17 @@ class FusedProblem:
             min_stride,
             getattr(self, "pieces", 0),
         )
-        self.binning = (
-            nbins,
-            bsize,
-            boff,
-            a_bin.astype(self.dtype),
-            a2_bin.astype(self.dtype),
-        )
+        # None if no template is binned: the kernel's binned code is then
+        # specialized away (shorter first-run compilation, step 52)
+        self.binning = None
+        if numpy.any(nbins > 0):
+            self.binning = (
+                nbins,
+                bsize,
+                boff,
+                a_bin.astype(self.dtype),
+                a2_bin.astype(self.dtype),
+            )
         widths, rows, offsets, lengths, profile, overshoot, sum_a2 = self.templates
         self.templates_kernel = (
             widths,
@@ -1750,7 +1823,7 @@ class FusedProblem:
             float(p.T0_search_margin),
             float(tls_constants.SIGNAL_DEPTH),
             self.prune,
-            *self.binning,
+            self.binning,
             *self.pl,
             *self.workspace(),
             self.invariants,
@@ -1799,11 +1872,7 @@ def search_periods_fused_parallel(
     T0_search_margin,
     signal_depth,
     prune,
-    nbins,
-    bsize,
-    boff,
-    a_bin,
-    a2_bin,
+    bins,
     pl_n,
     pl_off,
     pl_n2,
@@ -1861,11 +1930,7 @@ def search_periods_fused_parallel(
                 T0_search_margin,
                 signal_depth,
                 prune,
-                nbins,
-                bsize,
-                boff,
-                a_bin,
-                a2_bin,
+                bins,
                 pl_n,
                 pl_off,
                 pl_n2,
