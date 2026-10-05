@@ -1,0 +1,11 @@
+numpy>=1.22
+numba
+tqdm
+
+[catalog]
+astroquery>=0.3.9
+
+[test]
+pytest
+scipy
+batman-package

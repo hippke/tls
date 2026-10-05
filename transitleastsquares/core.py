@@ -13,19 +13,19 @@ from transitleastsquares.grid import T14
 from transitleastsquares.helpers import running_mean
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def fold(time, period, T0):
     """Normal phase folding"""
     return (time - T0) / period - numpy.floor((time - T0) / period)
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def foldfast(time, period):
     """Fast phase folding with T0=0 hardcoded"""
     return time / period - numpy.floor(time / period)
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_dy):
     """chi2 contribution of the points appended for wrap-around (to be removed)."""
     regular = numpy.sum(((1 - flux) ** 2) * 1 / dy**2)
@@ -33,7 +33,7 @@ def edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_dy):
     return patched - regular
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def lowest_residuals_in_this_duration(
     mean,
     transit_depth_min,
@@ -89,7 +89,7 @@ def lowest_residuals_in_this_duration(
     return summed_residual_in_rows, best_row, best_depth
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def out_of_transit_residuals(data, width_signal, dy):
     """chi2 of all points outside a sliding window of width_signal samples"""
     chi2 = numpy.zeros(len(data) - width_signal + 1)
@@ -160,7 +160,7 @@ def search_period(
 
     # Fractional transit duration can be longer than this.
     # Example: Data length 11 days, 2 transits at 0.5 days and 10.5 days
-    length = max(t) - min(t)
+    length = numpy.max(t) - numpy.min(t)
     no_of_transits_naive = length / period
     no_of_transits_worst = no_of_transits_naive + 1
     correction_factor = no_of_transits_worst / no_of_transits_naive
@@ -186,8 +186,14 @@ def search_period(
             signal=lc_arr[chosen_transit_row],
             inverse_squared_patched_dy_arr=inverse_squared_patched_dy,
             overshoot=lc_cache_overview["overshoot"][chosen_transit_row],
+            # chi2 outside of the template. The template can be shorter than
+            # the window (trimmed near-unity samples of some custom shapes);
+            # then the window points beyond the template are out of transit.
+            # (TLS <= 1.33 used the window width: these points were dropped.)
             ootr=out_of_transit_residuals(
-                patched_data, duration, inverse_squared_patched_dy
+                patched_data,
+                len(lc_arr[chosen_transit_row]),
+                inverse_squared_patched_dy,
             ),
             summed_edge_effect_correction=this_edge_effect_correction,
             chosen_transit_row=chosen_transit_row,

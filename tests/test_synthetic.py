@@ -1,7 +1,7 @@
 import os
 
-import batman
 import numpy
+import synthetic_lc as batman  # own transit model, no batman dependency
 
 from transitleastsquares import transitleastsquares
 
@@ -52,7 +52,10 @@ def test_synthetic():
         use_threads=1,
     )
 
-    numpy.testing.assert_almost_equal(results.chi2_min, 8831.654060613922, decimal=5)
+    # TLS <= 1.33 (batman templates, batman-generated data): 8831.654060613922.
+    # Own transit model for templates: 8831.654326366346; and for the injected
+    # data (synthetic_lc instead of batman): 8831.58905929298 (rel. 7e-6)
+    numpy.testing.assert_almost_equal(results.chi2_min, 8831.58905929298, decimal=5)
     numpy.testing.assert_almost_equal(
         results.chi2red_min, 0.6719152511118321, decimal=5
     )

@@ -64,6 +64,10 @@ BOX_INC = 90
 BOX_U = [0]
 BOX_LIMB_DARK = "linear"
 
+# Transit model for the templates: "tls" (own implementation, transit_model.py)
+# or "batman" (needs batman-package; used by TLS <= 1.33, kept for comparisons)
+TRANSIT_MODEL = "tls"
+
 # Unique depth of trial signals (at various durations). These are rescaled in
 # depth so that their integral matches the mean flux in the window in question.
 # In principle, "signal_depth" is an arbitrary value >0 and <1
@@ -123,10 +127,11 @@ PROGRESSBAR_THRESHOLD = 5000
 # Then: Warn and return the default grid
 MINIMUM_PERIOD_GRID_SIZE = 100
 
-# Search backend used by default (see transitleastsquares.backends).
+# Search backend used by default (see transitleastsquares.backends):
+# "fused" (fast, default) or "numba" (reference implementation of TLS 1.33).
 # Can be overridden per call (power(backend=...)) or by the environment
 # variable TLS_BACKEND.
-DEFAULT_BACKEND = "numba"
+DEFAULT_BACKEND = "fused"
 
 # Warn the user if unknown **kwargs are given as parameters
 VALID_PARAMETERS = [

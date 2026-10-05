@@ -1,7 +1,7 @@
 import os
 
-import batman
 import numpy
+import synthetic_lc as batman  # own transit model, no batman dependency
 
 from transitleastsquares import transitleastsquares
 

@@ -111,6 +111,9 @@ class SearchBackend:
 # name -> backend class / factory, or "module:attribute" string (lazy import)
 _REGISTRY: Dict[str, Union[str, Callable[[], SearchBackend]]] = {
     "numba": "transitleastsquares.backends.numba_reference:NumbaBackend",
+    "fused": "transitleastsquares.backends.fused:FusedBackend",
+    "fused-threads": "transitleastsquares.backends.fused:FusedThreadsBackend",
+    "c": "transitleastsquares.backends.c_kernel:CBackend",
 }
 
 

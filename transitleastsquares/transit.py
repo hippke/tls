@@ -4,23 +4,25 @@ import numpy
 
 from transitleastsquares import tls_constants
 from transitleastsquares.interpolation import interp1d
+from transitleastsquares.transit_model import light_curve
 
 
 def model_flux(t, per, rp, a, inc, ecc, w, u, limb_dark):
-    """Limb-darkened transit light curve at times t (mid-transit at t=0)."""
-    import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
+    """Limb-darkened transit light curve at times t (mid-transit at t=0).
 
-    ma = batman.TransitParams()
-    ma.t0 = 0  # time of inferior conjunction
-    ma.per = per  # orbital period
-    ma.rp = rp  # planet radius (in units of stellar radii)
-    ma.a = a  # semi-major axis (in units of stellar radii)
-    ma.inc = inc  # orbital inclination (in degrees)
-    ma.ecc = ecc  # eccentricity
-    ma.w = w  # longitude of periastron (in degrees)
-    ma.u = u  # limb darkening coefficients
-    ma.limb_dark = limb_dark  # limb darkening model
-    return batman.TransitModel(ma, t).light_curve(ma)
+    Uses TLS' own transit model (transit_model.py). For comparisons, batman can
+    be selected with tls_constants.TRANSIT_MODEL = "batman" (if installed).
+    """
+    if tls_constants.TRANSIT_MODEL == "batman":
+        import batman
+
+        params = batman.TransitParams()
+        params.t0, params.per, params.rp, params.a, params.inc = 0, per, rp, a, inc
+        params.ecc, params.w, params.u, params.limb_dark = ecc, w, u, limb_dark
+        return batman.TransitModel(params, t).light_curve(params)
+    if tls_constants.TRANSIT_MODEL != "tls":
+        raise ValueError(f"Unknown TRANSIT_MODEL {tls_constants.TRANSIT_MODEL!r}")
+    return light_curve(t, 0, per, rp, a, inc, ecc, w, u, limb_dark)
 
 
 def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
@@ -40,10 +42,11 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
     if numpy.all(flux >= 1):
         raise ValueError("Transit template parameters yield no transit")
 
-    # Determine start of transit (first value < 1)
+    # Determine start of transit (first value < 1); symmetric in-transit slice
     idx_first = numpy.argmax(flux < 1)
-    intransit_flux = flux[idx_first : -idx_first + 1]
-    intransit_time = t[idx_first : -idx_first + 1]
+    idx_last = len(flux) - idx_first  # exclusive
+    intransit_flux = flux[idx_first:idx_last]
+    intransit_time = t[idx_first:idx_last]
 
     # Downsample (bin) to target sample size
     x_new = numpy.linspace(t[idx_first], t[-idx_first - 1], samples)

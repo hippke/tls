@@ -9,7 +9,7 @@ from numpy import pi, sqrt
 from transitleastsquares import tls_constants
 
 
-@numba.jit(fastmath=True, parallel=False, nopython=True)
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
 def T14(
     R_s, M_s, P, upper_limit=tls_constants.FRACTIONAL_TRANSIT_DURATION_MAX, small=False
 ):
@@ -49,10 +49,10 @@ def duration_grid(
     ``shortest`` is accepted for backwards compatibility and unused.
     """
     duration_max = T14(
-        R_s=R_star_max, M_s=M_star_max, P=min(periods), small=False
+        R_s=R_star_max, M_s=M_star_max, P=numpy.min(periods), small=False
     )  # large planet for long transit duration
     duration_min = T14(
-        R_s=R_star_min, M_s=M_star_min, P=max(periods), small=True
+        R_s=R_star_min, M_s=M_star_min, P=numpy.max(periods), small=True
     )  # small planet for short transit duration
 
     durations = [duration_min]

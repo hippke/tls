@@ -1,0 +1,2 @@
+[console_scripts]
+transitleastsquares = transitleastsquares.command_line:main

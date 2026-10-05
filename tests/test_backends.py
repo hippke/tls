@@ -11,6 +11,7 @@ from transitleastsquares import (
     transitleastsquares,
 )
 from transitleastsquares.backends import _REGISTRY
+from transitleastsquares.backends.fused import FusedBackend
 from transitleastsquares.backends.numba_reference import NumbaBackend
 
 Q = dict(show_progress_bar=False, verbose=False)
@@ -27,7 +28,7 @@ def lc():
 
 def test_default_backend():
     assert "numba" in available_backends()
-    assert isinstance(get_backend(), NumbaBackend)
+    assert isinstance(get_backend(), FusedBackend)  # default
     assert isinstance(get_backend("numba"), NumbaBackend)
     b = NumbaBackend()
     assert get_backend(b) is b
@@ -39,6 +40,8 @@ def test_env_var(monkeypatch):
         get_backend()
     monkeypatch.setenv("TLS_BACKEND", "numba")
     assert isinstance(get_backend(), NumbaBackend)
+    monkeypatch.delenv("TLS_BACKEND")
+    assert isinstance(get_backend(), FusedBackend)
 
 
 class CountingBackend(NumbaBackend):
@@ -61,7 +64,7 @@ def test_custom_backend_identical_results():
     try:
         t, y = lc()
         kw = dict(period_min=3, period_max=3.6, use_threads=1, **Q)
-        ref = transitleastsquares(t, y).power(**kw)
+        ref = transitleastsquares(t, y).power(backend="numba", **kw)
         cur = transitleastsquares(t, y).power(backend="counting", **kw)
         assert CountingBackend.calls == {"search": 1, "fit_T0": 1}
         numpy.testing.assert_array_equal(ref.power, cur.power)

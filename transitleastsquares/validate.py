@@ -20,16 +20,16 @@ def validate_inputs(t, y, dy):
 
     if numpy.size(y) < 3 or numpy.size(t) < 3:
         raise ValueError("Too few values in data set")
-    if max(t) - min(t) <= 0:
+    if numpy.max(t) - numpy.min(t) <= 0:
         raise ValueError("Time duration must positive")
     if numpy.mean(y) > 1.01 or numpy.mean(y) < 0.99:
         warnings.warn(
             "Warning: The mean flux should be normalized to 1, but it was found "
             f"to be {numpy.mean(y)}"
         )
-    if min(y) < 0:
+    if numpy.min(y) < 0:
         raise ValueError("Flux values must be positive")
-    if max(y) >= float("inf"):
+    if numpy.max(y) >= float("inf"):
         raise ValueError("Flux values must be finite")
 
     # If no dy is given, create it with the standard deviation of the flux

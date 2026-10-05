@@ -3,6 +3,7 @@
 import functools
 from os import path
 
+import numba
 import numpy
 from tqdm import tqdm
 
@@ -68,13 +69,27 @@ def rp_rs_from_depth(depth, law, params):
         ) ** (1 / 2)
 
 
-def pink_noise(data, width):
-    """Mean standard deviation of the mean in sliding windows of `width` points"""
-    std = 0
+@numba.njit(cache=True)
+def _pink_noise(data, width):
+    total = 0.0
     datapoints = len(data) - width + 1
     for i in range(datapoints):
-        std += numpy.std(data[i : i + width]) / width**0.5
-    return std / datapoints
+        mean = 0.0
+        for j in range(i, i + width):
+            mean += data[j]
+        mean /= width
+        var = 0.0
+        for j in range(i, i + width):
+            var += (data[j] - mean) ** 2
+        total += numpy.sqrt(var / width) / width**0.5
+    return total / datapoints
+
+
+def pink_noise(data, width):
+    """Mean standard deviation of the mean in sliding windows of `width` points"""
+    if width < 1 or len(data) - width + 1 < 1:
+        raise ValueError("pink_noise: invalid window")
+    return _pink_noise(numpy.ascontiguousarray(data, dtype=float), int(width))
 
 
 def period_uncertainty(periods, power):
@@ -134,13 +149,83 @@ def spectra(chi2, oversampling_factor):
     return SR, power_raw, power, SDE_raw, SDE
 
 
+@numba.njit(cache=True)
+def _t0_scan(flux_p, w_p, signal, starts, total):
+    """Index of the start with the lowest chi2 (first one in case of ties).
+    flux_p/w_p: phase-sorted flux and weights, patched with their first
+    len(signal) values (cyclic windows without modulo)."""
+    best = numpy.inf
+    best_n = 0
+    dur = len(signal)
+    for n in range(len(starts)):
+        g = starts[n]
+        acc = 0.0
+        for k in range(dur):
+            f = flux_p[g + k]
+            acc += ((f - signal[k]) ** 2 - (f - 1.0) ** 2) * w_p[g + k]
+        value = total + acc
+        if value < best:
+            best = value
+            best_n = n
+    return best_n
+
+
+def _T0_trials(t, n_samples, dur, period, T0_fit_margin):
+    if T0_fit_margin == 0:
+        points = n_samples
+    else:
+        points = int(n_samples / (T0_fit_margin * dur))
+    points = min(points, n_samples)
+    # All trial T0s from the start of [t] to [t+period]
+    return numpy.linspace(start=numpy.min(t), stop=numpy.min(t) + period, num=points)
+
+
 def final_T0_fit(
     signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar, verbose
 ):
     """After the search, we know the best period, width and duration.
     But T0 was not preserved due to speed optimizations.
     Thus, iterate over T0s using the given parameters.
-    Fold to all T0s so that the transit is expected at phase = 0"""
+
+    Shifting T0 only rotates the phase circle, so the data are folded and
+    sorted once; every trial T0 is a cyclic rotation of that order. The chi2
+    outside of the template window follows from the total chi2 of a flat
+    model, so each trial costs O(duration) instead of O(N log N).
+    """
+    dur = len(signal)
+    scale = tls_constants.SIGNAL_DEPTH / (1 - depth)
+    signal = 1 - ((1 - signal) / scale)
+    n = numpy.size(y)
+    T0_array = _T0_trials(t, n, dur, period, T0_fit_margin)
+
+    if verbose:
+        print("Searching for best T0 for period", format(period, ".5f"), "days")
+
+    # Phases relative to the first trial T0 = min(t); trial Tx = min(t) + c * P
+    t_min = numpy.min(t)
+    phases = fold(time=t, period=period, T0=t_min)
+    order = numpy.argsort(phases, kind="mergesort")
+    phases_sorted = phases[order]
+    flux = y[order]
+    weights = 1 / dy[order] ** 2
+    c = (T0_array - t_min) / period
+    # Trial Tx: the sorted sequence starts at the first phase >= c (cyclic) and
+    # is rolled by int(dur/2)+1 so that the template window starts at index 0
+    starts = numpy.searchsorted(phases_sorted, c, side="left")
+    starts = (starts - (int(dur / 2) + 1)) % n
+    flux_p = numpy.concatenate([flux, flux[:dur]])
+    w_p = numpy.concatenate([weights, weights[:dur]])
+    total = numpy.sum((flux - 1) ** 2 * weights)
+    best = _t0_scan(flux_p, w_p, signal, starts.astype(numpy.int64), total)
+    return T0_array[best]
+
+
+def final_T0_fit_sorting(
+    signal, depth, t, y, dy, period, T0_fit_margin, show_progress_bar, verbose
+):
+    """Reference implementation of the final T0 fit (TLS <= 1.33): re-fold and
+    re-sort the data for every trial T0. O(points * N log N). Kept for tests;
+    final_T0_fit gives the same result in O(N log N + points * duration)."""
 
     dur = len(signal)
     scale = tls_constants.SIGNAL_DEPTH / (1 - depth)
@@ -230,8 +315,8 @@ def model_lightcurve(transit_times, period, t, model_transit_single):
     if numpy.all(numpy.isnan(full_x_array)):
         return None, None
     # Determine start and end of relevant time series, and crop it
-    start_cadence = numpy.nanargmax(full_x_array > min(t))
-    stop_cadence = numpy.nanargmax(full_x_array > max(t))
+    start_cadence = numpy.nanargmax(full_x_array > numpy.min(t))
+    stop_cadence = numpy.nanargmax(full_x_array > numpy.max(t))
     return (
         full_y_array[start_cadence:stop_cadence],
         full_x_array[start_cadence:stop_cadence],
@@ -277,7 +362,7 @@ def calculate_fill_factor(t):
     """Return the fraction of existing cadences, assuming constant cadences"""
 
     average_cadence = numpy.median(numpy.diff(t))
-    span = max(t) - min(t)
+    span = numpy.max(t) - numpy.min(t)
     theoretical_cadences = span / average_cadence
     return (len(t) - 1) / theoretical_cadences
 
@@ -293,7 +378,7 @@ def count_stats(t, y, transit_times, transit_duration_in_days):
     in_transit_count = 0
     after_transit_count = 0
     before_transit_count = 0
-    t_min, t_max = min(t), max(t)
+    t_min, t_max = numpy.min(t), numpy.max(t)
 
     for mid_transit in transit_times:
         T0 = mid_transit - 1.5 * transit_duration_in_days  # 1 duration before ingress

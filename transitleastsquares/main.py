@@ -149,7 +149,7 @@ class transitleastsquares:
 
         self._log(
             f"Searching {len(self.y)} data points, {len(periods)} periods from "
-            f"{round(min(periods), 3)} to {round(max(periods), 3)} days"
+            f"{round(numpy.min(periods), 3)} to {round(numpy.max(periods), 3)} days"
         )
         if self.use_threads == multiprocessing.cpu_count():
             self._log(f"Using all {self.use_threads} CPU threads")
@@ -174,7 +174,9 @@ class transitleastsquares:
         )
 
         # A period without any fit keeps best_depth == 0
-        no_transits_were_fit = numpy.all(found.depths == 0) or (max(chi2) == min(chi2))
+        no_transits_were_fit = numpy.all(found.depths == 0) or (
+            numpy.max(chi2) == numpy.min(chi2)
+        )
         if no_transits_were_fit:
             warnings.warn('No transit were fit. Try smaller "transit_depth_min"')
             r.update(_NO_FIT_RESULTS)

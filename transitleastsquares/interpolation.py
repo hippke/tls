@@ -5,7 +5,7 @@ from math import floor
 import numba
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, cache=True)
 def interpolation_search(x, z):
     n = len(x)
     assert n > 1
@@ -27,7 +27,7 @@ def interpolation_search(x, z):
     return imin
 
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, cache=True)
 def lerp(y, theta):
     return (1 - theta) * y[..., 0] + theta * y[..., 1]
 
@@ -45,7 +45,7 @@ class interp1d:
         (self._index, self._theta) = self._locate(x_new, x)
 
     @staticmethod
-    @numba.guvectorize("(i8[:],f8[:],f8[:],f8[:])", "(m),(m),(n)->(m)")
+    @numba.guvectorize("(i8[:],f8[:],f8[:],f8[:])", "(m),(m),(n)->(m)", cache=True)
     def _linear(index, theta, y, y_new):
         for j, (i, t) in enumerate(zip(index, theta)):
             y_new[j] = lerp(y[i : i + 2], t)
@@ -53,7 +53,7 @@ class interp1d:
     def __call__(self, y):
         return self._linear(self._index, self._theta, y)
 
-    @numba.guvectorize("(f8[:],f8[:],i8[:],f8[:])", "(),(n)->(),()")
+    @numba.guvectorize("(f8[:],f8[:],i8[:],f8[:])", "(),(n)->(),()", cache=True)
     def _locate(x_new, x, index, theta):
         index[0] = i = interpolation_search(x, x_new[0])
         theta[0] = (x_new[0] - x[i]) / (x[i + 1] - x[i])

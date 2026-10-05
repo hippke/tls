@@ -11,8 +11,11 @@ import warnings
 import numpy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Golden set in use. v1 = TLS 1.33 + bug fixes, batman templates.
-GOLDEN_SET = os.environ.get("TLS_GOLDEN_SET", "v1")
+# Golden sets:
+#   v1 = TLS 1.33 + bug fixes, batman templates. Reproduced by the refactored
+#        code with TLS_GOLDEN_SET=v1 TLS_TRANSIT_MODEL=batman.
+#   v2 = own transit model (transit_model.py) instead of batman. Default.
+GOLDEN_SET = os.environ.get("TLS_GOLDEN_SET", "v2")
 GOLDEN_DIR = os.path.join(HERE, "golden", GOLDEN_SET)
 DATA = os.path.join(HERE, "data")
 
@@ -193,7 +196,10 @@ CASES = {
 
 
 def run(name):
-    from transitleastsquares import transitleastsquares
+    from transitleastsquares import tls_constants, transitleastsquares
+
+    if os.environ.get("TLS_TRANSIT_MODEL"):  # e.g. "batman" to check golden v1
+        tls_constants.TRANSIT_MODEL = os.environ["TLS_TRANSIT_MODEL"]
 
     loader, kw = CASES[name]
     t, y, dy = loader()
@@ -226,7 +232,9 @@ def compare(name, results, rtol=1e-9, atol=1e-12):
         if a.shape != b.shape:
             bad.append((k, f"shape {a.shape} != {b.shape}"))
             continue
-        if not numpy.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True):
+        # Spectra amplify chi2 rounding (~1e-13 relative) by 1/std(SR) ~ 1e4
+        key_atol = 1e-8 if k in ("power", "power_raw", "SR") else atol
+        if not numpy.allclose(a, b, rtol=rtol, atol=key_atol, equal_nan=True):
             d = numpy.nanmax(numpy.abs(a - b)) if a.size else 0
             bad.append((k, f"max abs diff {d:.3e}"))
     for k in cur:
