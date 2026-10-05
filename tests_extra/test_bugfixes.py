@@ -156,3 +156,13 @@ def test_reference_transit_long_duration_template():
     assert len(shape) == 500
     assert numpy.argmin(shape) in range(200, 300)  # transit bottom centred
     assert shape[0] > 0.9 and shape[-1] > 0.9  # edges near nominal flux
+
+def test_period_uncertainty_no_negative_index_wrap():
+    """Peak at the first period: the lower search wrapped to power[-1]."""
+    periods = numpy.linspace(1, 2, 10)
+    power = numpy.array([10, 9, 1, 0, 0, 0, 0, 0, 0, 0.0])
+    assert period_uncertainty(periods, power) == float("inf")
+    power = numpy.array([0, 1, 9, 10, 9, 1, 0, 0, 0, 0.0])
+    assert numpy.isclose(
+        period_uncertainty(periods, power), 0.5 * (periods[5] - periods[1])
+    )

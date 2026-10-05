@@ -93,6 +93,10 @@ def period_uncertainty(periods, power):
         idx = index_highest_power
         while True:
             idx -= 1
+            # BUGFIX: a negative index silently wrapped around to the end of
+            # the array (Python semantics) instead of raising -> wrong value
+            if idx < 0:
+                raise IndexError
             if power[idx] <= 0.5 * power[index_highest_power]:
                 idx_lower = idx
                 break
