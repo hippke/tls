@@ -410,9 +410,6 @@ def final_T0_fit(
     n = numpy.size(y)
     T0_array = _T0_trials(t, n, dur, period, T0_fit_margin)
 
-    if verbose:
-        print("Searching for best T0 for period", format(period, ".5f"), "days")
-
     # Phases relative to the first trial T0 = min(t); trial Tx = min(t) + c * P
     t_min = numpy.min(t)
     phases = fold(time=t, period=period, T0=t_min)
