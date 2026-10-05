@@ -110,11 +110,13 @@ def test_T0_search_margin():
 
 
 def test_coarse_to_fine_mode():
-    """Approximate fast mode: same detection, about 1/3 of the periods."""
+    """Approximate fast mode: same detection and SDE scale, full period grid
+    (unevaluated periods carry the nearest coarse chi2)."""
     t, y = lc()
     ref = transitleastsquares(t, y).power(use_threads=1, **Q)
     fast = transitleastsquares(t, y).power(use_threads=1, coarse_to_fine=True, **Q)
-    assert len(fast.periods) < 0.4 * len(ref.periods)
+    numpy.testing.assert_array_equal(fast.periods, ref.periods)
+    assert numpy.mean(fast.chi2 == ref.chi2) < 0.6  # most periods not evaluated
     assert abs(fast.period / ref.period - 1) < 1e-3
     assert abs(fast.T0 - ref.T0) < 0.01
-    assert fast.SDE > 0.7 * ref.SDE
+    assert abs(fast.SDE / ref.SDE - 1) < 0.1

@@ -172,16 +172,21 @@ class transitleastsquares:
         return self._results(found, durations, lc_cache_overview, lc_arr, backend)
 
     def _search_coarse_to_fine(self, backend, periods, lc_cache_overview, lc_arr):
-        """Approximate fast mode (PERFORMANCE_LOG.md, idea B5).
+        """Approximate fast mode (PERFORMANCE_LOG.md, idea B5; step 30).
 
         1. Search every `step`-th period (step = round(oversampling_factor)),
            i.e. a grid with oversampling ~1.
         2. Refine the K highest local maxima of the coarse power spectrum at
            full resolution (+-1 coarse step).
-        3. The coarse spectrum, with the winning coarse point replaced by the
-           best refined period, is returned and used for SDE and all
-           statistics (median kernel scaled to the coarse grid).
+        3. Return the full period grid: refined and coarse periods with their
+           own chi2, every other period with the chi2 of the nearest coarse
+           period. The statistics (SDE etc.) use this spectrum with the
+           normal median kernel. Nearest-value filling keeps the
+           distribution of the noise spectrum (linear interpolation would
+           smooth it and inflate the SDE by ~0.9).
         """
+        from transitleastsquares.backends import SearchResult
+
         step = int(round(self.oversampling_factor))
         K = 20 if self.coarse_to_fine is True else int(self.coarse_to_fine)
         fine = numpy.sort(numpy.asarray(periods))  # ascending
@@ -189,10 +194,9 @@ class transitleastsquares:
             return self._search(backend, periods, lc_cache_overview, lc_arr)
         coarse_idx = numpy.arange(0, len(fine), step)
         coarse = self._search(backend, fine[coarse_idx], lc_cache_overview, lc_arr)
-        self._spectra_oversampling = self.oversampling_factor / step
         if numpy.all(coarse.depths == 0):
             return coarse
-        _, _, power, _, _ = spectra(coarse.chi2, self._spectra_oversampling)
+        _, _, power, _, _ = spectra(coarse.chi2, self.oversampling_factor / step)
         chosen = []
         for j in numpy.argsort(power)[::-1]:  # K highest local maxima
             if all(abs(j - q) > 1 for q in chosen):
@@ -211,27 +215,29 @@ class transitleastsquares:
             )
         )
         refine = refine[refine % step != 0]  # coarse points are known
-        if len(refine) == 0:
-            return coarse
-        old_bar = self.show_progress_bar
-        self.show_progress_bar = False
-        try:
-            fine_found = self._search(backend, fine[refine], lc_cache_overview, lc_arr)
-        finally:
-            self.show_progress_bar = old_bar
-        # winning refined period: lowest chi2 among all refined points
-        b = int(numpy.argmin(fine_found.chi2))
-        jb = int(numpy.argmin(numpy.abs(coarse.periods - fine_found.periods[b])))
-        if fine_found.chi2[b] < coarse.chi2[jb]:
-            coarse.periods = coarse.periods.copy()
-            coarse.chi2 = coarse.chi2.copy()
-            coarse.rows = coarse.rows.copy()
-            coarse.depths = coarse.depths.copy()
-            coarse.periods[jb] = fine_found.periods[b]
-            coarse.chi2[jb] = fine_found.chi2[b]
-            coarse.rows[jb] = fine_found.rows[b]
-            coarse.depths[jb] = fine_found.depths[b]
-        return coarse
+        # full grid, nearest coarse value everywhere
+        near = numpy.clip(
+            numpy.rint(numpy.arange(len(fine)) / step).astype(int),
+            0,
+            len(coarse_idx) - 1,
+        )
+        out = SearchResult(
+            periods=fine,
+            chi2=coarse.chi2[near].copy(),
+            rows=coarse.rows[near].copy(),
+            depths=coarse.depths[near].copy(),
+        )
+        if len(refine):
+            old_bar = self.show_progress_bar
+            self.show_progress_bar = False
+            try:
+                ref = self._search(backend, fine[refine], lc_cache_overview, lc_arr)
+            finally:
+                self.show_progress_bar = old_bar
+            out.chi2[refine] = ref.chi2
+            out.rows[refine] = ref.rows
+            out.depths[refine] = ref.depths
+        return out
 
     # ---------------------------------------------------------------- results
     def _results(self, found, durations, lc_cache_overview, lc_arr, backend):
