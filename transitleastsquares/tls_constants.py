@@ -178,5 +178,4 @@ VALID_PARAMETERS = [
     "transit_template",
     "verbose",
     "backend",
-    "coarse_to_fine",
 ]

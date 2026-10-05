@@ -162,82 +162,8 @@ class transitleastsquares:
                 f"Using {self.use_threads} of {multiprocessing.cpu_count()} CPU threads"
             )
 
-        self._spectra_oversampling = self.oversampling_factor
-        if self.coarse_to_fine:
-            found = self._search_coarse_to_fine(
-                backend, periods, lc_cache_overview, lc_arr
-            )
-        else:
-            found = self._search(backend, periods, lc_cache_overview, lc_arr)
+        found = self._search(backend, periods, lc_cache_overview, lc_arr)
         return self._results(found, durations, lc_cache_overview, lc_arr, backend)
-
-    def _search_coarse_to_fine(self, backend, periods, lc_cache_overview, lc_arr):
-        """Approximate fast mode (PERFORMANCE_LOG.md, idea B5; step 30).
-
-        1. Search every `step`-th period (step = round(oversampling_factor)),
-           i.e. a grid with oversampling ~1.
-        2. Refine the K highest local maxima of the coarse power spectrum at
-           full resolution (+-1 coarse step).
-        3. Return the full period grid: refined and coarse periods with their
-           own chi2, every other period with the chi2 of the nearest coarse
-           period. The statistics (SDE etc.) use this spectrum with the
-           normal median kernel. Nearest-value filling keeps the
-           distribution of the noise spectrum (linear interpolation would
-           smooth it and inflate the SDE by ~0.9).
-        """
-        from transitleastsquares.backends import SearchResult
-
-        step = int(round(self.oversampling_factor))
-        K = 20 if self.coarse_to_fine is True else int(self.coarse_to_fine)
-        fine = numpy.sort(numpy.asarray(periods))  # ascending
-        if step < 2 or len(fine) < 4 * step:
-            return self._search(backend, periods, lc_cache_overview, lc_arr)
-        coarse_idx = numpy.arange(0, len(fine), step)
-        coarse = self._search(backend, fine[coarse_idx], lc_cache_overview, lc_arr)
-        if numpy.all(coarse.depths == 0):
-            return coarse
-        _, _, power, _, _ = spectra(coarse.chi2, self.oversampling_factor / step)
-        chosen = []
-        for j in numpy.argsort(power)[::-1]:  # K highest local maxima
-            if all(abs(j - q) > 1 for q in chosen):
-                chosen.append(int(j))
-            if len(chosen) == K:
-                break
-        refine = numpy.unique(
-            numpy.concatenate(
-                [
-                    numpy.arange(
-                        max(0, coarse_idx[j] - step + 1),
-                        min(len(fine), coarse_idx[j] + step),
-                    )
-                    for j in chosen
-                ]
-            )
-        )
-        refine = refine[refine % step != 0]  # coarse points are known
-        # full grid, nearest coarse value everywhere
-        near = numpy.clip(
-            numpy.rint(numpy.arange(len(fine)) / step).astype(int),
-            0,
-            len(coarse_idx) - 1,
-        )
-        out = SearchResult(
-            periods=fine,
-            chi2=coarse.chi2[near].copy(),
-            rows=coarse.rows[near].copy(),
-            depths=coarse.depths[near].copy(),
-        )
-        if len(refine):
-            old_bar = self.show_progress_bar
-            self.show_progress_bar = False
-            try:
-                ref = self._search(backend, fine[refine], lc_cache_overview, lc_arr)
-            finally:
-                self.show_progress_bar = old_bar
-            out.chi2[refine] = ref.chi2
-            out.rows[refine] = ref.rows
-            out.depths[refine] = ref.depths
-        return out
 
     # ---------------------------------------------------------------- results
     def _results(self, found, durations, lc_cache_overview, lc_arr, backend):
@@ -274,7 +200,7 @@ class transitleastsquares:
     ):
         t, y, dy = self.t, self.y, self.dy
         SR, power_raw, power, SDE_raw, SDE = spectra(
-            found.chi2, getattr(self, "_spectra_oversampling", self.oversampling_factor)
+            found.chi2, self.oversampling_factor
         )
         index_highest_power = numpy.argmax(power)
         period = found.periods[index_highest_power]
