@@ -17,8 +17,17 @@ class FusedBackend(ProcessPoolBackend):
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl, a2_approx=self.use_a2_approx(fp))
+        fp.set_pl(*self.pl_config(), a2_approx=self.use_a2_approx(fp))
         return fp
+
+    def pl_config(self):
+        """(min_length, max_stride, eps); eps can be overridden for
+        experiments with the environment variable TLS_PL_EPS."""
+        import os
+
+        if len(self.pl) < 3 or "TLS_PL_EPS" not in os.environ:
+            return self.pl
+        return (*self.pl[:2], float(os.environ["TLS_PL_EPS"]))
 
     def use_a2_approx(self, fp):
         """Idea U2: A2 from the window-mean weight if the weights are nearly
@@ -53,7 +62,7 @@ class FusedThreadsBackend(FusedBackend):
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl, a2_approx=self.use_a2_approx(fp))
+        fp.set_pl(*self.pl_config(), a2_approx=self.use_a2_approx(fp))
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -126,5 +135,5 @@ class FusedPLBackend(FusedBackend):
 
     name = "fused-pl"
     exact = False
-    pl = (64, 1 << 62, 1e-2)
+    pl = (64, 1 << 62, 2e-2)  # eps 2e-2: PERFORMANCE_LOG step 23
     a2_spread_max = 0.1  # U2 for nearly uniform weights (PERFORMANCE_LOG step 21)
