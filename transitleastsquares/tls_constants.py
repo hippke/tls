@@ -133,7 +133,9 @@ MINIMUM_PERIOD_GRID_SIZE = 100
 #                   depth, ~20 knots), so each correlation costs ~20 terms on
 #                   double prefix sums (approximate; closer to the exact
 #                   statistic than "fused-binned"; no loss of sensitivity in
-#                   injection-recovery tests)
+#                   injection-recovery tests). If the weights 1/dy^2 vary
+#                   by <= 10 % (std), A2 = sum(a^2 w) uses the window-mean
+#                   weight (PERFORMANCE_LOG step 21)
 #   "fused-binned"  previous default: stride-aligned bins for templates whose
 #                   phase shifts are thinned by T0_search_margin (stride >= 4)
 #   "fused"         same kernel, exact correlation (reference up to rounding)

@@ -226,6 +226,8 @@ def search_period_fused(
     pl_c,
     pl_sum,
     pl_sum2,
+    pl_a2_approx,
+    pl_w_max,
     fbuf,
     ibuf,
     vbuf,
@@ -243,6 +245,9 @@ def search_period_fused(
     pl_n[u] > 0, AR (and A2 for non-uniform weights) of template u come from
     pl_n[u] (pl_n2[u]) terms on double prefix sums; this takes precedence
     over the bins. Approximate unless every sample is a knot.
+    pl_a2_approx (non-uniform weights, PL templates only; idea U2): A2 from
+    the window-mean weight, sum(a^2) * mean(w over the window), instead of
+    the second PL correlation; pruning then uses A2_true <= sum(a^2) * w_max.
 
     prune: skip shifts whose gain provably cannot beat the best gain so far.
     With R2 = sum r^2 w over the window and Cauchy-Schwarz AR <= sqrt(A2 R2),
@@ -457,6 +462,9 @@ def search_period_fused(
         psum = pl_sum[u] * mu_rw
         psum2 = pl_sum2[u] * mu_w
         nb = nbins[u] if npl == 0 else 0
+        a2_win = pl_a2_approx and npl > 0 and not uniform_weights
+        a2_unit = sum_a2[u] / length
+        a2_wmax = sum_a2[u] * pl_w_max
         brw = rw[:0]
         bw = w[:0]
         ab = a_bin[:0]
@@ -499,6 +507,9 @@ def search_period_fused(
                     r2 = cum_r2[i + length] - cum_r2[i]
                     if uniform_weights:  # A2 known exactly
                         bound = 2 * k * numpy.sqrt(a2_const * r2) - k * k * a2_const
+                    elif a2_win:  # approximate A2 (U2); AR <= sqrt(A2_max R2)
+                        a2e = a2_unit * (cum_w[i + length] - cum_w[i])
+                        bound = 2 * k * numpy.sqrt(a2_wmax * r2) - k * k * a2e
                     else:  # 0 <= A2 <= a2b; maximum of the concave bound
                         a2b = amax2 * (cum_w[i + length] - cum_w[i])
                         if a2b * k * k >= r2:
@@ -511,6 +522,8 @@ def search_period_fused(
                     ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
                     if uniform_weights:
                         a2 = a2_const
+                    elif a2_win:
+                        a2 = a2_unit * (cum_w[i + length] - cum_w[i])
                     else:
                         a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
                 elif nb > 0:
@@ -774,11 +787,12 @@ class FusedProblem:
         self.set_binning(0)
         self.set_pl(0)
 
-    def set_pl(self, min_length, max_stride=4, eps=1e-2):
+    def set_pl(self, min_length, max_stride=4, eps=1e-2, a2_approx=False):
         """Piecewise-linear templates (idea L3, see pl_templates) for
         templates with length >= min_length and shift stride < max_stride;
-        min_length <= 0: off."""
-        self.pl_args = (min_length, max_stride, eps)
+        min_length <= 0: off. a2_approx: A2 from the window-mean weight
+        (idea U2, approximate; for nearly uniform weights)."""
+        self.pl_args = (min_length, max_stride, eps, a2_approx)
         if min_length <= 0:
             min_length = 1 << 62
         self.pl = pl_templates(
@@ -787,7 +801,7 @@ class FusedProblem:
             min_length,
             max_stride,
             eps,
-        )
+        ) + (bool(a2_approx), float(numpy.max(self.inv_dy2)))
 
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
@@ -903,6 +917,8 @@ def search_periods_fused_parallel(
     pl_c,
     pl_sum,
     pl_sum2,
+    pl_a2_approx,
+    pl_w_max,
     n_chunks,
 ):
     """search_period_fused for many periods, numba threads (prange over
@@ -956,6 +972,8 @@ def search_periods_fused_parallel(
                 pl_c,
                 pl_sum,
                 pl_sum2,
+                pl_a2_approx,
+                pl_w_max,
                 fbuf,
                 ibuf,
                 vbuf,

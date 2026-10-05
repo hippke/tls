@@ -10,14 +10,26 @@ class FusedBackend(ProcessPoolBackend):
     pieces = 0  # piecewise-constant templates (B1b); 0: off
     dtype = "float64"  # dot-product precision
     pl = (0,)  # piecewise-linear templates (L3): (min_length, max_stride, eps)
+    a2_spread_max = 0.0  # U2 (A2 from the window-mean weight) if spread <= this
 
     def prepare(self, problem):
         fp = FusedProblem(problem)
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl)
+        fp.set_pl(*self.pl, a2_approx=self.use_a2_approx(fp))
         return fp
+
+    def use_a2_approx(self, fp):
+        """Idea U2: A2 from the window-mean weight if the weights are nearly
+        uniform (relative std <= a2_spread_max; env TLS_PL_A2_SPREAD_MAX)."""
+        import os
+
+        import numpy
+
+        limit = float(os.environ.get("TLS_PL_A2_SPREAD_MAX", self.a2_spread_max))
+        w = fp.inv_dy2
+        return bool(limit > 0 and numpy.std(w) <= limit * numpy.mean(w))
 
     def evaluate(self, state, period):
         return state.search(period)
@@ -41,7 +53,7 @@ class FusedThreadsBackend(FusedBackend):
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
-        fp.set_pl(*self.pl)
+        fp.set_pl(*self.pl, a2_approx=self.use_a2_approx(fp))
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -115,3 +127,4 @@ class FusedPLBackend(FusedBackend):
     name = "fused-pl"
     exact = False
     pl = (64, 1 << 62, 1e-2)
+    a2_spread_max = 0.1  # U2 for nearly uniform weights (PERFORMANCE_LOG step 21)
