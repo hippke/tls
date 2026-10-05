@@ -120,6 +120,8 @@ class FusedThreadsBackend(FusedBackend):
                         *fp.binning,
                         *fp.pl,
                         int(min(use_threads, numba.config.NUMBA_NUM_THREADS)),
+                        fp.invariants,
+                        fp.index_dtype,
                     )
                 )
                 if progress is not None:

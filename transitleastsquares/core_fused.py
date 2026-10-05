@@ -141,8 +141,13 @@ def fold_sort(t, y, inv_dy2, period):
     return flux, w
 
 
+def sort_index_dtype(n):
+    """Counts include the end offset N; use compact storage only if it fits."""
+    return numpy.int32 if n <= numpy.iinfo(numpy.int32).max else numpy.int64
+
+
 def workspace_size(n, maxw):
-    """Sizes (float64, int64, value buffer) of the work buffers of
+    """Sizes (float64, integer, value buffer) of the work buffers of
     search_period_fused."""
     m = n + maxw + 1
     return 4 * n + 6 * m + 16, 2 * n + 2, 6 * m
@@ -197,6 +202,17 @@ def _pl_eval(c, pos, dd):
 
 
 @numba.njit(fastmath=True, cache=True)
+def _input_means(y, inv_dy2):
+    """Period-independent centering constants for the double prefix sums."""
+    mu_rw = 0.0
+    mu_w = 0.0
+    for i in range(len(y)):
+        mu_rw += (1.0 - y[i]) * inv_dy2[i]
+        mu_w += inv_dy2[i]
+    return mu_rw / len(y), mu_w / len(y)
+
+
+@numba.njit(fastmath=True, cache=True)
 def search_period_fused(
     period,
     t,
@@ -240,11 +256,15 @@ def search_period_fused(
     fbuf,
     ibuf,
     vbuf,
+    invariants,
 ):
     """Returns (chi2_min, template row, depth) for one trial period.
 
     fbuf/ibuf: preallocated work buffers (see workspace_size). Reusing them
     across periods avoids ~1 ms of page faults per period for N ~ 1e5.
+
+    invariants: input means (rw, w) and per-template max(a^2), computed once
+    per problem/precision rather than once per period.
 
     nbins/boff/a_bin/a2_bin: stride-binned templates (see bin_templates). With
     nbins[u] == 0 (default, exact) the full-resolution correlation is used;
@@ -325,17 +345,12 @@ def search_period_fused(
     )
     w0 = inv_dy2[0]
     has_pl = len(pl_c) > 0
+    # U2 obtains A2 from cum_w; only the full weighted-PL path reads dd_w.
+    has_pl_w = has_pl and not pl_a2_approx
     # Double prefix sums for the piecewise-linear templates (in the same
     # pass; mean removed for precision, its contribution mu * sum(p) is added
     # back). The means come from the unsorted data (any constant is exact).
-    mu_rw = 0.0
-    mu_w = 0.0
-    if has_pl:
-        for i in range(n):
-            mu_rw += (1.0 - y[i]) * inv_dy2[i]
-            mu_w += inv_dy2[i]
-        mu_rw /= n
-        mu_w /= n
+    mu_rw, mu_w, max_a2 = invariants
     cum_rw[0] = 0.0
     cum[0] = 0.0
     cum_r2[0] = 0.0
@@ -381,6 +396,7 @@ def search_period_fused(
                 a_rw += s_rw
                 dd_rw[k + 1] = a_rw
                 s_rw += rk - mu_rw
+            if has_pl_w:
                 a_w += s_w
                 dd_w[k + 1] = a_w
                 s_w += wk - mu_w
@@ -480,10 +496,7 @@ def search_period_fused(
             ov = overshoot[u]
             a2_const = sum_a2[u] * w0
             prof = profile[off : off + length]
-            amax2 = 0.0
-            for j in range(length):
-                if prof[j] * prof[j] > amax2:
-                    amax2 = prof[j] * prof[j]
+            amax2 = max_a2[u]
 
             xth = 1
             if T0_search_margin > 0 and d > T0_search_margin:
@@ -912,8 +925,10 @@ class FusedProblem:
         self.y = numpy.ascontiguousarray(problem.y, dtype=float)
         dy = numpy.asarray(problem.dy, dtype=float)
         self.inv_dy2 = 1 / dy**2
+        self.input_means = _input_means(self.y, self.inv_dy2)
         self.uniform_weights = bool(numpy.all(self.inv_dy2 == self.inv_dy2[0]))
         self.time_span = float(numpy.max(self.t) - numpy.min(self.t))
+        self.index_dtype = sort_index_dtype(len(self.t))
         self.templates = flatten_templates(problem.lc_arr, problem.lc_cache_overview)
         self.problem = problem
         self.prune = True
@@ -989,6 +1004,17 @@ class FusedProblem:
             overshoot,
             sum_a2,
         )
+        # Use the kernel's profile precision, including experimental float32.
+        if getattr(self, "_invariants_dtype", None) != self.dtype:
+            kernel_profile = self.templates_kernel[4]
+            max_a2 = numpy.array(
+                [
+                    numpy.max(kernel_profile[o : o + n] ** 2, initial=0.0)
+                    for o, n in zip(offsets, lengths)
+                ]
+            )
+            self.invariants = (*self.input_means, max_a2)
+            self._invariants_dtype = self.dtype
 
     def search(self, period):
         p = self.problem
@@ -1011,6 +1037,7 @@ class FusedProblem:
             *self.binning,
             *self.pl,
             *self.workspace(),
+            self.invariants,
         )
         return period, chi2, row, depth
 
@@ -1020,7 +1047,7 @@ class FusedProblem:
             nf, ni, nv = workspace_size(len(self.t), maxw)
             self._ws = (
                 numpy.empty(nf),
-                numpy.empty(ni, dtype=numpy.int64),
+                numpy.empty(ni, dtype=self.index_dtype),
                 numpy.empty(nv, dtype=self.dtype),
             )
         return self._ws
@@ -1073,6 +1100,8 @@ def search_periods_fused_parallel(
     scout_every,
     ls_depth,
     n_chunks,
+    invariants,
+    index_dtype,
 ):
     """search_period_fused for many periods, numba threads (prange over
     n_chunks chunks, each with its own work buffers)."""
@@ -1087,7 +1116,7 @@ def search_periods_fused_parallel(
     ni = 2 * n + 2
     for c_idx in numba.prange(n_chunks):
         fbuf = numpy.empty(nf)
-        ibuf = numpy.empty(ni, dtype=numpy.int64)
+        ibuf = numpy.empty(ni, dtype=index_dtype)
         vbuf = numpy.empty(6 * m, dtype=profile.dtype)
         for p in range(c_idx, n_p, n_chunks):
             c, r, d = search_period_fused(
@@ -1133,6 +1162,7 @@ def search_periods_fused_parallel(
                 fbuf,
                 ibuf,
                 vbuf,
+                invariants,
             )
             chi2[p] = c
             row[p] = r

@@ -21,6 +21,7 @@ CASES = {
     "gaps": lambda rng: numpy.concatenate(
         [numpy.arange(0, 10, 0.01), numpy.arange(50, 60, 0.01)]
     ),
+    "clustered": lambda rng: rng.uniform(0, 1e-5, 5000),
 }
 
 
@@ -64,3 +65,42 @@ def test_fold_sort_without_weights(case):
     )
     numpy.testing.assert_array_equal(flux, reference(t, y, w, 1.7)[0])
     assert numpy.all(w_out == -7.0)
+
+
+@pytest.mark.parametrize("case", list(CASES))
+@pytest.mark.parametrize("move_w", [True, False])
+@pytest.mark.parametrize("dtype", [numpy.int32, numpy.int64])
+def test_fold_sort_integer_workspaces(case, move_w, dtype):
+    """Compact and wide storage preserve stable ties and the clustered fallback."""
+    from transitleastsquares.core_fused import fold_sort_into
+
+    rng = numpy.random.default_rng(2)
+    t = CASES[case](rng)
+    n = len(t)
+    y = rng.normal(1, 1e-3, n)
+    weights = rng.uniform(0.5, 2.0, n)
+    flux = numpy.empty(n)
+    w_out = numpy.full(n, -7.0)
+    phases, keys = numpy.empty(n), numpy.empty(n)
+    counts, bucket = numpy.empty(n + 1, dtype=dtype), numpy.empty(n, dtype=dtype)
+    for period in [0.37, 3.3, 41.0]:
+        fold_sort_into(
+            t, y, weights, period, phases, counts, bucket, keys, flux, w_out, move_w
+        )
+        expected_f, expected_w = reference(t, y, weights, period)
+        numpy.testing.assert_array_equal(flux, expected_f)
+        if move_w:
+            numpy.testing.assert_array_equal(w_out, expected_w)
+        else:
+            assert numpy.all(w_out == -7.0)
+
+
+def test_sort_workspace_capacity_boundary():
+    """The final count can equal N, including at the signed-32-bit boundary."""
+    from transitleastsquares.core_fused import sort_index_dtype
+
+    limit = numpy.iinfo(numpy.int32).max
+    for n in [1, 100_000, limit, limit + 1]:
+        dtype = sort_index_dtype(n)
+        assert int(dtype(n)) == n
+        assert numpy.dtype(dtype).itemsize == (4 if n <= limit else 8)
