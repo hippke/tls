@@ -66,8 +66,17 @@ class transitleastsquares(object):
             n_transits_min=self.n_transits_min,
         )
 
+        # BUGFIX: the duration grid previously ignored the user-supplied stellar
+        # limits (always used the tls_constants defaults), so e.g. R_star_max > 3.5
+        # could never produce longer trial durations than the default.
         durations = duration_grid(
-            periods, shortest=1 / len(self.t), log_step=self.duration_grid_step
+            periods,
+            shortest=1 / len(self.t),
+            log_step=self.duration_grid_step,
+            R_star_min=self.R_star_min,
+            R_star_max=self.R_star_max,
+            M_star_min=self.M_star_min,
+            M_star_max=self.M_star_max,
         )
 
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))

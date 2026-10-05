@@ -32,17 +32,30 @@ def T14(
     return result
 
 
-def duration_grid(periods, shortest, log_step=tls_constants.DURATION_GRID_STEP):
-    
+def duration_grid(
+    periods,
+    shortest,
+    log_step=tls_constants.DURATION_GRID_STEP,
+    R_star_min=tls_constants.R_STAR_MIN,
+    R_star_max=tls_constants.R_STAR_MAX,
+    M_star_min=tls_constants.M_STAR_MIN,
+    M_star_max=tls_constants.M_STAR_MAX,
+):
+    """Logarithmic grid of trial durations (fractions of the period).
+
+    BUGFIX: the stellar limits used to be hard-wired to the tls_constants
+    defaults, ignoring user-supplied R_star_min/max, M_star_min/max (which are
+    used per period in core.search_period). Defaults are unchanged."""
+
     duration_max = T14(
-        R_s=tls_constants.R_STAR_MAX,
-        M_s=tls_constants.M_STAR_MAX,
+        R_s=R_star_max,
+        M_s=M_star_max,
         P=min(periods),
         small=False  # large planet for long transit duration
     )
     duration_min = T14(
-        R_s=tls_constants.R_STAR_MIN,
-        M_s=tls_constants.M_STAR_MIN,
+        R_s=R_star_min,
+        M_s=M_star_min,
         P=max(periods),
         small=True  # small planet for short transit duration
     )

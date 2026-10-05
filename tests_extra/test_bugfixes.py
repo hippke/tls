@@ -111,3 +111,23 @@ def test_user_template_parameters_not_overwritten():
         tls_constants.DEFAULT_PERIOD,
         tls_constants.DEFAULT_INC,
     )
+
+def test_duration_grid_honours_stellar_limits():
+    # long periods only, so that the 0.12 cap (FRACTIONAL_TRANSIT_DURATION_MAX)
+    # does not hide the difference
+    periods = period_grid(R_star=1, M_star=1, time_span=200, period_min=20)
+    d_default = duration_grid(periods, shortest=1e-4, log_step=1.1)
+    d_narrow = duration_grid(
+        periods,
+        shortest=1e-4,
+        log_step=1.1,
+        R_star_min=0.8,
+        R_star_max=1.2,
+        M_star_min=0.8,
+        M_star_max=1.2,
+    )
+    assert max(d_narrow) < max(d_default)
+    assert min(d_narrow) > min(d_default)
+    # defaults unchanged vs. the repo test (test_duration_grid.py)
+    d = duration_grid(period_grid(1, 1, 20, 0, 999, 3), log_step=1.05, shortest=2)
+    assert len(d) == 69
