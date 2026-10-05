@@ -177,3 +177,10 @@ def test_constructor_verbose_false_is_respected():
             show_progress_bar=False, use_threads=1, period_min=2.5, period_max=3.5
         )
     assert buf.getvalue() == ""
+
+def test_period_grid_tiny_radius_clamped_to_0_01():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a = period_grid(R_star=0.001, M_star=1, time_span=20)
+        b = period_grid(R_star=0.01, M_star=1, time_span=20)
+    numpy.testing.assert_array_equal(a, b)

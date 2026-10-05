@@ -88,7 +88,7 @@ def period_grid(
             + ")"
         )
         warnings.warn(text)
-        R_star = 0.1
+        R_star = 0.01  # BUGFIX: was set to 0.1, contradicting the warning text
 
     if R_star > 10000:
         text = (
