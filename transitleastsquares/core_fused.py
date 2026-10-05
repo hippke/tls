@@ -151,6 +151,12 @@ def workspace_size(n, maxw):
 # Pruning pays off only if the dot product is much more expensive than the bound
 PRUNE_MIN_LENGTH = 48
 
+# Scout durations (L8) only for light curves with >= SCOUT_MIN_N points: for
+# very short ones the per-period optimum of noise is less coherent across
+# durations (noise-only N = 150: 15 % of the periods change, up to 3 %;
+# N >= 2000: ~1 %, <= 7e-4; PERFORMANCE_LOG step 28). Small N is fast anyway.
+SCOUT_MIN_N = 2000
+
 
 # The dot products take array *views* (slices). Indexing the full arrays with
 # rw[i + j] inside a loop over i with a variable step prevents LLVM from
@@ -229,6 +235,7 @@ def search_period_fused(
     pl_a2_approx,
     pl_w_max,
     t0_coarsen,
+    scout_every,
     fbuf,
     ibuf,
     vbuf,
@@ -252,6 +259,9 @@ def search_period_fused(
     t0_coarsen = c > 1 (idea L5, approximate): shifts on a c times coarser
     grid (where int(c * margin * width) >= 2), then the c - 1 fine-grid
     shifts on each side of the best coarse shift of every duration.
+    scout_every = s > 0 (idea L8, approximate): only every s-th allowed
+    duration (and the longest) scans all phases; the others scan windows of
+    +- one duration around the best centres found by these scouts.
 
     prune: skip shifts whose gain provably cannot beat the best gain so far.
     With R2 = sum r^2 w over the window and Cauchy-Schwarz AR <= sqrt(A2 R2),
@@ -434,153 +444,217 @@ def search_period_fused(
     # Shifts with gain <= seed (minus rounding margin) cannot be the result
     threshold = seed * (1 - 1e-9)
 
+    # Scout durations (idea L8): allowed durations with ordinal % scout_every
+    # == 0, and the longest, scan all phases first (upass 0); the others
+    # (upass 1) only windows around the scouts' best centres.
+    n_allowed = 0
     for u in range(len(widths)):
-        d = widths[u]
-        if d < width_min or d > width_max:
-            continue
-        row = rows[u]
-        off = offsets[u]
-        length = lengths[u]
-        ov = overshoot[u]
-        a2_const = sum_a2[u] * w0
-        prof = profile[off : off + length]
-        amax2 = 0.0
-        for j in range(length):
-            if prof[j] * prof[j] > amax2:
-                amax2 = prof[j] * prof[j]
+        if width_min <= widths[u] <= width_max:
+            n_allowed += 1
+    use_scouts = scout_every > 1 and n_allowed > scout_every and n >= SCOUT_MIN_N
+    cand_c = numpy.empty(len(widths) + 1, dtype=numpy.int64)
+    n_cand = 0
+    win_lo = numpy.empty(2 * len(widths) + 2, dtype=numpy.int64)
+    win_hi = numpy.empty(2 * len(widths) + 2, dtype=numpy.int64)
+    for upass in range(2 if use_scouts else 1):
+        ordinal = -1
+        for u in range(len(widths)):
+            d = widths[u]
+            if d < width_min or d > width_max:
+                continue
+            ordinal += 1
+            is_scout = (
+                not use_scouts or ordinal % scout_every == 0 or ordinal == n_allowed - 1
+            )
+            if is_scout != (upass == 0):
+                continue
+            row = rows[u]
+            off = offsets[u]
+            length = lengths[u]
+            ov = overshoot[u]
+            a2_const = sum_a2[u] * w0
+            prof = profile[off : off + length]
+            amax2 = 0.0
+            for j in range(length):
+                if prof[j] * prof[j] > amax2:
+                    amax2 = prof[j] * prof[j]
 
-        xth = 1
-        if T0_search_margin > 0 and d > T0_search_margin:
-            xth = int(d / (1 / T0_search_margin))
-            if xth < 1:
-                xth = 1
-        n_shifts = m - d + 1
-        if xth == 1 and n_shifts > n:
-            n_shifts = n  # shifts >= n repeat shifts already tested
+            xth = 1
+            if T0_search_margin > 0 and d > T0_search_margin:
+                xth = int(d / (1 / T0_search_margin))
+                if xth < 1:
+                    xth = 1
+            n_shifts = m - d + 1
+            if xth == 1 and n_shifts > n:
+                n_shifts = n  # shifts >= n repeat shifts already tested
 
-        # Stride-binned correlation (approximate, only if nbins[u] > 0)
-        npl = pl_n[u]
-        pc = pl_c[pl_off[u] : pl_off[u] + npl]
-        pp = pl_pos[pl_off[u] : pl_off[u] + npl]
-        pc2 = pl_c[pl_off2[u] : pl_off2[u] + pl_n2[u]]
-        pp2 = pl_pos[pl_off2[u] : pl_off2[u] + pl_n2[u]]
-        psum = pl_sum[u] * mu_rw
-        psum2 = pl_sum2[u] * mu_w
-        nb = nbins[u] if npl == 0 else 0
-        a2_win = pl_a2_approx and npl > 0 and not uniform_weights
-        a2_unit = sum_a2[u] / length
-        a2_wmax = sum_a2[u] * pl_w_max
-        brw = rw[:0]
-        bw = w[:0]
-        ab = a_bin[:0]
-        a2bin = a2_bin[:0]
-        rem0 = 0
-        prem = prof
-        bs = bsize[u]
-        q_row = 0  # bins per row of the (decimated) data bin table
-        multirow = False
-        if nb > 0:
-            # Data bin sums of size bs. Row r holds the bins starting at
-            # r, r + bs, r + 2 bs, ... If all shifts are multiples of bs
-            # (aligned case, B1) only row 0 is needed.
-            multirow = xth % bs != 0
-            n_rows = bs if multirow else 1
-            q_row = m // bs + 1
-            for r in range(n_rows):
-                base = r * q_row
-                for kb in range(q_row):
-                    lo = r + kb * bs
-                    hi = lo + bs
-                    if hi > m:
-                        break
-                    brw_buf[base + kb] = cum_rw[hi] - cum_rw[lo]
-                    if not uniform_weights:
-                        bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
-            brw = brw_buf
-            bw = bw_buf
-            ab = a_bin[boff[u] : boff[u] + nb]
-            a2bin = a2_bin[boff[u] : boff[u] + nb]
-            rem0 = nb * bs
-            prem = prof[rem0:]
+            # Stride-binned correlation (approximate, only if nbins[u] > 0)
+            npl = pl_n[u]
+            pc = pl_c[pl_off[u] : pl_off[u] + npl]
+            pp = pl_pos[pl_off[u] : pl_off[u] + npl]
+            pc2 = pl_c[pl_off2[u] : pl_off2[u] + pl_n2[u]]
+            pp2 = pl_pos[pl_off2[u] : pl_off2[u] + pl_n2[u]]
+            psum = pl_sum[u] * mu_rw
+            psum2 = pl_sum2[u] * mu_w
+            nb = nbins[u] if npl == 0 else 0
+            a2_win = pl_a2_approx and npl > 0 and not uniform_weights
+            a2_unit = sum_a2[u] / length
+            a2_wmax = sum_a2[u] * pl_w_max
+            brw = rw[:0]
+            bw = w[:0]
+            ab = a_bin[:0]
+            a2bin = a2_bin[:0]
+            rem0 = 0
+            prem = prof
+            bs = bsize[u]
+            q_row = 0  # bins per row of the (decimated) data bin table
+            multirow = False
+            if nb > 0:
+                # Data bin sums of size bs. Row r holds the bins starting at
+                # r, r + bs, r + 2 bs, ... If all shifts are multiples of bs
+                # (aligned case, B1) only row 0 is needed.
+                multirow = xth % bs != 0
+                n_rows = bs if multirow else 1
+                q_row = m // bs + 1
+                for r in range(n_rows):
+                    base = r * q_row
+                    for kb in range(q_row):
+                        lo = r + kb * bs
+                        hi = lo + bs
+                        if hi > m:
+                            break
+                        brw_buf[base + kb] = cum_rw[hi] - cum_rw[lo]
+                        if not uniform_weights:
+                            bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
+                brw = brw_buf
+                bw = bw_buf
+                ab = a_bin[boff[u] : boff[u] + nb]
+                a2bin = a2_bin[boff[u] : boff[u] + nb]
+                rem0 = nb * bs
+                prem = prof[rem0:]
 
-        # coarse grid (stride xc) plus refinement around the best coarse shift
-        xc = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
-        dur_gain = -1e300
-        dur_i = -1
-        i_star = -1
-        for pass_ in range(3 if xc > xth else 1):
-            lo, hi, st = 0, n_shifts, xc
-            if pass_ > 0:  # fine shifts left (1) and right (2) of i_star
-                if dur_i < 0:
-                    break
-                if pass_ == 1:
-                    i_star = dur_i
-                    lo = max(0, i_star - (xc - xth))
-                    hi = i_star
-                else:
-                    lo = i_star + xth
-                    hi = min(n_shifts, i_star + (xc - xth) + 1)
-                st = xth
-            for i in range(lo, hi, st):
-                mean = 1 - (cum[i + d] - cum[i]) / d
-                if mean > transit_depth_min:
-                    target_depth = mean * ov
-                    k = 1 / (signal_depth / target_depth)
-                    if prune and length >= PRUNE_MIN_LENGTH:
-                        r2 = cum_r2[i + length] - cum_r2[i]
-                        if uniform_weights:  # A2 known exactly
-                            bound = (
-                                2 * k * numpy.sqrt(a2_const * r2) - k * k * a2_const
-                            )
-                        elif a2_win:  # approximate A2 (U2); AR <= sqrt(A2_max R2)
-                            a2e = a2_unit * (cum_w[i + length] - cum_w[i])
-                            bound = 2 * k * numpy.sqrt(a2_wmax * r2) - k * k * a2e
-                        else:  # 0 <= A2 <= a2b; maximum of the concave bound
-                            a2b = amax2 * (cum_w[i + length] - cum_w[i])
-                            if a2b * k * k >= r2:
-                                bound = r2
+            # coarse grid (stride xc) plus refinement around the best coarse shift
+            xc = _coarse_stride(d, xth, T0_search_margin, t0_coarsen)
+            dur_gain = -1e300
+            dur_i = -1
+            i_star = -1
+            # windows of pass 0: all shifts, or (non-scout) +- d around the
+            # scouts' best centres (wrapped at the phase boundary)
+            n_win = 1
+            win_lo[0] = 0
+            win_hi[0] = n_shifts
+            if not is_scout:
+                n_win = 0
+                period_n = n  # shift i and i + n are the same phase
+                for q in range(n_cand):
+                    lo = cand_c[q] - d // 2 - d
+                    hi = cand_c[q] - d // 2 + d + 1
+                    lo = (lo // xc) * xc
+                    if lo < 0:
+                        win_lo[n_win] = max(0, ((lo + period_n) // xc) * xc)
+                        win_hi[n_win] = min(n_shifts, period_n)
+                        n_win += 1
+                        lo = 0
+                    if hi > n_shifts:
+                        win_lo[n_win] = 0
+                        win_hi[n_win] = min(n_shifts, hi - period_n)
+                        n_win += 1
+                        hi = n_shifts
+                    if hi > lo:
+                        win_lo[n_win] = lo
+                        win_hi[n_win] = hi
+                        n_win += 1
+            for pass_ in range(3 if xc > xth else 1):
+                for wdx in range(n_win if pass_ == 0 else 1):
+                    lo, hi, st = win_lo[wdx], win_hi[wdx], xc
+                    if pass_ > 0:  # fine shifts left (1) and right (2) of i_star
+                        if dur_i < 0:
+                            break
+                        if pass_ == 1:
+                            i_star = dur_i
+                            lo = max(0, i_star - (xc - xth))
+                            hi = i_star
+                        else:
+                            lo = i_star + xth
+                            hi = min(n_shifts, i_star + (xc - xth) + 1)
+                        st = xth
+                    for i in range(lo, hi, st):
+                        mean = 1 - (cum[i + d] - cum[i]) / d
+                        if mean > transit_depth_min:
+                            target_depth = mean * ov
+                            k = 1 / (signal_depth / target_depth)
+                            if prune and length >= PRUNE_MIN_LENGTH:
+                                r2 = cum_r2[i + length] - cum_r2[i]
+                                if uniform_weights:  # A2 known exactly
+                                    bound = (
+                                        2 * k * numpy.sqrt(a2_const * r2)
+                                        - k * k * a2_const
+                                    )
+                                elif a2_win:  # approximate A2 (U2)
+                                    # AR <= sqrt(A2_max R2)
+                                    a2e = a2_unit * (cum_w[i + length] - cum_w[i])
+                                    bound = (
+                                        2 * k * numpy.sqrt(a2_wmax * r2) - k * k * a2e
+                                    )
+                                else:  # 0 <= A2 <= a2b; maximum of the concave bound
+                                    a2b = amax2 * (cum_w[i + length] - cum_w[i])
+                                    if a2b * k * k >= r2:
+                                        bound = r2
+                                    else:
+                                        bound = (
+                                            2 * k * numpy.sqrt(a2b * r2) - k * k * a2b
+                                        )
+                                if bound * (1 + 1e-9) <= best_gain or bound < threshold:
+                                    continue
+                            if npl > 0:
+                                ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
+                                if uniform_weights:
+                                    a2 = a2_const
+                                elif a2_win:
+                                    a2 = a2_unit * (cum_w[i + length] - cum_w[i])
+                                else:
+                                    a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
+                            elif nb > 0:
+                                if multirow:
+                                    q = (i % bs) * q_row + i // bs
+                                else:
+                                    q = i // bs
+                                ar = _dot1(ab, brw[q : q + nb])
+                                if uniform_weights:
+                                    ar += _dot1(prem, rw[i + rem0 : i + length])
+                                    a2 = a2_const
+                                else:
+                                    ar2, a22 = _dot2(
+                                        prem,
+                                        rw[i + rem0 : i + length],
+                                        w[i + rem0 : i + length],
+                                    )
+                                    ar += ar2
+                                    a2 = _dot1(a2bin, bw[q : q + nb]) + a22
+                            elif uniform_weights:
+                                ar = _dot1(prof, rw[i : i + length])
+                                a2 = a2_const
                             else:
-                                bound = 2 * k * numpy.sqrt(a2b * r2) - k * k * a2b
-                        if bound * (1 + 1e-9) <= best_gain or bound < threshold:
-                            continue
-                    if npl > 0:
-                        ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
-                        if uniform_weights:
-                            a2 = a2_const
-                        elif a2_win:
-                            a2 = a2_unit * (cum_w[i + length] - cum_w[i])
-                        else:
-                            a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
-                    elif nb > 0:
-                        if multirow:
-                            q = (i % bs) * q_row + i // bs
-                        else:
-                            q = i // bs
-                        ar = _dot1(ab, brw[q : q + nb])
-                        if uniform_weights:
-                            ar += _dot1(prem, rw[i + rem0 : i + length])
-                            a2 = a2_const
-                        else:
-                            ar2, a22 = _dot2(
-                                prem,
-                                rw[i + rem0 : i + length],
-                                w[i + rem0 : i + length],
-                            )
-                            ar += ar2
-                            a2 = _dot1(a2bin, bw[q : q + nb]) + a22
-                    elif uniform_weights:
-                        ar = _dot1(prof, rw[i : i + length])
-                        a2 = a2_const
-                    else:
-                        ar, a2 = _dot2(prof, rw[i : i + length], w[i : i + length])
-                    gain = 2 * k * ar - k * k * a2
-                    if gain > dur_gain:
-                        dur_gain = gain
-                        dur_i = i
-                    if gain > best_gain:
-                        best_gain = gain
-                        best_row = row
-                        best_depth = 1 - target_depth
+                                ar, a2 = _dot2(
+                                    prof, rw[i : i + length], w[i : i + length]
+                                )
+                            gain = 2 * k * ar - k * k * a2
+                            if gain > dur_gain:
+                                dur_gain = gain
+                                dur_i = i
+                            if gain > best_gain:
+                                best_gain = gain
+                                best_row = row
+                                best_depth = 1 - target_depth
+            if upass == 0 and use_scouts and dur_i >= 0:
+                cc = dur_i + d // 2
+                dup = False
+                for q in range(n_cand):
+                    if abs(cand_c[q] - cc) <= d // 4:
+                        dup = True
+                if not dup:
+                    cand_c[n_cand] = cc
+                    n_cand += 1
 
     return total - best_gain, best_row, best_depth
 
@@ -826,7 +900,15 @@ class FusedProblem:
         self.set_binning(0)
         self.set_pl(0)
 
-    def set_pl(self, min_length, max_stride=4, eps=1e-2, a2_approx=False, t0_coarsen=1):
+    def set_pl(
+        self,
+        min_length,
+        max_stride=4,
+        eps=1e-2,
+        a2_approx=False,
+        t0_coarsen=1,
+        scout_every=0,
+    ):
         """Piecewise-linear templates (idea L3, see pl_templates) for
         templates with length >= min_length and shift stride < max_stride;
         min_length <= 0: off. a2_approx: A2 from the window-mean weight
@@ -841,7 +923,12 @@ class FusedProblem:
             min_length,
             max_stride,
             eps,
-        ) + (bool(a2_approx), float(numpy.max(self.inv_dy2)), int(t0_coarsen))
+        ) + (
+            bool(a2_approx),
+            float(numpy.max(self.inv_dy2)),
+            int(t0_coarsen),
+            int(scout_every),
+        )
 
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
@@ -960,6 +1047,7 @@ def search_periods_fused_parallel(
     pl_a2_approx,
     pl_w_max,
     t0_coarsen,
+    scout_every,
     n_chunks,
 ):
     """search_period_fused for many periods, numba threads (prange over
@@ -1016,6 +1104,7 @@ def search_periods_fused_parallel(
                 pl_a2_approx,
                 pl_w_max,
                 t0_coarsen,
+                scout_every,
                 fbuf,
                 ibuf,
                 vbuf,

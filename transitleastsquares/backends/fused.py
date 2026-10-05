@@ -12,6 +12,7 @@ class FusedBackend(ProcessPoolBackend):
     pl = (0,)  # piecewise-linear templates (L3): (min_length, max_stride, eps)
     a2_spread_max = 0.0  # U2 (A2 from the window-mean weight) if spread <= this
     t0_coarsen = 1  # L5: coarse T0 grid with local refinement (1: off)
+    scout_every = 0  # L8: every n-th duration scans all phases (0: off)
 
     def prepare(self, problem):
         fp = FusedProblem(problem)
@@ -22,6 +23,7 @@ class FusedBackend(ProcessPoolBackend):
             *self.pl_config(),
             a2_approx=self.use_a2_approx(fp),
             t0_coarsen=self.coarsen(),
+            scout_every=self.scouts(),
         )
         return fp
 
@@ -30,6 +32,12 @@ class FusedBackend(ProcessPoolBackend):
         import os
 
         return int(os.environ.get("TLS_T0_COARSEN", self.t0_coarsen))
+
+    def scouts(self):
+        """Scout durations (idea L8); environment TLS_SCOUT_EVERY."""
+        import os
+
+        return int(os.environ.get("TLS_SCOUT_EVERY", self.scout_every))
 
     def pl_config(self):
         """(min_length, max_stride, eps); eps can be overridden for
@@ -77,6 +85,7 @@ class FusedThreadsBackend(FusedBackend):
             *self.pl_config(),
             a2_approx=self.use_a2_approx(fp),
             t0_coarsen=self.coarsen(),
+            scout_every=self.scouts(),
         )
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
@@ -153,3 +162,4 @@ class FusedPLBackend(FusedBackend):
     pl = (64, 1 << 62, 2e-2)  # eps 2e-2: PERFORMANCE_LOG step 23
     a2_spread_max = 0.1  # U2 for nearly uniform weights (PERFORMANCE_LOG step 21)
     t0_coarsen = 3  # L5: 3x coarser T0 grid + local refinement (step 24)
+    scout_every = 4  # L8: scout durations (step 28)

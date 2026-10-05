@@ -137,7 +137,9 @@ MINIMUM_PERIOD_GRID_SIZE = 100
 #                   by <= 10 % (std), A2 = sum(a^2 w) uses the window-mean
 #                   weight (PERFORMANCE_LOG step 21). Phase shifts are
 #                   first tested on a 3x coarser grid, then refined around
-#                   the best coarse shift of every duration (step 24)
+#                   the best coarse shift of every duration (step 24); for
+#                   N >= 2000 only every 4th duration scans all phases, the
+#                   others search around the best phases found (step 28)
 #   "fused-binned"  previous default: stride-aligned bins for templates whose
 #                   phase shifts are thinned by T0_search_margin (stride >= 4)
 #   "fused"         same kernel, exact correlation (reference up to rounding)
