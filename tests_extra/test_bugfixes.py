@@ -184,3 +184,16 @@ def test_period_grid_tiny_radius_clamped_to_0_01():
         a = period_grid(R_star=0.001, M_star=1, time_span=20)
         b = period_grid(R_star=0.01, M_star=1, time_span=20)
     numpy.testing.assert_array_equal(a, b)
+
+def test_period_grid_fallback_honours_period_range():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = period_grid(R_star=5, M_star=1, time_span=20, period_min=2, period_max=5)
+    assert len(p) > 0 and p.min() > 2 and p.max() <= 5
+    # narrow range: must terminate and stay inside the range
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = period_grid(
+            R_star=5, M_star=1, time_span=20, period_min=4.0, period_max=4.05
+        )
+    assert p.min() > 4.0 and p.max() <= 4.05

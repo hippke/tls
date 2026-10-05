@@ -77,6 +77,7 @@ def period_grid(
     period_max=float("inf"),
     oversampling_factor=tls_constants.OVERSAMPLING_FACTOR,
     n_transits_min=tls_constants.N_TRANSITS_MIN,
+    _is_fallback=False,
 ):
     """Returns array of optimal sampling periods for transit search in light curves
        Following Ofir (2014, A&A, 561, A138)"""
@@ -156,14 +157,33 @@ def period_grid(
         )
         warnings.warn(text)
 
+    if number_of_periods < tls_constants.MINIMUM_PERIOD_GRID_SIZE and _is_fallback:
+        # The fallback grid (R_star=M_star=1) is still small, e.g. because the
+        # user requested a narrow [period_min, period_max]. Return it as is
+        # rather than recursing forever or ignoring the user's period range.
+        if number_of_periods == 0:
+            raise ValueError(
+                "Empty period grid. Check period_min, period_max and time span."
+            )
+        return periods[selected_index]
+
     if number_of_periods < tls_constants.MINIMUM_PERIOD_GRID_SIZE:
         if time_span < 5 * tls_constants.SECONDS_PER_DAY:
             time_span = 5 * tls_constants.SECONDS_PER_DAY
         warnings.warn(
             "period_grid defaults to R_star=1 and M_star=1 as given density yielded grid with too few values"
         )
+        # BUGFIX: the fallback grid silently dropped period_min, period_max,
+        # oversampling_factor and n_transits_min
         return period_grid(
-            R_star=1, M_star=1, time_span=time_span / tls_constants.SECONDS_PER_DAY
+            R_star=1,
+            M_star=1,
+            time_span=time_span / tls_constants.SECONDS_PER_DAY,
+            period_min=period_min,
+            period_max=period_max,
+            oversampling_factor=oversampling_factor,
+            n_transits_min=n_transits_min,
+            _is_fallback=True,
         )
     else:
         return periods[selected_index]  # periods in [days]
