@@ -1123,8 +1123,33 @@ def screen_round_budget(y, w, means, maxw):
     )
 
 
+# Proxy tolerance by template length (PERFORMANCE_LOG step 45): a full
+# correlation costs ~length, a proxy ~20 terms regardless of length, so long
+# templates profit from a tighter proxy that rejects more candidates.
+SCREEN_PROXY_EPS = ((0, 0.1), (512, 0.01))
+SCREEN_MIN_LENGTH = 64
+
+
+def proxy_tolerance(rule, length):
+    """Proxy PL tolerance for a template length: a float, or ascending
+    (min_length, eps) pairs (the last pair with length >= min_length)."""
+    if numpy.isscalar(rule):
+        return float(rule)
+    tol = rule[0][1]
+    for lo, value in rule:
+        if length >= lo:
+            tol = value
+    return float(tol)
+
+
 def screen_templates(
-    templates, pl, eps, weighted, proxy_eps=0.1, min_length=128, round_budget=None
+    templates,
+    pl,
+    eps,
+    weighted,
+    proxy_eps=SCREEN_PROXY_EPS,
+    min_length=SCREEN_MIN_LENGTH,
+    round_budget=None,
 ):
     """Cheap PL proxies with certificates for the unchanged target statistic.
 
@@ -1132,6 +1157,7 @@ def screen_templates(
     |A2 - A2_proxy| <= max|target_A2 - proxy2| * sum(w).
     For a PL target, fit its actual evaluated shape (and its separate A2 fit).
     Use measured residual norms, not the nominal knot-fitting tolerance.
+    proxy_eps: a float, or a length rule (see proxy_tolerance).
     """
     widths, rows, offsets, lengths, profile, overshoot, sum_a2 = templates
     nu = len(widths)
@@ -1149,7 +1175,8 @@ def screen_templates(
             continue
         a = profile[offsets[u] : offsets[u] + lengths[u]]
         target = pl_fit(a, eps)[3] if pl[0][u] > 0 else a
-        pos, c, sm, proxy = pl_fit(target, proxy_eps)
+        tol = proxy_tolerance(proxy_eps, lengths[u])
+        pos, c, sm, proxy = pl_fit(target, tol)
         if len(c) >= (pl[0][u] if pl[0][u] else lengths[u]):
             continue
         ns[u], off[u], sums[u] = len(c), offset, sm
@@ -1164,7 +1191,7 @@ def screen_templates(
             ar_round[u] = round_budget[0] * numpy.sum(numpy.abs(c))
         if weighted:
             target2 = pl_fit(a * a, eps)[3] if pl[0][u] > 0 else a * a
-            pos, c, sm, proxy = pl_fit(target2, proxy_eps)
+            pos, c, sm, proxy = pl_fit(target2, tol)
             ns2[u], off2[u], sums2[u] = len(c), offset, sm
             err2[u] = (
                 numpy.max(numpy.abs(target2 - proxy))
@@ -1239,11 +1266,13 @@ class FusedProblem:
         )
         self.screen = None
 
-    def set_screen(self, proxy_eps=0.1, min_length=128):
+    def set_screen(self, proxy_eps=SCREEN_PROXY_EPS, min_length=SCREEN_MIN_LENGTH):
         """Enable certified correlation screening without changing the target.
 
         The exact backends enable this after configuration. The already-cheap
         default PL correlations are faster without another screening stage.
+        proxy_eps: float or length rule (see proxy_tolerance); templates
+        shorter than min_length keep the direct correlation.
         """
         self.screen = None
         if self.dtype == numpy.float64 and self.prune and not self.pl[-1]:

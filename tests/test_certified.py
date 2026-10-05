@@ -7,9 +7,11 @@ from test_core_oracle import cache, make_case
 from transitleastsquares import tls_constants as C
 from transitleastsquares.backends import SearchProblem
 from transitleastsquares.core_fused import (
+    SCREEN_PROXY_EPS,
     FusedProblem,
     pl_fit,
     pl_templates,
+    proxy_tolerance,
     screen_round_budget,
     screen_templates,
 )
@@ -19,7 +21,8 @@ from transitleastsquares.core_fused import (
 @pytest.mark.parametrize("shape", ["curved", "box"])
 @pytest.mark.parametrize("length", [128, 1024])
 @pytest.mark.parametrize("spike", [False, True])
-def test_correlation_certificate(weighted, shape, length, spike):
+@pytest.mark.parametrize("tol", [0.1, 0.01, SCREEN_PROXY_EPS])
+def test_correlation_certificate(weighted, shape, length, spike, tol):
     rng = numpy.random.default_rng(443)
     start = 50000
     a = (
@@ -39,7 +42,7 @@ def test_correlation_certificate(weighted, shape, length, spike):
     rw = r * w
     mu, muw = numpy.mean(rw), numpy.mean(w)
     budget = screen_round_budget(y, w, (mu, muw), length)
-    s = screen_templates(templates, pl, 0.02, weighted, round_budget=budget)
+    s = screen_templates(templates, pl, 0.02, weighted, tol, round_budget=budget)
     assert s is not None
 
     def double_prefix(x):
@@ -169,3 +172,36 @@ def test_exact_screen_builds_weights_with_inactive_u2_flag():
         actual_dd, fp.workspace()[0][offset : offset + m + 2]
     )
     numpy.testing.assert_allclose(actual, expected, rtol=1e-12)
+
+
+def test_proxy_tolerance_rule():
+    rule = ((0, 0.1), (512, 0.01))
+    assert proxy_tolerance(0.06, 4096) == 0.06
+    assert proxy_tolerance(rule, 64) == 0.1
+    assert proxy_tolerance(rule, 511) == 0.1
+    assert proxy_tolerance(rule, 512) == 0.01
+    assert proxy_tolerance(rule, 10**6) == 0.01
+
+
+@pytest.mark.parametrize("with_dy", [False, True])
+def test_length_rule_matches_unscreened(with_dy):
+    """Both proxy tolerances (forced onto short templates) keep every result."""
+    t, y, dy = make_case(9, n=3000, span=30, with_dy=with_dy)
+    ov, lc = cache(t, y, "ecc_sqrt")
+    fp = FusedProblem(
+        SearchProblem(
+            t, y, dy, lc, ov, 1e-5,
+            C.R_STAR_MIN, C.R_STAR_MAX, C.M_STAR_MIN, C.M_STAR_MAX, 0.01,
+        )
+    )
+    periods = [0.7, 1.2, 2.3, 4.2, 10.0]
+    expected = numpy.array([fp.search(p) for p in periods])
+    lengths = fp.templates[3]
+    split = int(numpy.median(lengths[lengths >= 48]))
+    fp.set_screen(proxy_eps=((0, 0.1), (split, 0.01)), min_length=48)
+    s = fp.screen
+    assert s is not None and numpy.sum(s[0][lengths >= split] > 0) > 0
+    assert numpy.sum(s[0][(lengths >= 48) & (lengths < split)] > 0) > 0
+    actual = numpy.array([fp.search(p) for p in periods])
+    numpy.testing.assert_array_equal(actual[:, 2:], expected[:, 2:])
+    numpy.testing.assert_allclose(actual[:, 1], expected[:, 1], rtol=1e-12)
