@@ -28,6 +28,7 @@ def box_lc(t, period, t0, duration, depth):
     y[numpy.abs(phase) < duration / 2] -= depth
     return y
 
+
 def test_final_T0_fit_uses_uncertainties():
     """final_T0_fit overwrote dy with the (rolled) flux -> unweighted fit.
     A deep fake dip with huge uncertainties must not attract T0."""
@@ -62,24 +63,17 @@ def test_final_T0_fit_does_not_modify_inputs():
     final_T0_fit(numpy.full(20, 0.5), 0.999, t, y, dy, 4.0, 0.01, False, False)
     numpy.testing.assert_array_equal(dy, dy0)
 
-def test_snr_uses_out_of_transit_noise():
-    rng = numpy.random.default_rng(4)
-    t = numpy.arange(0, 90, 0.02)
-    sigma, depth = 1e-4, 1e-3
-    y = box_lc(t, 7.3, 2.0, 0.25, depth) + rng.normal(0, sigma, len(t))
-    r = TLS(t, y).power(period_min=7, period_max=7.6, use_threads=1, **QUIET)
-    n_in = numpy.sum(r.per_transit_count)
-    snr_expected = depth / sigma * numpy.sqrt(n_in)
-    assert abs(r.snr / snr_expected - 1) < 0.15, (r.snr, snr_expected)
 
-def test_no_fit_is_detected():
-    """With transit_depth_min above any signal, TLS must report no detection
-    (1.33 compared max(chi2)==min(chi2) exactly, which fails by rounding)."""
-    rng = numpy.random.default_rng(3)
-    t = numpy.linspace(0, 60, 6000)
-    y = 1 + rng.normal(0, 1e-5, len(t))
-    r = TLS(t, y).power(transit_depth_min=1e-2, use_threads=1, **QUIET)
-    assert r.SDE == 0 and numpy.isnan(r.period)
+def test_period_uncertainty_no_negative_index_wrap():
+    """Peak at the first period: the lower search wrapped to power[-1]."""
+    periods = numpy.linspace(1, 2, 10)
+    power = numpy.array([10, 9, 1, 0, 0, 0, 0, 0, 0, 0.0])
+    assert period_uncertainty(periods, power) == float("inf")
+    power = numpy.array([0, 1, 9, 10, 9, 1, 0, 0, 0, 0.0])
+    assert numpy.isclose(
+        period_uncertainty(periods, power), 0.5 * (periods[5] - periods[1])
+    )
+
 
 def test_cleaned_array_keeps_nonpositive_times():
     t = numpy.linspace(-5, 5, 11)
@@ -91,6 +85,19 @@ def test_cleaned_array_keeps_nonpositive_times():
     t[3] = numpy.nan
     ct, cy = cleaned_array(t, y)
     assert len(ct) == 10
+
+
+def test_constructor_verbose_false_is_respected():
+    rng = numpy.random.default_rng(0)
+    t = numpy.linspace(0, 30, 3000)
+    y = box_lc(t, 3.0, 0.5, 0.1, 2e-3) + rng.normal(0, 5e-4, len(t))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        TLS(t, y, verbose=False).power(
+            show_progress_bar=False, use_threads=1, period_min=2.5, period_max=3.5
+        )
+    assert buf.getvalue() == ""
+
 
 def test_user_template_parameters_not_overwritten():
     t = numpy.linspace(0, 30, 3000)
@@ -112,6 +119,7 @@ def test_user_template_parameters_not_overwritten():
         tls_constants.DEFAULT_INC,
     )
 
+
 def test_duration_grid_honours_stellar_limits():
     # long periods only, so that the 0.12 cap (FRACTIONAL_TRANSIT_DURATION_MAX)
     # does not hide the difference
@@ -132,6 +140,29 @@ def test_duration_grid_honours_stellar_limits():
     d = duration_grid(period_grid(1, 1, 20, 0, 999, 3), log_step=1.05, shortest=2)
     assert len(d) == 69
 
+
+def test_period_grid_tiny_radius_clamped_to_0_01():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        a = period_grid(R_star=0.001, M_star=1, time_span=20)
+        b = period_grid(R_star=0.01, M_star=1, time_span=20)
+    numpy.testing.assert_array_equal(a, b)
+
+
+def test_period_grid_fallback_honours_period_range():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = period_grid(R_star=5, M_star=1, time_span=20, period_min=2, period_max=5)
+    assert len(p) > 0 and p.min() > 2 and p.max() <= 5
+    # narrow range: must terminate and stay inside the range
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        p = period_grid(
+            R_star=5, M_star=1, time_span=20, period_min=4.0, period_max=4.05
+        )
+    assert p.min() > 4.0 and p.max() <= 4.05
+
+
 @pytest.mark.parametrize("n", [50, 100, 200])
 def test_short_light_curves_do_not_crash(n):
     rng = numpy.random.default_rng(1)
@@ -139,6 +170,7 @@ def test_short_light_curves_do_not_crash(n):
     y = box_lc(t, 5.0, 0.1, 0.4, 5e-3) + rng.normal(0, 1e-3, n)
     r = TLS(t, y).power(use_threads=1, **QUIET)
     assert numpy.isfinite(r.SDE)
+
 
 def test_reference_transit_long_duration_template():
     # T14 ~ P/(pi a) = 365/(pi*20) ~ 5.8 d  > the fixed 1-day window of 1.33
@@ -157,46 +189,27 @@ def test_reference_transit_long_duration_template():
     assert numpy.argmin(shape) in range(200, 300)  # transit bottom centred
     assert shape[0] > 0.9 and shape[-1] > 0.9  # edges near nominal flux
 
-def test_period_uncertainty_no_negative_index_wrap():
-    """Peak at the first period: the lower search wrapped to power[-1]."""
-    periods = numpy.linspace(1, 2, 10)
-    power = numpy.array([10, 9, 1, 0, 0, 0, 0, 0, 0, 0.0])
-    assert period_uncertainty(periods, power) == float("inf")
-    power = numpy.array([0, 1, 9, 10, 9, 1, 0, 0, 0, 0.0])
-    assert numpy.isclose(
-        period_uncertainty(periods, power), 0.5 * (periods[5] - periods[1])
-    )
 
-def test_constructor_verbose_false_is_respected():
-    rng = numpy.random.default_rng(0)
-    t = numpy.linspace(0, 30, 3000)
-    y = box_lc(t, 3.0, 0.5, 0.1, 2e-3) + rng.normal(0, 5e-4, len(t))
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        TLS(t, y, verbose=False).power(
-            show_progress_bar=False, use_threads=1, period_min=2.5, period_max=3.5
-        )
-    assert buf.getvalue() == ""
+def test_no_fit_is_detected():
+    """With transit_depth_min above any signal, TLS must report no detection
+    (1.33 compared max(chi2)==min(chi2) exactly, which fails by rounding)."""
+    rng = numpy.random.default_rng(3)
+    t = numpy.linspace(0, 60, 6000)
+    y = 1 + rng.normal(0, 1e-5, len(t))
+    r = TLS(t, y).power(transit_depth_min=1e-2, use_threads=1, **QUIET)
+    assert r.SDE == 0 and numpy.isnan(r.period)
 
-def test_period_grid_tiny_radius_clamped_to_0_01():
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        a = period_grid(R_star=0.001, M_star=1, time_span=20)
-        b = period_grid(R_star=0.01, M_star=1, time_span=20)
-    numpy.testing.assert_array_equal(a, b)
 
-def test_period_grid_fallback_honours_period_range():
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        p = period_grid(R_star=5, M_star=1, time_span=20, period_min=2, period_max=5)
-    assert len(p) > 0 and p.min() > 2 and p.max() <= 5
-    # narrow range: must terminate and stay inside the range
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        p = period_grid(
-            R_star=5, M_star=1, time_span=20, period_min=4.0, period_max=4.05
-        )
-    assert p.min() > 4.0 and p.max() <= 4.05
+def test_snr_uses_out_of_transit_noise():
+    rng = numpy.random.default_rng(4)
+    t = numpy.arange(0, 90, 0.02)
+    sigma, depth = 1e-4, 1e-3
+    y = box_lc(t, 7.3, 2.0, 0.25, depth) + rng.normal(0, sigma, len(t))
+    r = TLS(t, y).power(period_min=7, period_max=7.6, use_threads=1, **QUIET)
+    n_in = numpy.sum(r.per_transit_count)
+    snr_expected = depth / sigma * numpy.sqrt(n_in)
+    assert abs(r.snr / snr_expected - 1) < 0.15, (r.snr, snr_expected)
+
 
 def test_command_line_interface(tmp_path):
     rng = numpy.random.default_rng(5)

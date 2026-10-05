@@ -1,48 +1,47 @@
-from __future__ import division, print_function
-import sys
-from os import path
-import transitleastsquares.version as tls_version
+"""Constants and defaults of Transit Least Squares (TLS).
 
-"""Magic constants"""
-resources_dir = path.join(path.dirname(__file__))
+Users may override module attributes at runtime (``tls_constants.X = ...``);
+all code reads them at call time.
+"""
+
+from os import path
+
+from transitleastsquares import version as tls_version
+
+resources_dir = path.dirname(__file__)
 TLS_VERSION = (
-    "Transit Least Squares TLS "
-    + tls_version.TLS_VERSIONING
-    + " ("
-    + tls_version.TLS_DATE
-    + ")"
+    f"Transit Least Squares TLS {tls_version.TLS_VERSIONING} ({tls_version.TLS_DATE})"
 )
 
 # In the default, print status information during search
 VERBOSE = True
 
-# astrophysical constants
+# Astrophysical constants
 G = 6.673e-11  # gravitational constant [m^3 / kg / s^2]
 R_sun = 695508000  # radius of the Sun [m]
 R_earth = 6371000  # radius of the Earth [m]
 R_jup = 69911000  # radius of Jupiter [m]
-M_sun = 1.989 * 10 ** 30  # mass of the Sun [kg]
+M_sun = 1.989 * 10**30  # mass of the Sun [kg]
 SECONDS_PER_DAY = 86400
 
 # Default values as described in the paper
-TRANSIT_DEPTH_MIN = 10 * 10 ** -6  # 10 ppm
-NUMERICAL_STABILITY_CUTOFF = 0.01 * 10 ** -6  # to identify nominal flux in model
+TRANSIT_DEPTH_MIN = 10 * 10**-6  # 10 ppm
+NUMERICAL_STABILITY_CUTOFF = 0.01 * 10**-6  # to identify nominal flux in model
 
-# For the period grid
+# Period grid
 R_STAR = 1.0
 M_STAR = 1.0
 OVERSAMPLING_FACTOR = 3
 N_TRANSITS_MIN = 2
 
-# For the duration grid
+# Duration grid
 M_STAR_MIN = 0.1
 M_STAR_MAX = 1.0
 R_STAR_MIN = 0.13
 R_STAR_MAX = 3.5
 DURATION_GRID_STEP = 1.1
 
-# For the transit template
-# quadratic limb darkening for a G2V star in the Kepler bandpass
+# Transit template: quadratic limb darkening for a G2V star in the Kepler bandpass
 # http://vizier.u-strasbg.fr/viz-bin/VizieR?-source=J/A%2BA/552/A16
 DEFAULT_U = [0.4804, 0.1867]
 DEFAULT_LIMB_DARK = "quadratic"
@@ -71,7 +70,7 @@ BOX_LIMB_DARK = "linear"
 SIGNAL_DEPTH = 0.5
 
 # Maximum fractional transit duration ever observed is 0.117
-# for Kepler-1368 b (as of Oct 2018), so we set upper_limit=0.15
+# for Kepler-1368 b (as of Oct 2018), so we set upper_limit=0.12
 # Long fractional transit durations are computationally expensive
 # following a quadratic relation. If applicable, use a different value.
 # Longer transits can still be found, but at decreasing sensitivity
@@ -89,8 +88,9 @@ FRACTIONAL_TRANSIT_DURATION_MAX = 0.12
 SUPERSAMPLE_SIZE = 10000
 OVERSAMPLE_MODEL_LIGHT_CURVE = 5
 
-# Order in which the periods are searched: "shuffled"", "descending", "ascending"
-# Shuffled has the advantage of the best estimate for the remaining time
+# Order in which the periods are searched: "shuffled", "descending", "ascending"
+# Shuffled has the advantage of the best estimate for the remaining time.
+# The order has no influence on the results.
 PERIODS_SEARCH_ORDER = "shuffled"
 
 # When converting power_raw to power, a median of a certain window size is subtracted.
@@ -99,13 +99,19 @@ PERIODS_SEARCH_ORDER = "shuffled"
 # This value has proven to yield numerically stable results.
 SDE_MEDIAN_KERNEL_SIZE = 30
 
-# AFFECTS ONLY THE FINAL T0 FIT, NOT THE SDE
-# We can give user the option to not scan the phase space for T0 at every cadence
-# For speed reasons, it may be acceptable to approximate T0 to within X %
-# Useful in large datasets. 100k points: Extra runtime of order 2 minutes
-# While individual transits often are only a few cadences long, in the stacked
-# phase space it is (N transits * transit duration) [cadences] long
-T0_FIT_MARGIN = 0.01  # of transit duration e.g., 0.01 (=1%)
+# T0 margins, in units of the transit duration (0.01 = 1 %).
+#
+# T0_FIT_MARGIN: resolution of the final T0 fit after the search. The phase
+#   space is scanned in steps of T0_FIT_MARGIN * duration. 0 = every cadence.
+#   Useful in large datasets. 100k points: Extra runtime of order 2 minutes.
+#
+# The same margin is ALSO used during the period search (unless the parameter
+# T0_search_margin is given): for trial templates wider than 1/margin cadences
+# (100 cadences at 1 %), only every (width * margin)-th phase shift is tested.
+# This affects the SDE (slightly) and the speed (strongly, for long templates /
+# dense data). Note: older TLS documentation stated that T0_FIT_MARGIN affects
+# only the final T0 fit; this was never the case.
+T0_FIT_MARGIN = 0.01
 
 # The secondary fit for T0 can take negligible or significant time, depending on the
 # number of data points and on T0_FIT_MARGIN. Set an empirical threshold to avoid
@@ -116,6 +122,11 @@ PROGRESSBAR_THRESHOLD = 5000
 # Some cases yield empty period grids. Example: R_star=5, M_star=1
 # Then: Warn and return the default grid
 MINIMUM_PERIOD_GRID_SIZE = 100
+
+# Search backend used by default (see transitleastsquares.backends).
+# Can be overridden per call (power(backend=...)) or by the environment
+# variable TLS_BACKEND.
+DEFAULT_BACKEND = "numba"
 
 # Warn the user if unknown **kwargs are given as parameters
 VALID_PARAMETERS = [
@@ -141,8 +152,10 @@ VALID_PARAMETERS = [
     "transit_depth_min",
     "oversampling_factor",
     "T0_fit_margin",
+    "T0_search_margin",
     "use_threads",
     "show_progress_bar",
     "transit_template",
-    "verbose"
+    "verbose",
+    "backend",
 ]

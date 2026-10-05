@@ -1,7 +1,8 @@
-from __future__ import division, print_function
-import numpy
-import numba
+"""Fast linear interpolation (numba), used to resample transit templates."""
+
 from math import floor
+
+import numba
 
 
 @numba.jit(nopython=True)
@@ -31,7 +32,7 @@ def lerp(y, theta):
     return (1 - theta) * y[..., 0] + theta * y[..., 1]
 
 
-class interp1d(object):
+class interp1d:
     """
     Adapted from:
     Fast multithreaded linear interpolation, 1D and 2D - Ver. 3.4
@@ -46,7 +47,7 @@ class interp1d(object):
     @staticmethod
     @numba.guvectorize("(i8[:],f8[:],f8[:],f8[:])", "(m),(m),(n)->(m)")
     def _linear(index, theta, y, y_new):
-        for (j, (i, t)) in enumerate(zip(index, theta)):
+        for j, (i, t) in enumerate(zip(index, theta)):
             y_new[j] = lerp(y[i : i + 2], t)
 
     def __call__(self, y):

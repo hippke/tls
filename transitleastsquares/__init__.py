@@ -9,10 +9,33 @@
 #    /  :  \     (2) Max Planck Institute for Solar System Research,
 #       '            Justus-von-Liebig-Weg 3, 37077 G\"ottingen, Germany
 
-from __future__ import division, print_function
-from transitleastsquares.main import transitleastsquares
-from transitleastsquares.helpers import cleaned_array, resample, transit_mask
-from transitleastsquares.grid import duration_grid, period_grid
-from transitleastsquares.stats import FAP
+from transitleastsquares.backends import (
+    SearchBackend,
+    available_backends,
+    get_backend,
+    register_backend,
+)
 from transitleastsquares.catalog import catalog_info
 from transitleastsquares.core import fold
+from transitleastsquares.grid import duration_grid, period_grid
+from transitleastsquares.helpers import cleaned_array, resample, transit_mask
+from transitleastsquares.main import transitleastsquares
+from transitleastsquares.stats import FAP
+from transitleastsquares.version import __version__
+
+__all__ = [
+    "__version__",
+    "transitleastsquares",
+    "cleaned_array",
+    "resample",
+    "transit_mask",
+    "duration_grid",
+    "period_grid",
+    "FAP",
+    "catalog_info",
+    "fold",
+    "SearchBackend",
+    "available_backends",
+    "get_backend",
+    "register_backend",
+]

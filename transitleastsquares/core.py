@@ -1,7 +1,14 @@
-from __future__ import division, print_function
-import numpy
+"""Numerical core of the TLS period search (reference implementation, numba).
+
+The functions in this module define the TLS test statistic. Alternative search
+backends (see ``transitleastsquares.backends``) must reproduce
+``search_period`` (validated by tests/test_core_oracle.py).
+"""
+
 import numba
-import transitleastsquares.tls_constants as tls_constants
+import numpy
+
+from transitleastsquares import tls_constants
 from transitleastsquares.grid import T14
 from transitleastsquares.helpers import running_mean
 
@@ -20,7 +27,8 @@ def foldfast(time, period):
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def edge_effect_correction(flux, patched_data, dy, inverse_squared_patched_dy):
-    regular = numpy.sum(((1 - flux) ** 2) * 1 / dy ** 2)
+    """chi2 contribution of the points appended for wrap-around (to be removed)."""
+    regular = numpy.sum(((1 - flux) ** 2) * 1 / dy**2)
     patched = numpy.sum(((1 - patched_data) ** 2) * inverse_squared_patched_dy)
     return patched - regular
 
@@ -40,9 +48,14 @@ def lowest_residuals_in_this_duration(
     constant_residual,
     T0_fit_margin,
 ):
+    """Slide the template of one duration over the phase-folded data and return
+    (lowest chi2, template row, depth) for this duration.
 
-    # if nothing is fit, we fit a straight line: signal=1.
-    # this gives a chi2 of value constant_residual
+    For templates wider than 1/T0_fit_margin samples only every
+    int(duration * T0_fit_margin)-th phase shift is tested.
+    """
+    # If nothing is fit, we fit a straight line: signal=1.
+    # This gives a chi2 of value constant_residual
     summed_residual_in_rows = constant_residual
     best_row = 0
     best_depth = 0
@@ -78,6 +91,7 @@ def lowest_residuals_in_this_duration(
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
 def out_of_transit_residuals(data, width_signal, dy):
+    """chi2 of all points outside a sliding window of width_signal samples"""
     chi2 = numpy.zeros(len(data) - width_signal + 1)
     fullsum = numpy.sum(((1 - data) ** 2) * dy)
     window = numpy.sum(((1 - data[:width_signal]) ** 2) * dy[:width_signal])
@@ -107,9 +121,12 @@ def search_period(
     lc_cache_overview,
     T0_fit_margin,
 ):
-    """Core routine to search the flux data set 'injected' over all 'periods'"""
+    """Search one trial period: return [period, chi2_min, template row, depth].
 
-    # duration (in samples) of widest transit in lc_cache (axis 0: rows; axis 1: columns)
+    ``T0_fit_margin`` is the phase-shift margin used *during the search*
+    (``T0_search_margin`` in ``power()``).
+    """
+    # Width (in samples) of the widest transit template in the cache
     durations = numpy.unique(lc_cache_overview["width_in_samples"])
     maxwidth_in_samples = int(max(durations))
     if maxwidth_in_samples % 2 != 0:
@@ -118,13 +135,12 @@ def search_period(
     # Phase fold
     phases = foldfast(t, period)
     sort_index = numpy.argsort(phases, kind="mergesort")  # 8% faster than Quicksort
-    phases = phases[sort_index]
     flux = y[sort_index]
     dy = dy[sort_index]
 
     # faster to multiply than divide
     patched_dy = numpy.append(dy, dy[:maxwidth_in_samples])
-    inverse_squared_patched_dy = 1 / patched_dy ** 2
+    inverse_squared_patched_dy = 1 / patched_dy**2
 
     # Due to phase folding, the signal could start near the end of the data
     # and continue at the beginning. To avoid (slow) rolling,
@@ -136,10 +152,9 @@ def search_period(
     )
 
     # Set "best of" counters to max, in order to find smaller residuals
-    smallest_residuals_in_period = float("inf")
     summed_residual_in_rows = float("inf")
 
-    # Make unique to avoid duplicates in dense grids
+    # Physically plausible duration range for this period
     duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
     duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
 
@@ -155,10 +170,9 @@ def search_period(
     durations = durations[durations >= duration_min_in_samples]
     durations = durations[durations <= duration_max_in_samples]
 
-    skipped_all = True
     best_row = 0  # shortest and shallowest transit
     best_depth = 0
-    constant_residual = numpy.sum((flux - 1)**2/dy**2)
+    constant_residual = numpy.sum((flux - 1) ** 2 / dy**2)
 
     for duration in durations:
         chosen_transit_row = 0

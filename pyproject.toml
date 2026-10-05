@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transitleastsquares"
+dynamic = ["version"]
+description = "An optimized transit-fitting algorithm to search for periodic transits of small planets"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Michael Hippke", email = "michael@hippke.org" }]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.22",
+    "numba",
+    "tqdm",
+    "batman-package",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+[project.optional-dependencies]
+catalog = ["astroquery>=0.3.9"]
+test = ["pytest", "scipy", "batman-package"]
+
+[project.urls]
+Homepage = "https://github.com/hippke/tls"
+Documentation = "https://transitleastsquares.readthedocs.io"
+
+[project.scripts]
+transitleastsquares = "transitleastsquares.command_line:main"
+
+[tool.setuptools]
+packages = ["transitleastsquares", "transitleastsquares.backends"]
+
+[tool.setuptools.package-data]
+transitleastsquares = ["*.csv"]
+
+[tool.setuptools.dynamic]
+version = { attr = "transitleastsquares.version.TLS_VERSIONING" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: needs internet access (catalog queries)",
+    "slow: takes more than ~30 s",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E741",  # ambiguous variable names (physics notation)
+    "B905",  # zip(strict=) needs py3.10
+    "UP006", "UP007", "UP035", "UP045",  # keep typing compatible with py3.9
+    "B028",  # warnings without stacklevel (user-facing messages)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"transitleastsquares/__init__.py" = ["E402", "F401"]
+"tests/*" = ["E402"]

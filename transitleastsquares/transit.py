@@ -1,34 +1,38 @@
-from __future__ import division, print_function
-import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
+"""Transit templates: reference shape, scaled templates and the template cache."""
+
 import numpy
-import transitleastsquares.tls_constants as tls_constants
+
+from transitleastsquares import tls_constants
 from transitleastsquares.interpolation import interp1d
 
 
-def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
-    """Returns an Earth-like transit of width 1 and depth 1"""
+def model_flux(t, per, rp, a, inc, ecc, w, u, limb_dark):
+    """Limb-darkened transit light curve at times t (mid-transit at t=0)."""
+    import batman  # https://www.cfa.harvard.edu/~lkreidberg/batman/
 
-    f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
-    duration = 1  # transit duration in days. Increase for exotic cases
+    ma = batman.TransitParams()
+    ma.t0 = 0  # time of inferior conjunction
+    ma.per = per  # orbital period
+    ma.rp = rp  # planet radius (in units of stellar radii)
+    ma.a = a  # semi-major axis (in units of stellar radii)
+    ma.inc = inc  # orbital inclination (in degrees)
+    ma.ecc = ecc  # eccentricity
+    ma.w = w  # longitude of periastron (in degrees)
+    ma.u = u  # limb darkening coefficients
+    ma.limb_dark = limb_dark  # limb darkening model
+    return batman.TransitModel(ma, t).light_curve(ma)
+
+
+def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
+    """Returns a transit template of width 1 (first to last contact) and depth 1,
+    sampled with `samples` points (1 = nominal flux, 0 = transit bottom)."""
+    duration = 1  # time window in days, widened for long transits
     while True:
         t = numpy.linspace(
             -duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE
         )
-        ma = batman.TransitParams()
-        ma.t0 = 0  # time of inferior conjunction
-        ma.per = per  # orbital period, use Earth as a reference
-        ma.rp = rp  # planet radius (in units of stellar radii)
-        ma.a = a  # semi-major axis (in units of stellar radii)
-        ma.inc = inc  # orbital inclination (in degrees)
-        ma.ecc = ecc  # eccentricity
-        ma.w = w  # longitude of periastron (in degrees)
-        ma.u = u  # limb darkening coefficients
-        ma.limb_dark = limb_dark  # limb darkening model
-        m = batman.TransitModel(ma, t)  # initializes model
-        flux = m.light_curve(ma)  # calculates light curve
-        # BUGFIX: for custom templates with T14 > 1 day the transit filled the
-        # whole window, idx_first became 0 and the slice below degenerated to
-        # a single sample. Widen the window until the transit fits.
+        flux = model_flux(t, per, rp, a, inc, ecc, w, u, limb_dark)
+        # The transit must not fill the whole window (T14 > window)
         if flux[0] < 1 and duration < 1000:
             duration *= 2
             continue
@@ -107,11 +111,15 @@ def fractional_transit(
     return result
 
 
-def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
-              limb_dark, verbose=True):
-    """Fetches (size(durations)*size(depths)) light curves of length 
-        maxwidth_in_samples and returns these LCs in a 2D array, together with 
-        their metadata in a separate array."""
+def get_cache(
+    durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark, verbose=True
+):
+    """Create one template per trial duration.
+
+    Returns (lc_cache_overview, lc_arr): a structured array with the fields
+    duration, width_in_samples and overshoot per row, and a 1-D object array
+    with the (variable length) in-transit part of each template.
+    """
 
     if verbose:
         print("Creating model cache for", str(len(durations)), "durations")
@@ -154,9 +162,7 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
         full_values = numpy.where(
             scaled_transit < (1 - tls_constants.NUMERICAL_STABILITY_CUTOFF)
         )
-        # BUGFIX: for short data sets (few hundred points) the shortest trial
-        # durations are < 1 sample wide; the template was then empty and
-        # numpy.min() crashed ("zero-size array"). Skip such durations.
+        # Short data sets: the shortest trial durations can be < 1 sample wide
         if used_samples < 1 or numpy.size(full_values) == 0:
             continue
         lc_cache_overview["duration"][row] = duration
@@ -171,7 +177,7 @@ def get_cache(durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u,
 
         # Later, we multiply the inverse fraction ==> convert to inverse percentage
         lc_cache_overview["overshoot"][row] = 1 / (2 - overshoot)
-        row += +1
+        row += 1
 
     if row == 0:
         raise ValueError("Too few data points to create any transit template")

@@ -1,9 +1,12 @@
-from __future__ import division, print_function
-import numba
-import transitleastsquares.tls_constants as tls_constants
-import numpy
-from numpy import pi, sqrt, arccos, degrees, floor, ceil
+"""Period and duration grids."""
+
 import warnings
+
+import numba
+import numpy
+from numpy import pi, sqrt
+
+from transitleastsquares import tls_constants
 
 
 @numba.jit(fastmath=True, parallel=False, nopython=True)
@@ -11,9 +14,9 @@ def T14(
     R_s, M_s, P, upper_limit=tls_constants.FRACTIONAL_TRANSIT_DURATION_MAX, small=False
 ):
     """Input:  Stellar radius and mass; planetary period
-               Units: Solar radius and mass; days
-       Output: Maximum planetary transit duration T_14max
-               Unit: Fraction of period P"""
+            Units: Solar radius and mass; days
+    Output: Maximum planetary transit duration T_14max
+            Unit: Fraction of period P"""
 
     P = P * tls_constants.SECONDS_PER_DAY
     R_s = tls_constants.R_sun * R_s
@@ -43,22 +46,14 @@ def duration_grid(
 ):
     """Logarithmic grid of trial durations (fractions of the period).
 
-    BUGFIX: the stellar limits used to be hard-wired to the tls_constants
-    defaults, ignoring user-supplied R_star_min/max, M_star_min/max (which are
-    used per period in core.search_period). Defaults are unchanged."""
-
+    ``shortest`` is accepted for backwards compatibility and unused.
+    """
     duration_max = T14(
-        R_s=R_star_max,
-        M_s=M_star_max,
-        P=min(periods),
-        small=False  # large planet for long transit duration
-    )
+        R_s=R_star_max, M_s=M_star_max, P=min(periods), small=False
+    )  # large planet for long transit duration
     duration_min = T14(
-        R_s=R_star_min,
-        M_s=M_star_min,
-        P=max(periods),
-        small=True  # small planet for short transit duration
-    )
+        R_s=R_star_min, M_s=M_star_min, P=max(periods), small=True
+    )  # small planet for short transit duration
 
     durations = [duration_min]
     current_depth = duration_min
@@ -67,6 +62,22 @@ def duration_grid(
         durations.append(current_depth)
     durations.append(duration_max)  # Append endpoint. Not perfectly spaced.
     return durations
+
+
+def _clamp(name, value, lower, upper):
+    if value < lower:
+        warnings.warn(
+            f"Warning: {name} was set to {lower} for period_grid "
+            f"(was unphysical: {value})"
+        )
+        return lower
+    if value > upper:
+        warnings.warn(
+            f"Warning: {name} was set to {upper} for period_grid "
+            f"(was unphysical: {value})"
+        )
+        return upper
+    return value
 
 
 def period_grid(
@@ -80,43 +91,10 @@ def period_grid(
     _is_fallback=False,
 ):
     """Returns array of optimal sampling periods for transit search in light curves
-       Following Ofir (2014, A&A, 561, A138)"""
+    Following Ofir (2014, A&A, 561, A138)"""
 
-    if R_star < 0.01:
-        text = (
-            "Warning: R_star was set to 0.01 for period_grid (was unphysical: "
-            + str(R_star)
-            + ")"
-        )
-        warnings.warn(text)
-        R_star = 0.01  # BUGFIX: was set to 0.1, contradicting the warning text
-
-    if R_star > 10000:
-        text = (
-            "Warning: R_star was set to 10000 for period_grid (was unphysical: "
-            + str(R_star)
-            + ")"
-        )
-        warnings.warn(text)
-        R_star = 10000
-
-    if M_star < 0.01:
-        text = (
-            "Warning: M_star was set to 0.01 for period_grid (was unphysical: "
-            + str(M_star)
-            + ")"
-        )
-        warnings.warn(text)
-        M_star = 0.01
-
-    if M_star > 1000:
-        text = (
-            "Warning: M_star was set to 1000 for period_grid (was unphysical: "
-            + str(M_star)
-            + ")"
-        )
-        warnings.warn(text)
-        M_star = 1000
+    R_star = _clamp("R_star", R_star, 0.01, 10000)
+    M_star = _clamp("M_star", M_star, 0.01, 1000)
 
     R_star = R_star * tls_constants.R_sun
     M_star = M_star * tls_constants.M_sun
@@ -146,16 +124,14 @@ def period_grid(
     selected_index = numpy.where(
         numpy.logical_and(periods > period_min, periods <= period_max)
     )
-
     number_of_periods = numpy.size(periods[selected_index])
 
-    if number_of_periods > 10 ** 6:
-        text = (
-            "period_grid generates a very large grid ("
-            + str(number_of_periods)
-            + "). Recommend to check physical plausibility for stellar mass, radius, and time series duration."
+    if number_of_periods > 10**6:
+        warnings.warn(
+            f"period_grid generates a very large grid ({number_of_periods}). "
+            "Recommend to check physical plausibility for stellar mass, radius, "
+            "and time series duration."
         )
-        warnings.warn(text)
 
     if number_of_periods < tls_constants.MINIMUM_PERIOD_GRID_SIZE and _is_fallback:
         # The fallback grid (R_star=M_star=1) is still small, e.g. because the
@@ -171,10 +147,9 @@ def period_grid(
         if time_span < 5 * tls_constants.SECONDS_PER_DAY:
             time_span = 5 * tls_constants.SECONDS_PER_DAY
         warnings.warn(
-            "period_grid defaults to R_star=1 and M_star=1 as given density yielded grid with too few values"
+            "period_grid defaults to R_star=1 and M_star=1 as given density yielded "
+            "grid with too few values"
         )
-        # BUGFIX: the fallback grid silently dropped period_min, period_max,
-        # oversampling_factor and n_transits_min
         return period_grid(
             R_star=1,
             M_star=1,
@@ -185,5 +160,4 @@ def period_grid(
             n_transits_min=n_transits_min,
             _is_fallback=True,
         )
-    else:
-        return periods[selected_index]  # periods in [days]
+    return periods[selected_index]  # periods in [days]

@@ -1,53 +1,55 @@
-from __future__ import division, print_function
-from transitleastsquares import transitleastsquares
-from transitleastsquares.helpers import cleaned_array
-import transitleastsquares.tls_constants as tls_constants
-import numpy
+"""Command line interface: transitleastsquares <lightcurve.csv> [-o DIR] [-c CONFIG]"""
+
+import argparse
 import os
-import sys
 from configparser import ConfigParser
 
-try:
-    import argparse
-except:
-    raise ImportError("Could not import package argparse")
+import numpy
+
+from transitleastsquares import tls_constants
+from transitleastsquares.main import transitleastsquares
 
 
-def main():
-    # BUGFIX: all code ran at import time and main() was empty, so the
-    # console entry point only worked as a side effect of importing.
+def read_config(filename):
+    """Return (power kwargs, delimiter) from a TLS config file (see tls_config.cfg)"""
+    config = ConfigParser()
+    if not config.read(filename):
+        raise OSError(f"Cannot read {filename}")
+    grid, speed = config["Grid"], config["Speed"]
+    kwargs = dict(
+        R_star=float(grid["R_star"]),
+        R_star_min=float(grid["R_star_min"]),
+        R_star_max=float(grid["R_star_max"]),
+        M_star=float(grid["M_star"]),
+        M_star_min=float(grid["M_star_min"]),
+        M_star_max=float(grid["M_star_max"]),
+        period_min=float(grid["period_min"]),
+        period_max=float(grid["period_max"]),
+        n_transits_min=int(grid["n_transits_min"]),
+        transit_template=config["Template"]["transit_template"],
+        duration_grid_step=float(speed["duration_grid_step"]),
+        transit_depth_min=float(speed["transit_depth_min"]),
+        oversampling_factor=int(speed["oversampling_factor"]),
+        T0_fit_margin=float(speed["T0_fit_margin"]),
+        use_threads=int(speed["use_threads"]),
+    )
+    return kwargs, config["File"]["delimiter"]
+
+
+def main(argv=None):
     print(tls_constants.TLS_VERSION)
     parser = argparse.ArgumentParser()
     parser.add_argument("lightcurve", help="path to lightcurve file")
     parser.add_argument("-o", "--output", help="path to output directory")
     parser.add_argument("-c", "--config", help="path to configuration file")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    # Read config file if possible
-    use_config_file = False
+    kwargs, delimiter = {}, ","
     if args.config is not None:
         try:
-            config = ConfigParser()
-            config.read(args.config)
-            R_star = float(config["Grid"]["R_star"])
-            R_star_min = float(config["Grid"]["R_star_min"])
-            R_star_max = float(config["Grid"]["R_star_max"])
-            M_star = float(config["Grid"]["M_star"])
-            M_star_min = float(config["Grid"]["M_star_min"])
-            M_star_max = float(config["Grid"]["M_star_max"])
-            period_min = float(config["Grid"]["period_min"])
-            period_max = float(config["Grid"]["period_max"])
-            n_transits_min = int(config["Grid"]["n_transits_min"])
-            transit_template = config["Template"]["transit_template"]
-            duration_grid_step = float(config["Speed"]["duration_grid_step"])
-            transit_depth_min = float(config["Speed"]["transit_depth_min"])
-            oversampling_factor = int(config["Speed"]["oversampling_factor"])
-            T0_fit_margin = float(config["Speed"]["T0_fit_margin"])
-            use_threads = int(config["Speed"]["use_threads"])
-            delimiter = config["File"]["delimiter"]  # BUGFIX: was int(",") -> always failed
-            use_config_file = True
+            kwargs, delimiter = read_config(args.config)
             print("Using TLS configuration from config file", args.config)
-        except:
+        except (OSError, KeyError, ValueError):
             print(
                 "Using default values because of broken or missing configuration file",
                 args.config,
@@ -55,79 +57,33 @@ def main():
     else:
         print("No config file given. Using default values")
 
-    # Load data
-    if use_config_file:
-        data = numpy.genfromtxt(args.lightcurve, delimiter=delimiter)  # BUGFIX: args has no .delimiter
-    else:
-        data = numpy.genfromtxt(args.lightcurve, delimiter=",")
-
-    t = data[:, 0]
-    y = data[:, 1]
-
-
-    # Initiate transitleastsquares model
-    try:
-        dy = data[:, 2]
-        model = transitleastsquares(t, y, dy)
-    except:
-        model = transitleastsquares(t, y)
-
-    if use_config_file:
-        results = model.power(
-            R_star=R_star,
-            R_star_min=R_star_min,
-            R_star_max=R_star_max,
-            M_star=M_star,
-            M_star_min=M_star_min,
-            M_star_max=M_star_max,
-            period_min=period_min,
-            period_max=period_max,
-            n_transits_min=n_transits_min,
-            transit_template=transit_template,
-            duration_grid_step=duration_grid_step,
-            transit_depth_min=transit_depth_min,
-            oversampling_factor=oversampling_factor,
-            T0_fit_margin=T0_fit_margin,
-            use_threads=use_threads,
-        )
-    else:
-        results = model.power()
-
-
-    # Save results to CSV files
+    data = numpy.genfromtxt(args.lightcurve, delimiter=delimiter)
+    t, y = data[:, 0], data[:, 1]
+    dy = data[:, 2] if data.shape[1] > 2 else None
+    results = transitleastsquares(t, y, dy).power(**kwargs)
 
     # Determine path and file names of output files
-    if args.output is None:
-        file_stats = args.lightcurve + "_statistics.csv"
-        file_power = args.lightcurve + "_power.csv"
-    else:
-        file_stats = os.path.join(args.output, args.lightcurve + "_statistics.csv")
-        file_power = os.path.join(args.output, args.lightcurve + "_power.csv")
+    base = args.lightcurve
+    if args.output is not None:
+        base = os.path.join(args.output, os.path.basename(args.lightcurve))
+    file_stats, file_power = base + "_statistics.csv", base + "_power.csv"
 
-    # Save
     try:
         numpy.savetxt(
             file_power,
-            numpy.column_stack(
-                [
-                    # BUGFIX: positional slicing [25:26]/[26:27] selected
-                    # in_transit_count/after_transit_count, not periods/power
-                    results.periods,
-                    results.power,
-                ]
-            ),
+            numpy.column_stack([results.periods, results.power]),
             delimiter=",",
             fmt="%1.6f",
         )
         print("SDE-ogram saved to", file_power)
 
-        statistics = dict(list(results.items())[0:28])  # all scalar/per-transit statistics
+        statistics = dict(list(results.items())[0:28])  # scalar + per-transit stats
         numpy.set_printoptions(precision=8, threshold=10e10)
         with open(file_stats, "w") as f:
-            for key in statistics.keys():
-                f.write("%s %s\n" % (key, statistics[key]))
+            for key, value in statistics.items():
+                f.write(f"{key} {value}\n")
         print("Statistics saved to", file_stats)
-    except IOError:
+    except OSError:
         print("Error saving result file")
 
 
