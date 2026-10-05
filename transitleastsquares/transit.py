@@ -10,19 +10,31 @@ def reference_transit(samples, per, rp, a, inc, ecc, w, u, limb_dark):
 
     f = numpy.ones(tls_constants.SUPERSAMPLE_SIZE)
     duration = 1  # transit duration in days. Increase for exotic cases
-    t = numpy.linspace(-duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE)
-    ma = batman.TransitParams()
-    ma.t0 = 0  # time of inferior conjunction
-    ma.per = per  # orbital period, use Earth as a reference
-    ma.rp = rp  # planet radius (in units of stellar radii)
-    ma.a = a  # semi-major axis (in units of stellar radii)
-    ma.inc = inc  # orbital inclination (in degrees)
-    ma.ecc = ecc  # eccentricity
-    ma.w = w  # longitude of periastron (in degrees)
-    ma.u = u  # limb darkening coefficients
-    ma.limb_dark = limb_dark  # limb darkening model
-    m = batman.TransitModel(ma, t)  # initializes model
-    flux = m.light_curve(ma)  # calculates light curve
+    while True:
+        t = numpy.linspace(
+            -duration * 0.5, duration * 0.5, tls_constants.SUPERSAMPLE_SIZE
+        )
+        ma = batman.TransitParams()
+        ma.t0 = 0  # time of inferior conjunction
+        ma.per = per  # orbital period, use Earth as a reference
+        ma.rp = rp  # planet radius (in units of stellar radii)
+        ma.a = a  # semi-major axis (in units of stellar radii)
+        ma.inc = inc  # orbital inclination (in degrees)
+        ma.ecc = ecc  # eccentricity
+        ma.w = w  # longitude of periastron (in degrees)
+        ma.u = u  # limb darkening coefficients
+        ma.limb_dark = limb_dark  # limb darkening model
+        m = batman.TransitModel(ma, t)  # initializes model
+        flux = m.light_curve(ma)  # calculates light curve
+        # BUGFIX: for custom templates with T14 > 1 day the transit filled the
+        # whole window, idx_first became 0 and the slice below degenerated to
+        # a single sample. Widen the window until the transit fits.
+        if flux[0] < 1 and duration < 1000:
+            duration *= 2
+            continue
+        break
+    if numpy.all(flux >= 1):
+        raise ValueError("Transit template parameters yield no transit")
 
     # Determine start of transit (first value < 1)
     idx_first = numpy.argmax(flux < 1)

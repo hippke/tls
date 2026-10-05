@@ -139,3 +139,20 @@ def test_short_light_curves_do_not_crash(n):
     y = box_lc(t, 5.0, 0.1, 0.4, 5e-3) + rng.normal(0, 1e-3, n)
     r = TLS(t, y).power(use_threads=1, **QUIET)
     assert numpy.isfinite(r.SDE)
+
+def test_reference_transit_long_duration_template():
+    # T14 ~ P/(pi a) = 365/(pi*20) ~ 5.8 d  > the fixed 1-day window of 1.33
+    shape = reference_transit(
+        samples=500,
+        per=365,
+        rp=0.05,
+        a=20,
+        inc=90,
+        ecc=0,
+        w=90,
+        u=[0.4, 0.2],
+        limb_dark="quadratic",
+    )
+    assert len(shape) == 500
+    assert numpy.argmin(shape) in range(200, 300)  # transit bottom centred
+    assert shape[0] > 0.9 and shape[-1] > 0.9  # edges near nominal flux
