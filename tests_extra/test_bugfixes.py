@@ -71,3 +71,12 @@ def test_snr_uses_out_of_transit_noise():
     n_in = numpy.sum(r.per_transit_count)
     snr_expected = depth / sigma * numpy.sqrt(n_in)
     assert abs(r.snr / snr_expected - 1) < 0.15, (r.snr, snr_expected)
+
+def test_no_fit_is_detected():
+    """With transit_depth_min above any signal, TLS must report no detection
+    (1.33 compared max(chi2)==min(chi2) exactly, which fails by rounding)."""
+    rng = numpy.random.default_rng(3)
+    t = numpy.linspace(0, 60, 6000)
+    y = 1 + rng.normal(0, 1e-5, len(t))
+    r = TLS(t, y).power(transit_depth_min=1e-2, use_threads=1, **QUIET)
+    assert r.SDE == 0 and numpy.isnan(r.period)

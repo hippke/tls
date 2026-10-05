@@ -34,6 +34,7 @@ if __name__ == "__main__":
     # Create noise and merge with flux
     ppm = 5
     stdev = 10 ** -6 * ppm
+    numpy.random.seed(seed=0)  # reproducibility (was unseeded)
     noise = numpy.random.normal(0, stdev, int(samples))
     y = original_flux + noise
     y[1] = numpy.nan
@@ -59,14 +60,19 @@ if __name__ == "__main__":
     numpy.testing.assert_equal(results.in_transit_count, numpy.nan)
     numpy.testing.assert_equal(results.after_transit_count, numpy.nan)
     numpy.testing.assert_equal(results.before_transit_count, numpy.nan)
-    numpy.testing.assert_almost_equal(results.chi2_min, 13148.0)
-    numpy.testing.assert_almost_equal(results.chi2red_min, 1.0003043213633598)
+    # Since TLS 1.33 (PR #112) the "no fit" chi2 is sum((y-1)^2/dy^2) with
+    # dy = std(y) (no dy given), not len(y) as before.
+    y_clean = y[numpy.isfinite(y)]
+    chi2_expected = numpy.sum((y_clean - 1) ** 2 / numpy.std(y_clean) ** 2)
+    chi2red_expected = chi2_expected / (len(y_clean) - 4)
+    numpy.testing.assert_almost_equal(results.chi2_min, chi2_expected, decimal=5)
+    numpy.testing.assert_almost_equal(results.chi2red_min, chi2red_expected)
     numpy.testing.assert_equal(len(results.periods), 278)
     numpy.testing.assert_almost_equal(max(results.periods), 369.9831654894093)
     numpy.testing.assert_almost_equal(min(results.periods), 360.0118189140635)
     numpy.testing.assert_almost_equal(max(results.power), 0)
     numpy.testing.assert_almost_equal(min(results.periods), 360.0118189140635)
     numpy.testing.assert_almost_equal(min(results.power), 0)
-    numpy.testing.assert_almost_equal(max(results.chi2), 13148.0)
-    numpy.testing.assert_almost_equal(max(results.chi2red), 1.0003043213633598)
+    numpy.testing.assert_almost_equal(max(results.chi2), chi2_expected, decimal=5)
+    numpy.testing.assert_almost_equal(max(results.chi2red), chi2red_expected)
     print("Test passed: transit_depth_min=1000*10**-6, where no transit is fit")

@@ -199,7 +199,14 @@ class transitleastsquares(object):
         # (kept as in TLS <= 1.33; only used for the model curves)
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
 
-        if max(test_statistic_residuals) == min(test_statistic_residuals):
+        # BUGFIX: "no transit fit at all" was detected with an exact float
+        # comparison max(chi2) == min(chi2). Since TLS 1.33 the no-fit chi2 is
+        # computed per period from re-sorted data, so rounding differences
+        # (~1e-12) broke this test and a garbage "detection" (depth=0) was
+        # reported. A period without any fit keeps best_depth == 0.
+        if numpy.all(test_statistic_depths == 0) or (
+            max(test_statistic_residuals) == min(test_statistic_residuals)
+        ):
             no_transits_were_fit = True
             warnings.warn('No transit were fit. Try smaller "transit_depth_min"')
         else:
