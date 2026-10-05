@@ -180,7 +180,10 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_b
         sort_index = numpy.argsort(phases, kind="mergesort")  # 75% of CPU time
         phases = phases[sort_index]
         flux = y[sort_index]
-        dy = dy[sort_index]
+        # BUGFIX: previously `dy = dy[sort_index]` overwrote the input array, so
+        # the uncertainties were re-permuted cumulatively in every iteration,
+        # and the subsequent roll assigned the *flux* to dy. Use a local copy.
+        dy_sorted = dy[sort_index]
 
         # Roll so that the signal starts at index 0
         # Numpy roll is slow, so we replace it with less elegant concatenate
@@ -188,10 +191,16 @@ def final_T0_fit(signal, depth, t, y, dy, period, T0_fit_margin, show_progress_b
         # dy = numpy.roll(dy, roll_cadences)
         roll_cadences = int(dur / 2) + 1
         flux = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
-        dy = numpy.concatenate([flux[-roll_cadences:], flux[:-roll_cadences]])
+        dy_sorted = numpy.concatenate(
+            [dy_sorted[-roll_cadences:], dy_sorted[:-roll_cadences]]
+        )
 
-        residuals_intransit = numpy.sum((flux[:dur] - signal) ** 2 / dy[:dur] ** 2)
-        residuals_ootr = numpy.sum((flux[dur:] - signal_ootr) ** 2 / dy[dur:] ** 2)
+        residuals_intransit = numpy.sum(
+            (flux[:dur] - signal) ** 2 / dy_sorted[:dur] ** 2
+        )
+        residuals_ootr = numpy.sum(
+            (flux[dur:] - signal_ootr) ** 2 / dy_sorted[dur:] ** 2
+        )
         residuals_total = residuals_intransit + residuals_ootr
 
         if show_progress_info:
