@@ -1,3 +1,3 @@
-TLS_VERSIONING = "1.34.0.dev0"
-TLS_DATE = "2 Oct 2026"
+TLS_VERSIONING = "2.0"
+TLS_DATE = "5 Oct 2026"
 __version__ = TLS_VERSIONING
