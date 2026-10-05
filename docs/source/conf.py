@@ -1,9 +1,9 @@
 html_show_sourcelink = False
 project = 'Transit Least Squares'
-copyright = '2019 Michael Hippke, Rene Heller'
+copyright = '2019-2026 Michael Hippke, Rene Heller'
 author = 'Michael Hippke, Rene Heller'
-version = ''
-release = ''
+version = '2.0'
+release = '2.0'
 extensions = ['sphinx.ext.mathjax',]
 templates_path = ['_templates']
 source_suffix = '.rst'

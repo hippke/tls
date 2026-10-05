@@ -56,18 +56,11 @@ In the right panel, the only change is ``transit_depth_min=200*10**-6``. That is
 How fast is TLS?
 ----------------
 
-Very fast! It can search an entire unbinned Kepler K2 lightcurve (90 days, 4000 datapoints) for the best-fit limb-darkened transit model in a few seconds on a typical laptop computer.
+Very fast! A typical unbinned Kepler K2 light curve (90 days, ~4000 datapoints) is searched for the best-fit limb-darkened transit model in about half a second on a typical laptop computer, after a one-time numba JIT compilation of a few seconds (the compiled kernels are cached).
 
-In a typical K2 light curve (e.g., EPIC 201367065), TLS (default configuration) performs :math:`3\times10^8` light curve evaluations in the :math:`\chi^2` sense, over 8500 trial periods, each including a transit and the out-of-transit part of the light curve. 
+In a typical K2 light curve (e.g., EPIC 201367065), TLS (default configuration) tests ~8500 trial periods. TLS 2.0 evaluates the same statistic as the original implementation, but with a rewritten numba kernel stack: the phase-folded correlations are computed algebraically from prefix sums (no per-point residual loops), the templates are approximated piecewise-linearly (validated against the exact statistic), and the search is distributed over a persistent pool of worker processes. Compared to TLS 1.x, this makes searches 30-60x faster on warm benchmarks, with identical detection rates in hundreds of injection-recovery tests. The exact backend (``backend="fused"``) reproduces the original algorithm up to floating-point rounding, and multi-year data sets (e.g., simulated PLATO light curves with ~100k datapoints) that previously took hours are searched in minutes.
 
-A single phase-folded light curve evaluation calculates the squared residuals of the best-fit limb-darkened model light curve to the data points. It pulls the out-of-transit residuals from a cache (if re-usable from previous models) or calculates and caches them. In the end, it returns the :math:`\chi^2` of this model to the main routine. One such individual model comparison consumes (on average) 230 ns of wall-clock time on one core of an Intel Core i5-6300U at 2.4 GHz.
-
-The average number of in-transit points (in the phase-folded view), i.e. the transit duration in cadences, is 138 (in this example). Considering the out-of-transit points, almost :math:`10^{13}` squared-residuals-calculations would be required. Through careful evaluation of which out-of-transit points have previously been calculated and can be re-used, ~96% of these repetitive calculations can be avoided.
-
-In Kepler K2 light curves, on average ~53% of the total compute time is required for phase-folding and sorting. Sorting is set to use numpy's `MergeSort` algorithm which is implemented in the C language. This is slightly faster than the more commonly used `QuickSort`, because phase-folded data is already partially sorted.
-
-But: TLS is written in Python and JIT-compiled with numba. How much faster would a pure C or Fortran implementation be? Not much faster, if faster at all. The innermost numba-loop which calculates the residuals in the :math:`\chi^2` sense has been measured with a throughput of 12.2 GFLOPs on a single core on an Intel Core i5-6300U at 2.4 GHz. The manufacturer spec-sheet gives a maximum of 16.9 GFLOPs per core at this clock speed, i.e. TLS pulls 72% of the theoretical maximum. The remaining fraction is very difficult to pull, as it includes a relevant amount of I/O in the form of array shifts. It may be possible to shave off a few percent using hand-optimized assembly, but certainly not more than of order 10%.
-
+The first call on a machine compiles the kernels; every later search, also in the worker processes, starts immediately from the cache. For a quick look at very large data, you can bin the data (see "Data resampling" in the Python interface documentation).
 
 Edge effect jitter correction
 -----------------------------
@@ -85,7 +78,7 @@ Small period trial ranges
 
 TLS can be parametrized to search over a restricted period range using ``period_min`` and ``period_max``. TLS will then create an optimal period search grid in  ``[period_min, ..., period_max]``. If the range is very small, only a few periods would be tested. This works in the least-squares (:math:`\chi^2`) sense, i.e. it would detect the period with the smallest residuals for our transit model. With only a few period trials, however, no ``power`` spectrum can be created (sometimes called "SDE-ogram"). This is because ``power`` is normalized by its standard deviation, and a standard deviation of just a few (noisy) points is not meaningful. The most common detection criteria is the SDE, often required to be >9 for a signal to be considered interesting. As the SDE is located at the maximum of ``power``, it can not be calculated without it. Thus, a small number of period trials are problematic. A large number of periods result in a robuster estimate of the ``power`` noise floor, and this in a robuster estimate of the height of the peak, the SDE.
 
-TLS solves the issue of very small period ranges by requiring at least 100 trial periods, and extends the period range to its (large) defaults if the grid is too small based on the supplied parameters. Thus, if you set ``period_min=365.2`` and ``period_max=365.3``, TLS will probably default to a larger range (depending on your stellar mass, radius, and oversampling parameter). This is displayed at the start of each TLS run:
+TLS requires at least 100 trial periods for a meaningful SDE. If the stellar parameters yield a smaller grid, it retries with default stellar parameters (R_star=M_star=1) while keeping your ``period_min``, ``period_max``, ``oversampling_factor`` and ``n_transits_min``; if even then no period fits the range, a ValueError is raised. Thus, if you set ``period_min=365.2`` and ``period_max=365.3``, you will get the trial periods inside this range (or a clear error), rather than a silently enlarged range. The grid actually searched is displayed at the start of each TLS run:
 
 ``Searching 18113 data points, 4726 periods from 0.602 to 27.867 days``
 

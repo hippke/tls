@@ -50,14 +50,13 @@ Parameters used for the period search grid and the transit duration search grid.
 
 
 
-Physical parameters to create a
-`Mandel & Agol (2002) <https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract>`_ transit model using a subset of the
-`batman module <https://www.cfa.harvard.edu/~lkreidberg/batman/>`_  and syntax (`Kreidberg 2015 <https://ui.adsabs.harvard.edu/#abs/2015PASP..127.1161K/abstract>`_). Available defaults are described below.
+Physical parameters to create a transit model. Available defaults are described below. TLS 2.0 uses its own transit model implementation (no runtime dependency on batman), following the
+`Mandel & Agol (2002) <https://ui.adsabs.harvard.edu/#abs/2002ApJ...580L.171M/abstract>`_ syntax (`Kreidberg 2015 <https://ui.adsabs.harvard.edu/#abs/2015PASP..127.1161K/abstract>`_).
 
-:per: *(float)* Orbital period (in units of days). Default: X.
-:rp: *(float)* Planet radius (in units of stellar radii). Default: X.
-:a: *(float)* Semi-major axis (in units of stellar radii). Default: X.
-:inc: *(float)* Orbital inclination (in degrees). Default: 90.
+:per: *(float)* Orbital period (in units of days). Default: 12.9.
+:rp: *(float)* Planet radius (in units of stellar radii). Default: 0.03.
+:a: *(float)* Semi-major axis (in units of stellar radii). Default: 23.1.
+:inc: *(float)* Orbital inclination (in degrees). Default: 89.21.
 :b: *(float)* Orbital impact parameter as the sky-projected distance between the centre of the stellar disc and the centre of the planetary disc at conjunction. If set, overrules ``inc=degrees(arccos(b/a)``. Default: 0.
 :ecc: *(float)* Orbital eccentricity. Default: 0.
 :w: *(float)* Argument of periapse (in degrees). Default: 90.
@@ -75,22 +74,33 @@ Parameters to balance detection efficiency and computational requirements:
 :transit_depth_min: *(float, default: 10 ppm)* Shallowest transit depth to be fitted. Transit depths down to half the transit_depth_min can be found at reduced sensitivity. A reasonable value should be estimated from the data to balance sensitivity and avoid fitting the noise floor. Overfitting may cause computational requirements larger by a factor of 10. For reference, the shallowest known transit is 11.9 ppm (Kepler-37b, `Barclay et al. 2013 <http://adsabs.harvard.edu/abs/2013Natur.494..452B>`_)
 :oversampling_factor: *(int, default: 3)* Oversampling of the period grid to avoid that the true period falls in between trial periods and is missed.
 :T0_fit_margin: *(float, default: 0.01)* Acceptable error margin of the mid-transit time T0. Unit: fraction of the transit duration (0.01 is 1%). For small datasets (e.g., Kepler K2; generally: <10k datapoints), this can be set to 0 with minor speed penalty (seconds). Then, every single cadence is sampled. In data with many cadences, however, this can take very long and can have negligible benefits. As an example, consider a Kepler LC light curve of 60000 points, with a maximum fractional transit duration :math:`T_{14}/P=0.12`. The longest phase-folded transit signal to be tested is then 7200 points long. With Kepler noise, shifting this signal point-by-point is overkill. Shifting by 1% of the transit duration would result in shifts of 72 cadences for this specific signal.
+:T0_search_margin: *(float, default: same as T0_fit_margin)* Resolution of the T0 grid **during the period search**, in the same units as ``T0_fit_margin``. The search skips phase shifts for trial templates wider than 1/margin cadences. In TLS <= 1.33, ``T0_fit_margin`` silently had this second role; the two resolutions can now be controlled independently.
 
 .. note::
 
    Higher ``oversampling_factor`` increases the detection efficiency at the cost of a linear increase in computational effort. Reasonable values may be 2-5 and should be tested empirically for the actual data. An upper limit can be found when the period step is smaller than the cadence, so that the error from shifting the model by one data point in phase dominates over the period trial shift. For a planet with a 365-day period orbiting a solar mass and radius star, this parity is reached for ``oversampling_factor=9`` at 30 min cadence (Kepler LC). Shorter periods have reduced oversampling benefits, as the cadence becomes a larger fraction of the period.
-   
-   
+
+
 Parameters to adjust the computational load and the user experience:
 
 :use_threads: *(int)* Number of parallel threads to be used. A processor like the Intel Core i7-8700K has 6 cores and can run 12 threads in parallel using hyperthreading. Setting ``use_threads=12`` will cause a full load. If no parameter is given, TLS determines the number of available threads and uses the maximum available (in this case: 12).
 :show_progress_bar: *(bool, default: True)* When set to ``False``, no progress bar (using ``tqdm``) is shown
+:backend: *(str, default: "fused-pl")* Search backend. ``numba`` is the reference implementation of the original TLS algorithm (slowest). ``fused`` is a reimplementation of the same statistic with fused numba kernels; it is exact up to floating-point rounding and returns bit-identical results. ``fused-pl`` (default) uses piecewise-linear template approximations and is validated against the exact statistic: identical detection rates in hundreds of injection-recovery tests, with |dSDE| <= 0.04. The backend can also be selected with the environment variable ``TLS_BACKEND``.
+:verbose: *(bool default: True)* Prints various status information during search. If set to ``False``, no status information is shown.
+
+
+SDE periodogram detrending
+--------------------------------
+
+The ``power`` spectrum (the "SDE-ogram") is obtained from the raw spectrum by subtracting a running median, which removes the period-dependent noise background. The way this background is removed is controlled by:
+
+:SDE_detrend: *(str, default: "median")*
+   - ``"median"``: TLS <= 1.33 behaviour (Hippke & Heller 2019, following Ofir 2014): subtract a running median with a kernel of ``oversampling_factor * 30`` period grid points.
+   - ``"hybrid"``: first subtract the analytic extreme-value background. For white (Gaussian) noise, the background is exactly ``a + b*ln(P)`` (slope ~(4/3)/N with N the number of data points); for heavy-tailed noise (stellar flares, ill-corrected jumps), a generalized law with a power-law growth is fitted robustly from the periodogram itself. A running median (1.5x wider kernel, tapered to the normal width at the grid edges) then removes residual localized background (e.g., systematics plateaus) that the analytic law cannot express.
 
 .. note::
 
-   Multi-threading (``use_threads>1`) only works with TLS running on Python 3 as of now. On Python 2, TLS should work, but will fall back to single-core.
-
-:verbose: *(bool default: True)* Prints various status information during search. If set to ``False``, no status information is shown.
+   Use ``SDE_detrend="hybrid"`` when the noise background of your data is not white, e.g., when detrending residuals leave period-dependent plateaus. For such cases, the median-only SDE can over- or underestimate the significance of peaks; the hybrid detrend measures the SDE against a physically motivated background. For white noise, both options are equivalent. The default ``"median"`` is unchanged and reproduces TLS <= 1.33 exactly.
 
 
 
@@ -101,7 +111,7 @@ Return values
 The TLS spectra:
 
 :periods: *(array)* The period grid used in the search
-:power: *(array)* The power spectrum per period as defined in the TLS paper. We recommend to use this spectrum to assess transit signals. It is the median-smoothed ``power_raw`` spectrum.
+:power: *(array)* The power spectrum per period as defined in the TLS paper. We recommend to use this spectrum to assess transit signals. It is the detrended ``power_raw`` spectrum (running median by default; see the ``SDE_detrend`` parameter).
 :power_raw: *(array)* The raw power spectrum (without median smoothing) as defined in the TLS paper
 :SR: *(array)* Signal residue similar to the BLS SR
 :chi2: *(array)* Minimum chi-squared (:math:`\chi^2`) per period
@@ -205,7 +215,7 @@ returns a period grid with 32172 values:
 
 
 .. note::
-    To avoid generating an infinitely large period_grid, parameters are auto-enforced to the ranges ``0.1 < R_star < 10000`` and ``0.01 < M_star < 1000``. Some combinations of mostly implausible values, such as ``R_star=1`` with ``M_star=5`` yield empty period grids. If the grid size is less than 100 values, the function returns the default grid ``R_star=M_star=1``. Very short time series (less than a few days of duration) default to a grid size with a span of 5 days.
+    To avoid generating an infinitely large period_grid, parameters are auto-enforced to the ranges ``0.1 < R_star < 10000`` and ``0.01 < M_star < 1000``. Some combinations of mostly implausible values, such as ``R_star=1`` with ``M_star=5`` yield empty period grids. If the grid size is less than 100 values, the function retries with ``R_star=M_star=1`` while honouring ``period_min``, ``period_max``, ``oversampling_factor`` and ``n_transits_min``; an empty grid raises a ValueError. Very short time series (less than a few days of duration) default to a grid size with a span of 5 days.
 
 
 
