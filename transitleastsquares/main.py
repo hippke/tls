@@ -195,9 +195,8 @@ class transitleastsquares(object):
         test_statistic_rows = numpy.array(test_statistic_rows)[sort_index]
         test_statistic_depths = numpy.array(test_statistic_depths)[sort_index]
 
-        idx_best = numpy.argmin(test_statistic_residuals)
-        best_row = test_statistic_rows[idx_best]
-        duration = lc_cache_overview["duration"][best_row]
+        # Note: unlike the cache, this value is *not* rounded up to an even number
+        # (kept as in TLS <= 1.33; only used for the model curves)
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.t))
 
         if max(test_statistic_residuals) == min(test_statistic_residuals):
@@ -270,6 +269,11 @@ class transitleastsquares(object):
             index_highest_power = numpy.argmax(power)
             period = test_statistic_periods[index_highest_power]
             depth = test_statistic_depths[index_highest_power]
+            # BUGFIX: the template row (duration) was taken from the period with
+            # minimum chi2, while period and depth come from the period with the
+            # highest (detrended) power. These can differ; use the same period.
+            best_row = test_statistic_rows[index_highest_power]
+            duration = lc_cache_overview["duration"][best_row]
             T0 = final_T0_fit(
                 signal=lc_arr[best_row],
                 depth=depth,
