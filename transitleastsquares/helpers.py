@@ -27,6 +27,16 @@ def cleaned_array(t, y, dy=None):
                     valid = True
         return valid
 
+    def isvalid_time(value):
+        # BUGFIX: time stamps <= 0 (e.g. time relative to an epoch, or t=0 at
+        # the start of a simulated series) were silently discarded together
+        # with their flux values. Time only has to be finite.
+        valid = False
+        if value is not None:
+            if numpy.isfinite(value):
+                valid = True
+        return valid
+
     # Start with empty Python lists and convert to numpy arrays later (reason: speed)
     clean_t = []
     clean_y = []
@@ -40,14 +50,14 @@ def cleaned_array(t, y, dy=None):
 
         # Case: t, y, dy
         if dy is not None:
-            if isvalid(y[i]) and isvalid(t[i]) and isvalid(dy[i]):
+            if isvalid(y[i]) and isvalid_time(t[i]) and isvalid(dy[i]):
                 clean_y.append(y[i])
                 clean_t.append(t[i])
                 clean_dy.append(dy[i])
 
         # Case: only t, y
         else:
-            if isvalid(y[i]) and isvalid(t[i]):
+            if isvalid(y[i]) and isvalid_time(t[i]):
                 clean_y.append(y[i])
                 clean_t.append(t[i])
 

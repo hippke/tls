@@ -80,3 +80,14 @@ def test_no_fit_is_detected():
     y = 1 + rng.normal(0, 1e-5, len(t))
     r = TLS(t, y).power(transit_depth_min=1e-2, use_threads=1, **QUIET)
     assert r.SDE == 0 and numpy.isnan(r.period)
+
+def test_cleaned_array_keeps_nonpositive_times():
+    t = numpy.linspace(-5, 5, 11)
+    y = numpy.ones(11)
+    ct, cy = cleaned_array(t, y)
+    assert len(ct) == 11
+    ct, cy, cdy = cleaned_array(t, y, numpy.ones(11))
+    assert len(ct) == 11
+    t[3] = numpy.nan
+    ct, cy = cleaned_array(t, y)
+    assert len(ct) == 10
