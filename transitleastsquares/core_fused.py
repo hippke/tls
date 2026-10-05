@@ -236,6 +236,7 @@ def search_period_fused(
     pl_w_max,
     t0_coarsen,
     scout_every,
+    ls_depth,
     fbuf,
     ibuf,
     vbuf,
@@ -262,6 +263,11 @@ def search_period_fused(
     scout_every = s > 0 (idea L8, approximate): only every s-th allowed
     duration (and the longest) scans all phases; the others scan windows of
     +- one duration around the best centres found by these scouts.
+    ls_depth (idea B6/L9, statistic change): depth by least squares per shift,
+    k = AR / A2 and gain = AR^2 / A2 (shifts with AR <= 0 skipped), instead
+    of TLS's box mean * overshoot. The box-depth threshold still selects
+    the shifts. Pruning: gain <= R2 (Cauchy-Schwarz; scaled by A2_max / A2
+    for the U2 approximation).
 
     prune: skip shifts whose gain provably cannot beat the best gain so far.
     With R2 = sum r^2 w over the window and Cauchy-Schwarz AR <= sqrt(A2 R2),
@@ -585,7 +591,15 @@ def search_period_fused(
                             k = 1 / (signal_depth / target_depth)
                             if prune and length >= PRUNE_MIN_LENGTH:
                                 r2 = cum_r2[i + length] - cum_r2[i]
-                                if uniform_weights:  # A2 known exactly
+                                if ls_depth:
+                                    bound = r2
+                                    if a2_win:
+                                        bound = (
+                                            r2
+                                            * a2_wmax
+                                            / (a2_unit * (cum_w[i + length] - cum_w[i]))
+                                        )
+                                elif uniform_weights:  # A2 known exactly
                                     bound = (
                                         2 * k * numpy.sqrt(a2_const * r2)
                                         - k * k * a2_const
@@ -638,7 +652,14 @@ def search_period_fused(
                                 ar, a2 = _dot2(
                                     prof, rw[i : i + length], w[i : i + length]
                                 )
-                            gain = 2 * k * ar - k * k * a2
+                            if ls_depth:
+                                if ar <= 0 or a2 <= 0:
+                                    continue
+                                k = ar / a2
+                                target_depth = k * signal_depth
+                                gain = ar * ar / a2
+                            else:
+                                gain = 2 * k * ar - k * k * a2
                             if gain > dur_gain:
                                 dur_gain = gain
                                 dur_i = i
@@ -908,6 +929,7 @@ class FusedProblem:
         a2_approx=False,
         t0_coarsen=1,
         scout_every=0,
+        ls_depth=False,
     ):
         """Piecewise-linear templates (idea L3, see pl_templates) for
         templates with length >= min_length and shift stride < max_stride;
@@ -928,6 +950,7 @@ class FusedProblem:
             float(numpy.max(self.inv_dy2)),
             int(t0_coarsen),
             int(scout_every),
+            bool(ls_depth),
         )
 
     def set_precision(self, dtype):
@@ -1048,6 +1071,7 @@ def search_periods_fused_parallel(
     pl_w_max,
     t0_coarsen,
     scout_every,
+    ls_depth,
     n_chunks,
 ):
     """search_period_fused for many periods, numba threads (prange over
@@ -1105,6 +1129,7 @@ def search_periods_fused_parallel(
                 pl_w_max,
                 t0_coarsen,
                 scout_every,
+                ls_depth,
                 fbuf,
                 ibuf,
                 vbuf,

@@ -1,5 +1,7 @@
 """Backend "fused": allocation-free fused period kernel (core_fused.py), numba."""
 
+import os
+
 from transitleastsquares.backends.pool import ProcessPoolBackend
 from transitleastsquares.core_fused import FusedProblem
 
@@ -13,6 +15,7 @@ class FusedBackend(ProcessPoolBackend):
     a2_spread_max = 0.0  # U2 (A2 from the window-mean weight) if spread <= this
     t0_coarsen = 1  # L5: coarse T0 grid with local refinement (1: off)
     scout_every = 0  # L8: every n-th duration scans all phases (0: off)
+    ls_depth = False  # B6/L9: least-squares depth per shift (statistic change)
 
     def prepare(self, problem):
         fp = FusedProblem(problem)
@@ -24,6 +27,7 @@ class FusedBackend(ProcessPoolBackend):
             a2_approx=self.use_a2_approx(fp),
             t0_coarsen=self.coarsen(),
             scout_every=self.scouts(),
+            ls_depth=self.ls_depth or os.environ.get("TLS_LS_DEPTH") == "1",
         )
         return fp
 
@@ -86,6 +90,7 @@ class FusedThreadsBackend(FusedBackend):
             a2_approx=self.use_a2_approx(fp),
             t0_coarsen=self.coarsen(),
             scout_every=self.scouts(),
+            ls_depth=self.ls_depth or os.environ.get("TLS_LS_DEPTH") == "1",
         )
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
