@@ -9,12 +9,14 @@ class FusedBackend(ProcessPoolBackend):
     min_stride = 0  # 0: exact correlation; see FusedBinnedBackend
     pieces = 0  # piecewise-constant templates (B1b); 0: off
     dtype = "float64"  # dot-product precision
+    pl = (0,)  # piecewise-linear templates (L3): (min_length, max_stride, eps)
 
     def prepare(self, problem):
         fp = FusedProblem(problem)
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
+        fp.set_pl(*self.pl)
         return fp
 
     def evaluate(self, state, period):
@@ -39,6 +41,7 @@ class FusedThreadsBackend(FusedBackend):
         fp.pieces = self.pieces
         fp.set_binning(self.min_stride)
         fp.set_precision(self.dtype)
+        fp.set_pl(*self.pl)
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -65,6 +68,7 @@ class FusedThreadsBackend(FusedBackend):
                         float(tls_constants.SIGNAL_DEPTH),
                         fp.prune,
                         *fp.binning,
+                        *fp.pl,
                         int(min(use_threads, numba.config.NUMBA_NUM_THREADS)),
                     )
                 )
@@ -101,3 +105,13 @@ class FusedPiecesBackend(FusedBinnedBackend):
 
     name = "fused-pieces"
     pieces = 100
+
+
+class FusedPLBackend(FusedBackend):
+    """Approximate: piecewise-linear templates (idea L3, PERFORMANCE_LOG.md
+    step 17) for all templates with >= 64 samples, any shift stride; no
+    stride bins. AR from about 20 terms on double prefix sums."""
+
+    name = "fused-pl"
+    exact = False
+    pl = (64, 1 << 62, 1e-2)

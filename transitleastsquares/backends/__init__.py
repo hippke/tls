@@ -120,6 +120,7 @@ _REGISTRY: Dict[str, Union[str, Callable[[], SearchBackend]]] = {
     "c": "transitleastsquares.backends.c_kernel:CBackend",
     "fused-binned": "transitleastsquares.backends.fused:FusedBinnedBackend",
     "fused-pieces": "transitleastsquares.backends.fused:FusedPiecesBackend",
+    "fused-pl": "transitleastsquares.backends.fused:FusedPLBackend",
 }
 
 

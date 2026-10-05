@@ -41,7 +41,7 @@ def test_env_var(monkeypatch):
     monkeypatch.setenv("TLS_BACKEND", "numba")
     assert isinstance(get_backend(), NumbaBackend)
     monkeypatch.delenv("TLS_BACKEND")
-    assert get_backend().name == "fused-binned"  # package default
+    assert get_backend().name == "fused-pl"  # package default
 
 
 class CountingBackend(NumbaBackend):

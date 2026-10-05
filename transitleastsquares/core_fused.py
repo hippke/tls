@@ -137,7 +137,7 @@ def workspace_size(n, maxw):
     """Sizes (float64, int64, value buffer) of the work buffers of
     search_period_fused."""
     m = n + maxw + 1
-    return 4 * n + 4 * m + 8, 2 * n + 2, 6 * m
+    return 4 * n + 6 * m + 16, 2 * n + 2, 6 * m
 
 
 # Pruning pays off only if the dot product is much more expensive than the bound
@@ -173,6 +173,29 @@ def _dot2(a, r, w):
 
 
 @numba.njit(fastmath=True, cache=True)
+def _pl_eval(c, pos, dd):
+    """sum_t c[t] * dd[pos[t]]: correlation of a piecewise-linear template
+    with the data whose double prefix sum is dd (idea L3)."""
+    acc = 0.0
+    for t in range(len(c)):
+        acc += c[t] * dd[pos[t]]
+    return acc
+
+
+@numba.njit(cache=True)
+def _double_prefix(x, m, mu, dd):
+    """dd[k] = sum_{l<k} S[l], S[l] = sum_{q<l} (x[q] - mu), for k = 0..m+1."""
+    s = 0.0
+    acc = 0.0
+    dd[0] = 0.0
+    for k in range(m + 1):
+        acc += s
+        dd[k + 1] = acc
+        if k < m:
+            s += x[k] - mu
+
+
+@numba.njit(fastmath=True, cache=True)
 def search_period_fused(
     period,
     t,
@@ -200,6 +223,14 @@ def search_period_fused(
     boff,
     a_bin,
     a2_bin,
+    pl_n,
+    pl_off,
+    pl_n2,
+    pl_off2,
+    pl_pos,
+    pl_c,
+    pl_sum,
+    pl_sum2,
     fbuf,
     ibuf,
     vbuf,
@@ -212,6 +243,11 @@ def search_period_fused(
     nbins/boff/a_bin/a2_bin: stride-binned templates (see bin_templates). With
     nbins[u] == 0 (default, exact) the full-resolution correlation is used;
     otherwise the approximate stride-binned correlation (idea B1).
+
+    pl_*: piecewise-linear templates (see pl_templates, idea L3). If
+    pl_n[u] > 0, AR (and A2 for non-uniform weights) of template u come from
+    pl_n[u] (pl_n2[u]) terms on double prefix sums; this takes precedence
+    over the bins. Approximate unless every sample is a knot.
 
     prune: skip shifts whose gain provably cannot beat the best gain so far.
     With R2 = sum r^2 w over the window and Cauchy-Schwarz AR <= sqrt(A2 R2),
@@ -241,6 +277,10 @@ def search_period_fused(
     o += m + 1
     cum_rw = fbuf[o : o + m + 1]
     o += m + 1
+    dd_rw = fbuf[o : o + m + 2]
+    o += m + 2
+    dd_w = fbuf[o : o + m + 2]
+    o += m + 2
     # values entering the dot products: dtype of vbuf (float64 or float32)
     w = vbuf[:m]
     rw = vbuf[m : 2 * m]
@@ -270,6 +310,17 @@ def search_period_fused(
         cum_rw[k + 1] = cum_rw[k] + (1.0 - f) * wk
         if k < n:
             total += (f - 1.0) ** 2 * wk
+
+    # Double prefix sums for the piecewise-linear templates (mean removed for
+    # precision; the mean's contribution mu * sum(p) is added back)
+    mu_rw = 0.0
+    mu_w = 0.0
+    if len(pl_c) > 0:
+        mu_rw = cum_rw[n] / n
+        _double_prefix(rw, m, mu_rw, dd_rw)
+        if not uniform_weights:
+            mu_w = cum_w[n] / n
+            _double_prefix(w, m, mu_w, dd_w)
 
     # Physically plausible template widths for this period
     # M_star_min / M_star_max are the masses paired with R_star_min (shortest
@@ -355,7 +406,14 @@ def search_period_fused(
             n_shifts = n  # shifts >= n repeat shifts already tested
 
         # Stride-binned correlation (approximate, only if nbins[u] > 0)
-        nb = nbins[u]
+        npl = pl_n[u]
+        pc = pl_c[pl_off[u] : pl_off[u] + npl]
+        pp = pl_pos[pl_off[u] : pl_off[u] + npl]
+        pc2 = pl_c[pl_off2[u] : pl_off2[u] + pl_n2[u]]
+        pp2 = pl_pos[pl_off2[u] : pl_off2[u] + pl_n2[u]]
+        psum = pl_sum[u] * mu_rw
+        psum2 = pl_sum2[u] * mu_w
+        nb = nbins[u] if npl == 0 else 0
         brw = rw[:0]
         bw = w[:0]
         ab = a_bin[:0]
@@ -405,7 +463,13 @@ def search_period_fused(
                             bound = 2 * k * numpy.sqrt(a2b * r2) - k * k * a2b
                     if bound * (1 + 1e-9) <= best_gain or bound < threshold:
                         continue
-                if nb > 0:
+                if npl > 0:
+                    ar = _pl_eval(pc, pp, dd_rw[i:]) + psum
+                    if uniform_weights:
+                        a2 = a2_const
+                    else:
+                        a2 = _pl_eval(pc2, pp2, dd_w[i:]) + psum2
+                elif nb > 0:
                     if multirow:
                         q = (i % bs) * q_row + i // bs
                     else:
@@ -477,6 +541,178 @@ def bin_templates(templates, margin, min_stride, pieces=0):
     return nbins, bsize, boff, numpy.concatenate(a_b), numpy.concatenate(a2_b)
 
 
+@numba.njit(cache=True)
+def _segment_ok(a, b, c, tol):
+    """Linear interpolant from sample b to sample c within tol of a[b..c]?"""
+    s = (a[c] - a[b]) / (c - b)
+    for j in range(b + 1, c):
+        if abs(a[b] + s * (j - b) - a[j]) > tol:
+            return False
+    return True
+
+
+@numba.njit(cache=True)
+def _greedy_knots(a, tol):
+    """Integer knots 0 = q_0 < ... < q_K = len(a) - 1 such that the linear
+    interpolant through (q_k, a[q_k]) stays within tol of every sample.
+    Each segment is grown by doubling, then bisection (O(L log L))."""
+    n = len(a)
+    knots = numpy.empty(n, dtype=numpy.int64)
+    knots[0] = 0
+    k = 1
+    b = 0
+    while b < n - 1:
+        good = b + 1  # always valid
+        step = 1
+        bad = -1
+        while True:
+            c = b + 2 * step
+            if c > n - 1:
+                c = n - 1
+            if c <= good:
+                break
+            if _segment_ok(a, b, c, tol):
+                good = c
+                if c == n - 1:
+                    break
+                step *= 2
+            else:
+                bad = c
+                break
+        if bad > 0:
+            while bad - good > 1:
+                c = (good + bad) // 2
+                if _segment_ok(a, b, c, tol):
+                    good = c
+                else:
+                    bad = c
+        knots[k] = good
+        k += 1
+        b = good
+    return knots[:k]
+
+
+@numba.njit(cache=True)
+def _pl_lsq(a, q):
+    """Least-squares values v at the knots q of the piecewise-linear fit to a
+    (hat-function basis, tridiagonal normal equations, Thomas algorithm).
+    Returns (v, fitted samples)."""
+    nq = len(q)
+    diag = numpy.zeros(nq)
+    off = numpy.zeros(nq)
+    rhs = numpy.zeros(nq)
+    for s in range(nq - 1):
+        h = q[s + 1] - q[s]
+        last = q[s + 1] if s == nq - 2 else q[s + 1] - 1
+        for j in range(q[s], last + 1):
+            t = (j - q[s]) / h
+            h0 = 1.0 - t
+            diag[s] += h0 * h0
+            diag[s + 1] += t * t
+            off[s] += h0 * t
+            rhs[s] += h0 * a[j]
+            rhs[s + 1] += t * a[j]
+    # Thomas algorithm (symmetric tridiagonal, positive definite)
+    cp = numpy.zeros(nq)
+    dp = numpy.zeros(nq)
+    cp[0] = off[0] / diag[0]
+    dp[0] = rhs[0] / diag[0]
+    for i in range(1, nq):
+        den = diag[i] - off[i - 1] * cp[i - 1]
+        cp[i] = off[i] / den if i < nq - 1 else 0.0
+        dp[i] = (rhs[i] - off[i - 1] * dp[i - 1]) / den
+    v = numpy.zeros(nq)
+    v[nq - 1] = dp[nq - 1]
+    for i in range(nq - 2, -1, -1):
+        v[i] = dp[i] - cp[i] * v[i + 1]
+    p = numpy.empty(len(a))
+    for s in range(nq - 1):
+        h = q[s + 1] - q[s]
+        for j in range(q[s], q[s + 1] + 1):
+            t = (j - q[s]) / h
+            p[j] = (1.0 - t) * v[s] + t * v[s + 1]
+    return v, p
+
+
+def pl_fit(a, eps):
+    """Piecewise-linear approximation of the samples a (len >= 2), idea L3.
+
+    Knots from _greedy_knots(a, eps * max|a|); then least-squares values at
+    the knots (eps <= 0: every sample is a knot, exact). Returns
+    (positions, coefficients, sum of the approximation, approximation): for
+    any x, sum_j p_j x[i + j] = sum_t c_t D[i + pos_t] with D the double
+    prefix sum D[k] = sum_{l<k} S[l], S[l] = sum_{q<l} x[q]. The
+    coefficients are the second differences of the zero-padded p.
+    """
+    a = numpy.asarray(a, dtype=float)
+    n = len(a)
+    j = numpy.arange(n)
+    if eps > 0:
+        q = _greedy_knots(a, eps * numpy.max(numpy.abs(a)))
+        v, p = _pl_lsq(a, q)
+    else:
+        q = j.copy()
+        v = a.copy()
+        p = a.copy()
+    s = numpy.diff(v) / numpy.diff(q)  # slopes of the K segments
+    pos = [0, 1]
+    coef = [v[0], s[0] - v[0]]
+    for k in range(1, len(q) - 1):
+        pos.append(q[k] + 1)
+        coef.append(s[k] - s[k - 1])
+    pos += [n, n + 1]
+    coef += [-v[-1] - s[-1], v[-1]]
+    pos = numpy.array(pos, dtype=numpy.int64)
+    coef = numpy.array(coef)
+    keep = coef != 0
+    return pos[keep], coef[keep], float(numpy.sum(p)), p
+
+
+def pl_templates(templates, margin, min_length, max_stride, eps):
+    """Piecewise-linear templates for the kernel (idea L3).
+
+    Used for templates with length >= min_length, shift stride < max_stride
+    and fewer terms than samples; else pl_n[u] = 0 (bins or exact dot
+    product). Returns (pl_n, pl_off, pl_n2, pl_off2, pl_pos, pl_c, pl_sum,
+    pl_sum2): terms for a (n, off, sum) and for a^2 (n2, off2, sum2) in the
+    shared arrays pl_pos, pl_c.
+    """
+    widths, rows, offsets, lengths, profile, overshoot, sum_a2 = templates
+    nu = len(widths)
+    pl_n = numpy.zeros(nu, dtype=numpy.int64)
+    pl_n2 = numpy.zeros(nu, dtype=numpy.int64)
+    pl_off = numpy.zeros(nu, dtype=numpy.int64)
+    pl_off2 = numpy.zeros(nu, dtype=numpy.int64)
+    pl_sum = numpy.zeros(nu)
+    pl_sum2 = numpy.zeros(nu)
+    pos_all, c_all = [numpy.zeros(0, dtype=numpy.int64)], [numpy.zeros(0)]
+    o = 0
+    for u in range(nu):
+        length = int(lengths[u])
+        if length < max(2, min_length) or shift_stride(widths[u], margin) >= max_stride:
+            continue
+        a = profile[offsets[u] : offsets[u] + length]
+        pos, c, sm, _ = pl_fit(a, eps)
+        pos2, c2, sm2, _ = pl_fit(a * a, eps)
+        if eps > 0 and len(c) >= length:  # no saving (eps <= 0: exact, for tests)
+            continue
+        pl_n[u], pl_off[u], pl_sum[u] = len(c), o, sm
+        pl_n2[u], pl_off2[u], pl_sum2[u] = len(c2), o + len(c), sm2
+        pos_all += [pos, pos2]
+        c_all += [c, c2]
+        o += len(c) + len(c2)
+    return (
+        pl_n,
+        pl_off,
+        pl_n2,
+        pl_off2,
+        numpy.concatenate(pos_all),
+        numpy.concatenate(c_all),
+        pl_sum,
+        pl_sum2,
+    )
+
+
 class FusedProblem:
     """Precomputed, numba-friendly view of a backends.SearchProblem."""
 
@@ -492,6 +728,22 @@ class FusedProblem:
         self.prune = True
         self.dtype = numpy.float64
         self.set_binning(0)
+        self.set_pl(0)
+
+    def set_pl(self, min_length, max_stride=4, eps=1e-2):
+        """Piecewise-linear templates (idea L3, see pl_templates) for
+        templates with length >= min_length and shift stride < max_stride;
+        min_length <= 0: off."""
+        self.pl_args = (min_length, max_stride, eps)
+        if min_length <= 0:
+            min_length = 1 << 62
+        self.pl = pl_templates(
+            self.templates,
+            float(self.problem.T0_search_margin),
+            min_length,
+            max_stride,
+            eps,
+        )
 
     def set_precision(self, dtype):
         """float64 (default) or float32 for the dot products (approximate)."""
@@ -549,6 +801,7 @@ class FusedProblem:
             float(tls_constants.SIGNAL_DEPTH),
             self.prune,
             *self.binning,
+            *self.pl,
             *self.workspace(),
         )
         return period, chi2, row, depth
@@ -598,6 +851,14 @@ def search_periods_fused_parallel(
     boff,
     a_bin,
     a2_bin,
+    pl_n,
+    pl_off,
+    pl_n2,
+    pl_off2,
+    pl_pos,
+    pl_c,
+    pl_sum,
+    pl_sum2,
     n_chunks,
 ):
     """search_period_fused for many periods, numba threads (prange over
@@ -609,7 +870,7 @@ def search_periods_fused_parallel(
     maxw = widths[-1] + 1
     n = len(t)
     m = n + maxw + 1
-    nf = 4 * n + 4 * m + 8
+    nf = 4 * n + 6 * m + 16
     ni = 2 * n + 2
     for c_idx in numba.prange(n_chunks):
         fbuf = numpy.empty(nf)
@@ -643,6 +904,14 @@ def search_periods_fused_parallel(
                 boff,
                 a_bin,
                 a2_bin,
+                pl_n,
+                pl_off,
+                pl_n2,
+                pl_off2,
+                pl_pos,
+                pl_c,
+                pl_sum,
+                pl_sum2,
                 fbuf,
                 ibuf,
                 vbuf,

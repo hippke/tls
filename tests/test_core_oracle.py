@@ -143,11 +143,42 @@ def test_fused_kernel_matches_brute_force(seed, T0_fit_margin, with_dy, template
     ov, lc_arr = cache(t, y, template)
     lim = (C.R_STAR_MIN, C.R_STAR_MAX, C.M_STAR_MIN, C.M_STAR_MAX)
     fused = FusedProblem(SearchProblem(t, y, dy, lc_arr, ov, 1e-5, *lim, T0_fit_margin))
+    # piecewise-linear path (idea L3) with every sample a knot: exact algebra
+    fused_pl = FusedProblem(
+        SearchProblem(t, y, dy, lc_arr, ov, 1e-5, *lim, T0_fit_margin)
+    )
+    fused_pl.set_pl(2, 1 << 62, 0.0)
+    assert numpy.sum(fused_pl.pl[0] > 0) > 0
     for period in [2.3, 1.7, 4.11, 0.93, 0.61]:
-        _, chi2, row, depth = fused.search(period)
         b_chi2, b_row, b_depth = brute_force_period(
             period, t, y, dy, 1e-5, lc_arr, ov, *lim, T0_fit_margin
         )
-        numpy.testing.assert_allclose(chi2, b_chi2, rtol=1e-9)
-        assert row == b_row
-        numpy.testing.assert_allclose(depth, b_depth, rtol=1e-9)
+        for fp, rtol in [(fused, 1e-9), (fused_pl, 1e-8)]:
+            _, chi2, row, depth = fp.search(period)
+            numpy.testing.assert_allclose(chi2, b_chi2, rtol=rtol)
+            assert row == b_row
+            numpy.testing.assert_allclose(depth, b_depth, rtol=1e-9)
+
+
+@pytest.mark.parametrize("length", [2, 3, 17, 250])
+@pytest.mark.parametrize("eps", [0.0, 1e-3, 1e-2])
+def test_pl_fit_algebra(length, eps):
+    """pl_fit: sum_j p_j x[i+j] == sum_t c_t D[i+pos_t] (double prefix sums),
+    p within eps * max|a| of a, and the exact case eps = 0."""
+    from transitleastsquares.core_fused import pl_fit
+
+    rng = numpy.random.default_rng(length)
+    a = numpy.sin(numpy.linspace(0, 3, length)) ** 2 + 0.01
+    pos, c, psum, p = pl_fit(a, eps)
+    if eps == 0:
+        numpy.testing.assert_array_equal(p, a)
+    else:
+        assert numpy.max(numpy.abs(p - a)) <= 2 * eps * numpy.max(a)
+    x = rng.normal(size=length + 50)
+    S = numpy.concatenate([[0.0], numpy.cumsum(x)])
+    D = numpy.concatenate([[0.0], numpy.cumsum(S)])
+    for i in [0, 7, 48]:
+        numpy.testing.assert_allclose(
+            numpy.dot(c, D[i + pos]), numpy.dot(p, x[i : i + length]), atol=1e-10
+        )
+    numpy.testing.assert_allclose(psum, numpy.sum(p))
