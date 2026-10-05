@@ -275,7 +275,10 @@ class transitleastsquares:
     ):
         t, y, dy = self.t, self.y, self.dy
         SR, power_raw, power, SDE_raw, SDE = spectra(
-            found.chi2, self.oversampling_factor
+            found.chi2,
+            self.oversampling_factor,
+            detrend=self.SDE_detrend,
+            periods=found.periods,
         )
         index_highest_power = numpy.argmax(power)
         period = found.periods[index_highest_power]

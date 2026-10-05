@@ -103,6 +103,38 @@ PERIODS_SEARCH_ORDER = "shuffled"
 # This value has proven to yield numerically stable results.
 SDE_MEDIAN_KERNEL_SIZE = 30
 
+# Background trend removal for the SDE(P) periodogram (power(SDE_detrend=...)):
+#   "median"  TLS <= 1.33 behaviour (Hippke & Heller 2019, following Ofir 2014):
+#             subtract a running median of kernel = oversampling_factor *
+#             SDE_MEDIAN_KERNEL_SIZE
+#   "hybrid"  first subtract the analytic extreme-value background
+#             a + b*((P/P0)**s - 1)/s (GEV form; scratch/sde_analytic). For
+#             white (Gaussian) noise s -> 0 and the law is a + b*ln(P) with
+#             slope ~(4/3)/N; for heavy-tailed noise (strong outliers, e.g.
+#             stellar flares, ill-corrected jumps) s > 0 and the background
+#             grows as a power law. s is fitted robustly (iterative
+#             2.5-sigma clipping) from the periodogram itself; the log law
+#             is in the fit grid, so Gaussian data are unaffected. Then a
+#             running median of a 1.5x wider kernel (tapered to 1x at the
+#             grid edges) removes residual localized background
+#             (systematics plateaus) that the analytic law cannot express.
+SDE_DETREND = "median"
+
+# Width multiplier of the running-median kernel in the "hybrid" SDE detrend
+# (relative to the "median" kernel). 3 tracked broad background well but was
+# visually too wide (over-smoothed the corrected spectrum between peaks);
+# 1 makes the hybrid SDE identical to the median method (the analytic stage
+# is then fully absorbed by the equal-width residual median); 1.5 is the
+# adopted compromise (user-guided, rev 4).
+SDE_HYBRID_KERNEL_FACTOR = 1.5
+
+# In the "hybrid" SDE detrend, the running-median kernel tapers from the
+# wide factor to the "median"-method width within this fraction of the
+# period grid at both ends: real data can rise steeply above the (white-noise)
+# analytic trend towards P_max, which a wide kernel cannot follow
+# (e.g. Kepler-21 Q2-Q4: quarter-boundary systematics at P > 0.75 * P_max).
+SDE_HYBRID_EDGE_FRACTION = 0.05
+
 # T0 margins, in units of the transit duration (0.01 = 1 %).
 #
 # T0_FIT_MARGIN: resolution of the final T0 fit after the search. The phase
@@ -179,6 +211,7 @@ VALID_PARAMETERS = [
     "duration_grid_step",
     "transit_depth_min",
     "oversampling_factor",
+    "SDE_detrend",
     "T0_fit_margin",
     "T0_search_margin",
     "use_threads",

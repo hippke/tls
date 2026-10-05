@@ -69,6 +69,9 @@ def validate_args(self, kwargs):
     self.oversampling_factor = kwargs.get(
         "oversampling_factor", tls_constants.OVERSAMPLING_FACTOR
     )
+    self.SDE_detrend = kwargs.get("SDE_detrend", tls_constants.SDE_DETREND)
+    if self.SDE_detrend not in ("median", "hybrid"):
+        raise ValueError('SDE_detrend must be "median" or "hybrid"')
     self.period_max = kwargs.get("period_max", float("inf"))
     self.period_min = kwargs.get("period_min", 0)
     self.n_transits_min = kwargs.get("n_transits_min", tls_constants.N_TRANSITS_MIN)

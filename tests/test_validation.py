@@ -26,6 +26,7 @@ def test_invalid_use_threads(threads):
         dict(n_transits_min=0),
         dict(transit_template="nonexistent"),
         dict(backend="nonexistent"),
+        dict(SDE_detrend="nonexistent"),
     ],
 )
 def test_invalid_parameters(kwargs):

@@ -11,6 +11,13 @@ from transitleastsquares import tls_constants
 from transitleastsquares.core import fold
 from transitleastsquares.helpers import running_median, transit_mask
 
+# Consistency constant of the MAD (median absolute deviation):
+# for Gaussian data, median(|x - median(x)|) = MAD ~ sigma / 1.4826,
+# so 1.4826 * MAD estimates the standard deviation while being immune to
+# the outliers that would inflate a plain std. Used to scale the sigma
+# clipping in the robust SDE-trend fits below.
+MAD_TO_SIGMA = 1.4826
+
 
 @functools.lru_cache(maxsize=1)
 def _fap_table():
@@ -151,8 +158,180 @@ def period_uncertainty(periods, power):
         return float("inf")
 
 
-def spectra(chi2, oversampling_factor):
-    """SR, power_raw, power (median-detrended), SDE_raw and SDE from chi2"""
+def _sde_kernel(oversampling_factor, factor=1):
+    """Odd running-median kernel of the SDE detrend (factor 1: "median").
+
+    For factor 1 the expression is the one of TLS <= 1.33 (no int cast, so a
+    fractional oversampling_factor behaves exactly as before)."""
+    kernel = oversampling_factor * tls_constants.SDE_MEDIAN_KERNEL_SIZE * factor
+    if factor != 1:
+        kernel = int(kernel)
+    if kernel % 2 == 0:
+        kernel = kernel + 1
+    return kernel
+
+
+def _robust_lnp_fit(power_raw, periods, clip=2.5, rounds=3):
+    """Robust fit of power_raw ~ a + b*ln(P).
+
+    The white-noise background of the SDE(P) periodogram is linear in ln P
+    (extreme-value theory; scratch/sde_analytic). Iterative sigma clipping
+    (both sides) keeps real peaks from biasing the fit. Deterministic.
+    Returns (a, b).
+    """
+    x = numpy.log(periods)
+    A = numpy.column_stack([numpy.ones(len(x)), x])
+    keep = numpy.ones(len(x), dtype=bool)
+    coef = numpy.linalg.lstsq(A, power_raw, rcond=None)[0]
+    for _ in range(rounds):
+        resid = power_raw - A @ coef
+        med = numpy.median(resid[keep])
+        s = MAD_TO_SIGMA * numpy.median(numpy.abs(resid - numpy.median(resid)))
+        if not numpy.isfinite(s) or s <= 0:
+            break
+        keep = numpy.abs(resid - med) < clip * s
+        if keep.sum() < 3:  # degenerate: keep everything
+            keep = numpy.ones(len(x), dtype=bool)
+            break
+        coef = numpy.linalg.lstsq(A[keep], power_raw[keep], rcond=None)[0]
+    return coef
+
+
+def _robust_gev_fit(power_raw, periods, clip=2.5, rounds=3):
+    """Robust fit of the generalized extreme-value (GEV) background law
+
+        power_raw ~ a + b * ((P/P0)**s - 1)/s ,   P0 = geometric mean of P
+
+    Extreme-value theory: the periodogram background is the mean of a
+    maximum over M(P) ~ sum 1/q ~ P^(2/3) effectively independent trial
+    windows. Gaussian noise gives the Gumbel limit (s -> 0: the law is
+    a + b*ln P, the white-noise case of scratch/sde_analytic). Heavy-tailed
+    noise (strong outliers in the light curve, e.g. stellar flares or
+    ill-corrected discontinuities) puts the maximum in the Frechet domain:
+    the background grows as a power law M^xi, i.e. s = (2/3)*xi > 0. The
+    shape s is found from a coarse-plus-refined grid, choosing the value
+    that minimizes the robust (MAD) residual scale; a and b are fitted with
+    the same iterative 2.5-sigma clipping as _robust_lnp_fit, so real
+    transit peaks do not bias the fit. s=0 (log law) is in the grid, so the
+    fit can never be worse than the Gaussian law. Deterministic.
+
+    Returns (a, b, s, x) with x = ((P/P0)**s - 1)/s the basis vector.
+    """
+    n = len(periods)
+    x0 = numpy.log(periods)
+    p0 = numpy.exp(x0.mean())
+    lnP = x0 - numpy.log(p0)  # ln(P/P0)
+    s_scale = lnP.max() - lnP.min()
+
+    def robust_fit(s):
+        if abs(s) * s_scale < 1e-3:  # s -> 0: the log law
+            x = lnP
+        else:
+            x = numpy.expm1(s * lnP) / s
+        keep = numpy.ones(n, dtype=bool)
+        # normal equations on the (robustly clipped) 2-column basis
+        xs, ys = x, power_raw
+        sx, sxx, sxy, sy = xs.sum(), (xs * xs).sum(), (xs * ys).sum(), ys.sum()
+        det = sx * sx - n * sxx
+        if det == 0:
+            return None, None, x
+        b = (sx * sy - n * sxy) / det
+        a = (sy - b * sx) / n
+        for _ in range(rounds):
+            resid = ys - a - b * xs
+            med = numpy.median(resid)
+            mad = MAD_TO_SIGMA * numpy.median(numpy.abs(resid - numpy.median(resid)))
+            if not numpy.isfinite(mad) or mad <= 0:
+                break
+            keep = numpy.abs(resid - med) < clip * mad
+            if keep.sum() < 3:
+                keep = numpy.ones(n, dtype=bool)
+                break
+            xk, yk = xs[keep], ys[keep]
+            nk = len(yk)
+            sx, sxx, sxy, sy = xk.sum(), (xk * xk).sum(), (xk * yk).sum(), yk.sum()
+            det = sx * sx - nk * sxx
+            if det == 0:
+                break
+            b = (sx * sy - nk * sxy) / det
+            a = (sy - b * sx) / nk
+        resid = ys - a - b * xs
+        return a, b, x
+
+    def scale_of(a, b, x):
+        if a is None:
+            return numpy.inf
+        resid = power_raw - a - b * x
+        return MAD_TO_SIGMA * numpy.median(numpy.abs(resid - numpy.median(resid)))
+
+    # coarse grid, then refinement around the best s
+    best = (numpy.inf, 0.0)
+    for s in numpy.concatenate(
+        [numpy.linspace(-0.1, 0.1, 9), numpy.linspace(0.11, 1.3, 24)]
+    ):
+        a, b, x = robust_fit(s)
+        sc = scale_of(a, b, x)
+        if sc < best[0]:
+            best = (sc, s)
+    lo, hi = best[1] - 0.06, best[1] + 0.06
+    for s in numpy.linspace(lo, hi, 13):
+        a, b, x = robust_fit(s)
+        sc = scale_of(a, b, x)
+        if sc < best[0]:
+            best = (sc, s)
+    a, b, x = robust_fit(best[1])
+    return a, b, float(best[1]), x
+
+
+def sde_trend(power_raw, periods, oversampling_factor, detrend=None):
+    """Background trend subtracted from power_raw by spectra().
+
+    detrend=None uses the module default (tls_constants.SDE_DETREND).
+    Returns the trend array (same length as power_raw), or None if
+    spectra() would apply no detrending (periodogram shorter than twice
+    the kernel).
+    """
+    if detrend is None:
+        detrend = tls_constants.SDE_DETREND
+    if detrend not in ("median", "hybrid"):
+        raise ValueError('SDE_detrend must be "median" or "hybrid"')
+    kernel = _sde_kernel(oversampling_factor)
+    if len(power_raw) <= 2 * kernel:
+        return None
+    if detrend == "median":
+        return running_median(power_raw, kernel)
+    # "hybrid": analytic background trend, robustly fitted. The law is the
+    # generalized extreme-value form a + b*((P/P0)**s - 1)/s, which reduces
+    # to a + b*ln(P) for white (Gaussian) noise and grows as a power law
+    # for heavy-tailed noise (see _robust_gev_fit) ...
+    a, b, s, x = _robust_gev_fit(power_raw, periods)
+    trend = a + b * x
+    # ... plus a wider running median of the residual, which only tracks
+    # broad background that even the GEV law cannot express (localized
+    # systematics plateaus). Near the grid edges the wide kernel cannot
+    # follow steep boundary rises, so it tapers to the "median"-method
+    # width there.
+    k_wide = _sde_kernel(oversampling_factor, tls_constants.SDE_HYBRID_KERNEL_FACTOR)
+    if len(power_raw) <= 2 * k_wide:
+        return trend
+    med_wide = running_median(power_raw - trend, k_wide)
+    med_narrow = running_median(power_raw - trend, kernel)
+    n = len(power_raw)
+    zone = max(k_wide, int(tls_constants.SDE_HYBRID_EDGE_FRACTION * n))
+    ramp = numpy.linspace(0.0, 1.0, zone)
+    weight = numpy.ones(n)
+    weight[:zone] = numpy.minimum(weight[:zone], ramp)
+    weight[n - zone :] = numpy.minimum(weight[n - zone :], ramp[::-1])
+    return trend + weight * med_wide + (1.0 - weight) * med_narrow
+
+
+def spectra(chi2, oversampling_factor, detrend=None, periods=None):
+    """SR, power_raw, power (detrended), SDE_raw and SDE from chi2
+
+    detrend: "median" (default) or "hybrid" (see sde_trend). The hybrid
+    detrend needs the trial periods (the analytic trend is a function of
+    ln P); without periods it falls back to "median".
+    """
     SR = numpy.min(chi2) / chi2
     SDE_raw = (1 - numpy.mean(SR)) / numpy.std(SR)
 
@@ -162,13 +341,13 @@ def spectra(chi2, oversampling_factor):
     power_raw = power_raw * scale
 
     # Detrended SDE, named "power"
-    kernel = oversampling_factor * tls_constants.SDE_MEDIAN_KERNEL_SIZE
-    if kernel % 2 == 0:
-        kernel = kernel + 1
-    if len(power_raw) > 2 * kernel:
-        my_median = running_median(power_raw, kernel)
-        power = power_raw - my_median
+    if periods is None:
+        detrend = "median"
+    trend = sde_trend(power_raw, periods, oversampling_factor, detrend)
+    if trend is not None:
+        power = power_raw - trend
         # Re-normalize to range between median = 0 and peak = SDE
+
         # shift down to the mean being zero
         power = power - numpy.mean(power)
         SDE = numpy.max(power / numpy.std(power))
