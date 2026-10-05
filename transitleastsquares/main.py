@@ -47,6 +47,9 @@ class transitleastsquares(object):
     def __init__(self, t, y, dy=None, verbose=True):
         self.t, self.y, self.dy = validate_inputs(t, y, dy)
         self.verbose = verbose
+        # BUGFIX: remember the constructor choice; power(verbose=...) may
+        # override it, but the constructor value is no longer ignored
+        self._verbose_init = verbose
 
     def power(self, **kwargs):
         """Compute the periodogram for a set of user-defined parameters"""

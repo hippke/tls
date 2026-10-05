@@ -48,7 +48,11 @@ def validate_inputs(t, y, dy):
 
 def validate_args(self, kwargs):
 
-    self.verbose = kwargs.get("verbose", tls_constants.VERBOSE)
+    # BUGFIX: the constructor argument transitleastsquares(..., verbose=False)
+    # was silently overridden by the default here
+    self.verbose = kwargs.get(
+        "verbose", getattr(self, "_verbose_init", tls_constants.VERBOSE)
+    )
 
     # Warn user if unknown parameters
     for key, value in kwargs.items():

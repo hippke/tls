@@ -166,3 +166,14 @@ def test_period_uncertainty_no_negative_index_wrap():
     assert numpy.isclose(
         period_uncertainty(periods, power), 0.5 * (periods[5] - periods[1])
     )
+
+def test_constructor_verbose_false_is_respected():
+    rng = numpy.random.default_rng(0)
+    t = numpy.linspace(0, 30, 3000)
+    y = box_lc(t, 3.0, 0.5, 0.1, 2e-3) + rng.normal(0, 5e-4, len(t))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        TLS(t, y, verbose=False).power(
+            show_progress_bar=False, use_threads=1, period_min=2.5, period_max=3.5
+        )
+    assert buf.getvalue() == ""
