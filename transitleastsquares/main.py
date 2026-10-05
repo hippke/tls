@@ -9,7 +9,7 @@ from tqdm import tqdm
 from transitleastsquares import tls_constants
 from transitleastsquares.backends import SearchProblem, get_backend
 from transitleastsquares.core import fold
-from transitleastsquares.grid import duration_grid, period_grid
+from transitleastsquares.grid import duration_grid, duration_limit_masses, period_grid
 from transitleastsquares.helpers import transit_mask
 from transitleastsquares.results import transitleastsquaresresults
 from transitleastsquares.stats import (
@@ -106,6 +106,10 @@ class transitleastsquares:
         raise ValueError("Unknown PERIODS_SEARCH_ORDER")
 
     def _search(self, backend, periods, lc_cache_overview, lc_arr):
+        # masses paired with R_star_min / R_star_max (BUGS.md F1)
+        m_short, m_long = duration_limit_masses(
+            self.R_star_min, self.R_star_max, self.M_star_min, self.M_star_max
+        )
         problem = SearchProblem(
             t=self.t,
             y=self.y,
@@ -115,8 +119,8 @@ class transitleastsquares:
             transit_depth_min=self.transit_depth_min,
             R_star_min=self.R_star_min,
             R_star_max=self.R_star_max,
-            M_star_min=self.M_star_min,
-            M_star_max=self.M_star_max,
+            M_star_min=m_short,
+            M_star_max=m_long,
             T0_search_margin=self.T0_search_margin,
         )
         pbar = None

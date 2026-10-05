@@ -14,8 +14,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Golden sets:
 #   v1 = TLS 1.33 + bug fixes, batman templates. Reproduced by the refactored
 #        code with TLS_GOLDEN_SET=v1 TLS_TRANSIT_MODEL=batman.
-#   v2 = own transit model (transit_model.py) instead of batman. Default.
-GOLDEN_SET = os.environ.get("TLS_GOLDEN_SET", "v2")
+#   v2 = own transit model (transit_model.py) instead of batman.
+#   v3 = v2 + duration limits from grid.duration_limit_masses (BUGS.md F1:
+#        interval extremes, density-clipped). Only narrow_stellar differs
+#        from v2. Default.
+GOLDEN_SET = os.environ.get("TLS_GOLDEN_SET", "v3")
 GOLDEN_DIR = os.path.join(HERE, "golden", GOLDEN_SET)
 DATA = os.path.join(HERE, "data")
 

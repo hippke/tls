@@ -35,6 +35,50 @@ def T14(
     return result
 
 
+def _density(M, R):
+    return M / (R * R * R)
+
+
+# Stellar densities (solar units) of the default corners: the smallest star
+# (R_STAR_MIN, M_STAR_MIN) and the largest one (R_STAR_MAX, M_STAR_MAX).
+RHO_DEFAULT_MAX = _density(tls_constants.M_STAR_MIN, tls_constants.R_STAR_MIN)
+RHO_DEFAULT_MIN = _density(tls_constants.M_STAR_MAX, tls_constants.R_STAR_MAX)
+
+
+def duration_limit_masses(R_star_min, R_star_max, M_star_min, M_star_max):
+    """Masses to pair with R_star_min (shortest) and R_star_max (longest duration).
+
+    T14 ~ R * M^(-1/3) ~ (P / rho)^(1/3). The interval extremes are (R_min, M_max)
+    for the shortest and (R_max, M_min) for the longest duration. TLS <= 1.33
+    paired (R_min, M_min) and (R_max, M_max) instead (BUGS.md F1), which is too
+    narrow for narrow user priors. But for wide intervals the extreme corners are
+    unphysical (R 0.13 with M 1.0 is 455 rho_sun). So the extreme density is
+    clipped to the more extreme of the old corner and the default corner
+    (RHO_DEFAULT_MAX / _MIN). Hence: default limits give the TLS 1.33 grid exactly,
+    narrow priors get the full interval range, and no range is ever narrower than
+    in TLS 1.33.
+
+    Returns (m_short, m_long).
+    """
+    # shortest duration: highest density
+    rho_cap = max(_density(M_star_min, R_star_min), RHO_DEFAULT_MAX)
+    if _density(M_star_max, R_star_min) <= rho_cap:
+        m_short = M_star_max
+    elif _density(M_star_min, R_star_min) >= RHO_DEFAULT_MAX:
+        m_short = M_star_min  # old corner (exact)
+    else:
+        m_short = RHO_DEFAULT_MAX * R_star_min**3
+    # longest duration: lowest density
+    rho_floor = min(_density(M_star_max, R_star_max), RHO_DEFAULT_MIN)
+    if _density(M_star_min, R_star_max) >= rho_floor:
+        m_long = M_star_min
+    elif _density(M_star_max, R_star_max) <= RHO_DEFAULT_MIN:
+        m_long = M_star_max  # old corner (exact)
+    else:
+        m_long = RHO_DEFAULT_MIN * R_star_max**3
+    return m_short, m_long
+
+
 def duration_grid(
     periods,
     shortest,
@@ -48,11 +92,14 @@ def duration_grid(
 
     ``shortest`` is accepted for backwards compatibility and unused.
     """
+    m_short, m_long = duration_limit_masses(
+        R_star_min, R_star_max, M_star_min, M_star_max
+    )
     duration_max = T14(
-        R_s=R_star_max, M_s=M_star_max, P=numpy.min(periods), small=False
+        R_s=R_star_max, M_s=m_long, P=numpy.min(periods), small=False
     )  # large planet for long transit duration
     duration_min = T14(
-        R_s=R_star_min, M_s=M_star_min, P=numpy.max(periods), small=True
+        R_s=R_star_min, M_s=m_short, P=numpy.max(periods), small=True
     )  # small planet for short transit duration
 
     durations = [duration_min]

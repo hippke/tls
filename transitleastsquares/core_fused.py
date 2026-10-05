@@ -272,6 +272,8 @@ def search_period_fused(
             total += (f - 1.0) ** 2 * wk
 
     # Physically plausible template widths for this period
+    # M_star_min / M_star_max are the masses paired with R_star_min (shortest
+    # duration) and R_star_max (longest), see grid.duration_limit_masses
     duration_max = T14(R_s=R_star_max, M_s=M_star_max, P=period, small=False)
     duration_min = T14(R_s=R_star_min, M_s=M_star_min, P=period, small=True)
     transits_naive = time_span / period

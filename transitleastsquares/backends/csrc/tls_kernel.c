@@ -127,6 +127,8 @@ static void search_one(double period, const double *t, const double *y,
         if (k < n) total += r * r * wk;
     }
 
+    /* M_min / M_max: masses paired with R_min (shortest duration) and R_max
+       (longest), see grid.duration_limit_masses (BUGS.md F1) */
     double dmax = T14(R_max, M_max, period, upper, 0);
     double dmin = T14(R_min, M_min, period, upper, 1);
     double tn = time_span / period;

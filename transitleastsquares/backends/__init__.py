@@ -35,7 +35,10 @@ class SearchProblem:
     lc_arr              object array: in-transit template per row (SIGNAL_DEPTH deep)
     lc_cache_overview   structured array (duration, width_in_samples, overshoot)
     transit_depth_min   shallowest depth that is fit
-    R/M_star_min/max    stellar limits that restrict the durations per period
+    R_star_min/max      stellar radius limits that restrict the durations per period
+    M_star_min/max      masses paired with R_star_min (shortest duration) and
+                        R_star_max (longest); from grid.duration_limit_masses,
+                        *not* the user's mass interval (BUGS.md F1)
     T0_search_margin    phase-shift margin during the search (fraction of width)
     """
 

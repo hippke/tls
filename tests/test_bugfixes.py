@@ -237,3 +237,43 @@ def test_command_line_interface(tmp_path):
     assert abs(p_best - 3.3) < 0.02
     stats = open(str(lc) + "_statistics.csv").read()
     assert stats.startswith("SDE ")
+
+
+def test_duration_limits_use_interval_extremes_for_narrow_priors():
+    # BUGS.md F1 (reported by Talens et al. 2026): T14 ~ R M^(-1/3), so the
+    # shortest duration needs (R_min, M_max) and the longest (R_max, M_min).
+    from transitleastsquares.grid import T14, duration_limit_masses
+
+    m_short, m_long = duration_limit_masses(0.8, 1.2, 0.8, 1.2)
+    assert (m_short, m_long) == (1.2, 0.8)
+    periods = period_grid(R_star=1, M_star=1, time_span=200, period_min=20)
+    d = duration_grid(
+        periods,
+        shortest=1e-4,
+        R_star_min=0.8,
+        R_star_max=1.2,
+        M_star_min=0.8,
+        M_star_max=1.2,
+    )
+    P = numpy.max(periods)
+    numpy.testing.assert_allclose(min(d), T14(0.8, 1.2, P, small=True))
+    assert min(d) < T14(0.8, 0.8, P, small=True)  # wider than TLS 1.33
+
+
+def test_duration_limits_defaults_unchanged_and_never_narrower():
+    from transitleastsquares import tls_constants as c
+    from transitleastsquares.grid import duration_limit_masses
+
+    # defaults: exactly the TLS 1.33 pairing (the extreme corners would mean
+    # 455 rho_sun), so the default grid is bit-identical
+    assert duration_limit_masses(
+        c.R_STAR_MIN, c.R_STAR_MAX, c.M_STAR_MIN, c.M_STAR_MAX
+    ) == (c.M_STAR_MIN, c.M_STAR_MAX)
+    rng = numpy.random.default_rng(3)
+    for _ in range(500):
+        r1, r2 = numpy.sort(rng.uniform(0.05, 20, 2))
+        m1, m2 = numpy.sort(rng.uniform(0.05, 5, 2))
+        m_short, m_long = duration_limit_masses(r1, r2, m1, m2)
+        assert m1 <= m_short <= m2 and m1 <= m_long <= m2
+        # never narrower than the old pairing (R_min, M_min) / (R_max, M_max)
+        assert m_short >= m1 and m_long <= m2
