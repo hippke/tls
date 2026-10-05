@@ -38,12 +38,17 @@ class ProcessPoolBackend(SearchBackend):
         """Per-search precomputation (done once, in the parent process)."""
         return problem
 
+    def plan(self, state, periods):
+        """Optional set-up that depends on the searched periods (in the parent
+        process, after prepare)."""
+
     def evaluate(self, state, period):
         """Return (period, chi2, row, depth) for one trial period."""
         raise NotImplementedError
 
     def search(self, problem, periods, use_threads=1, progress=None):
         state = self.prepare(problem)
+        self.plan(state, periods)
         results = []
 
         def collect(block):

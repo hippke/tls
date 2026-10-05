@@ -37,6 +37,10 @@ class FusedBackend(ProcessPoolBackend):
             fp.set_storage(numpy.float32)  # approximate backends (step 50)
         return fp
 
+    def plan(self, state, periods):
+        """Walk fold (idea L12): crossover period for the searched range."""
+        state.set_walk(periods=periods)
+
     def coarsen(self):
         """Coarse T0 grid factor (idea L5); environment TLS_T0_COARSEN."""
         import os
@@ -104,6 +108,7 @@ class FusedThreadsBackend(FusedBackend):
             fp.set_storage(numpy.float32)
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
+        fp.set_walk(periods=periods)
         old = numba.get_num_threads()
         numba.set_num_threads(min(use_threads, numba.config.NUMBA_NUM_THREADS))
         try:
@@ -133,6 +138,7 @@ class FusedThreadsBackend(FusedBackend):
                         fp.invariants,
                         fp.index_dtype,
                         fp.screen,
+                        fp.walk,
                     )
                 )
                 if progress is not None:

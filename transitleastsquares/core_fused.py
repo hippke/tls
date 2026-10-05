@@ -18,6 +18,8 @@ up to floating point rounding:
   (xth_point == 1). They are skipped in that case.
 """
 
+import os
+
 import numba
 import numpy
 
@@ -130,6 +132,7 @@ def fold_order_into(t, period, phases, counts, order, keys, folded=False):
     repair compares phases[order[i]] with the same strict ordering, so the
     result is the identical stable order. `keys` is no longer written.
     folded=True reuses phases from an unsuccessful few-run merge attempt.
+    Returns the insertion-repair work (moves; used by the walk-fold probes).
     """
     n = len(t)
     if not folded:
@@ -164,7 +167,325 @@ def fold_order_into(t, period, phases, counts, order, keys, folded=False):
                 fallback = numpy.argsort(phases[:n], kind="mergesort")
                 for q in range(n):
                     order[q] = fallback[q]
-                return
+                return work
+    return work
+
+
+# --- Three-gap walk fold (idea L12, PERFORMANCE_PLAN §13.2, step 51) --------
+#
+# For time stamps on a regular grid t = t_ref + g * delta + e (integer slot g,
+# 0 <= g < G, empty slots allowed, small deviations e) the grid phases
+# frac(phi0 + g * alpha), alpha = delta / P, are ordered by the three-distance
+# theorem: the circular successor of slot g is g + a, g - b or g + a - b, with
+# a, b the denominators of the Farey neighbours of alpha of order G - 1. The
+# walk proposes the phase order without counting or scattering; the insertion
+# repair on the actual phases makes it the exact stable order, so the result
+# never depends on how good the proposal is (any permutation is repaired).
+
+
+@numba.njit(cache=True)
+def _three_gap_steps(G, alpha):
+    """(a, b) = (argmin, argmax) over 1 <= j < G of frac(j * alpha): the
+    denominators of the best lower / upper rational approximations of alpha
+    with denominator < G (Stern-Brocot descent, batched steps, O(log G))."""
+    pl, ql, pu, qu = 0, 1, 1, 1
+    while True:
+        if pl + pu <= alpha * (ql + qu):  # mediant <= alpha: raise the lower bound
+            den = pu - alpha * qu
+            k = max(1, int((alpha * ql - pl) / den)) if den > 0 else G
+            k = min(k, (G - 1 - ql) // qu)
+            if k < 1:
+                break
+            pl += k * pu
+            ql += k * qu
+        else:
+            den = alpha * ql - pl
+            k = max(1, int((pu - alpha * qu) / den)) if den > 0 else G
+            k = min(k, (G - 1 - qu) // ql)
+            if k < 1:
+                break
+            pu += k * pl
+            qu += k * ql
+    return ql, qu
+
+
+@numba.njit(cache=True)
+def _grid_phase(x):
+    return x - numpy.floor(x)
+
+
+@numba.njit(cache=True)
+def fold_walk_into(period, phases, walk, buf, order, budget):
+    """Stable phase permutation of a regular-grid light curve (idea L12).
+
+    phases: actual (foldfast) phases. walk = (slot map gp[G] -> data index or
+    -1, slot per point, delta, t_ref, max|e|, P*) from regular_grid. buf: work
+    buffer of n + 1 integers; order: output (n). Returns the insertion-repair
+    work (>= 0), or -1 if the walk is not usable or the repair exceeds
+    `budget` moves; `order` must then be rebuilt by fold_order_into.
+    The result is the same permutation as fold_order_into: sorted by phase,
+    ties by index (the repair compares (phase, index) lexicographically).
+    """
+    gp, slot, delta, t_ref, emax = walk[0], walk[1], walk[2], walk[3], walk[4]
+    n = len(phases)
+    G = len(gp)
+    if n < 2 or G < 2:
+        return -1
+    alpha = _grid_phase(delta / period)
+    if not alpha > 0.0:
+        return -1
+    a, b = _three_gap_steps(G, alpha)
+    # a + b >= G with 1 <= a, b < G makes the successor map a bijection
+    if a < 1 or b < 1 or a >= G or b >= G or a + b < G:
+        return -1
+    j = 0
+    cnt = 0
+    steps = 0
+    for _ in range(G):
+        k = gp[j]
+        buf[cnt] = k  # cnt <= n: buf has n + 1 entries
+        if k >= 0:
+            cnt += 1
+        j1 = j + a
+        if j1 < G:
+            j = j1
+        elif j >= b:
+            j = j - b
+        else:
+            j = j1 - b
+        steps += 1
+        if j == 0:
+            break
+    # a single cycle through all G slots, i.e. every point exactly once
+    if steps != G or cnt != n:
+        return -1
+    # rotate to the smallest grid phase (binary search for the wrap of the
+    # grid phases, which increase cyclically along the walk)
+    phi0 = _grid_phase(t_ref / period)
+    g0 = _grid_phase(phi0 + slot[buf[0]] * alpha)
+    lo = 1
+    hi = n
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _grid_phase(phi0 + slot[buf[mid]] * alpha) < g0:
+            hi = mid
+        else:
+            lo = mid + 1
+    rot = lo if lo < n else 0
+    # Points whose actual phase wrapped across 0/1 relative to the grid phase
+    # (|phase - grid phase| <= max|e| / P) can only lie within the first hs /
+    # last ts walk positions: move them to the other end.
+    thr = 2.0 * (emax / period + 1e-9)
+    hs = 0
+    while hs < n:
+        q = rot + hs
+        if q >= n:
+            q -= n
+        ph = phases[buf[q]]
+        if thr <= ph <= 1.0 - thr:
+            break
+        hs += 1
+    ts = 0
+    while hs + ts < n:
+        q = rot + n - 1 - ts
+        if q >= n:
+            q -= n
+        ph = phases[buf[q]]
+        if thr <= ph <= 1.0 - thr:
+            break
+        ts += 1
+    out = 0
+    for i in range(n - ts, n):  # wrapped to phase ~0: first
+        q = rot + i
+        if q >= n:
+            q -= n
+        if phases[buf[q]] < 0.5:
+            order[out] = buf[q]
+            out += 1
+    for i in range(hs):
+        q = rot + i
+        if q >= n:
+            q -= n
+        if phases[buf[q]] < 0.5:
+            order[out] = buf[q]
+            out += 1
+    # bulk: walk positions hs .. n - ts - 1 after rotation (two segments)
+    s0 = rot + hs
+    s1 = rot + n - ts
+    if s0 >= n:
+        for q in range(s0 - n, s1 - n):
+            order[out] = buf[q]
+            out += 1
+    elif s1 <= n:
+        for q in range(s0, s1):
+            order[out] = buf[q]
+            out += 1
+    else:
+        for q in range(s0, n):
+            order[out] = buf[q]
+            out += 1
+        for q in range(0, s1 - n):
+            order[out] = buf[q]
+            out += 1
+    for i in range(n - ts, n):
+        q = rot + i
+        if q >= n:
+            q -= n
+        if phases[buf[q]] >= 0.5:
+            order[out] = buf[q]
+            out += 1
+    for i in range(hs):  # wrapped to phase ~1: last
+        q = rot + i
+        if q >= n:
+            q -= n
+        if phases[buf[q]] >= 0.5:
+            order[out] = buf[q]
+            out += 1
+    # exact stable order: insertion repair on (phase, index)
+    work = 0
+    pv = order[0]
+    prev = phases[pv]
+    for i in range(1, n):
+        iv = order[i]
+        kv = phases[iv]
+        if kv < prev or (kv == prev and iv < pv):
+            j = i - 1
+            while j >= 0:
+                oj = order[j]
+                po = phases[oj]
+                if po > kv or (po == kv and oj > iv):
+                    order[j + 1] = oj
+                    j -= 1
+                else:
+                    break
+            order[j + 1] = iv
+            work += i - 1 - j
+            if work > budget:
+                return -1
+        else:
+            prev = kv
+            pv = iv
+    return work
+
+
+def walk_repair_work(t, periods, walk, index_dtype=numpy.int64, budget=None):
+    """Per probe period: insertion-repair work of the walk fold (-1: not
+    usable or more than `budget` moves) and of the bucket path; used to find
+    the crossover period P* (regular_grid_crossover). A Python loop over a
+    few periods (no extra compiled function: less first-run compilation)."""
+    n = len(t)
+    phases = numpy.empty(n)
+    buf = numpy.empty(n + 1, dtype=index_dtype)
+    order = numpy.empty(n, dtype=index_dtype)
+    keys = numpy.empty(0)  # not written by fold_order_into
+    if budget is None:
+        budget = int(WALK_SEARCH_WORK * n)
+    walk = tuple(walk[:5]) + (numpy.inf,)
+    out = numpy.empty((len(periods), 2), dtype=numpy.int64)
+    for p, period in enumerate(periods):
+        period = float(period)
+        _foldfast_into(t, period, phases)
+        out[p, 0] = fold_walk_into(period, phases, walk, buf, order, budget)
+        out[p, 1] = fold_order_into(t, period, phases, buf, order, keys, True)
+    return out
+
+
+def regular_grid(t, index_dtype=numpy.int64, max_fill=2.0):
+    """Regular cadence grid of the time stamps for the walk fold (idea L12).
+
+    Slot increments rint(dt / median dt) between sorted time stamps (local
+    rounding is robust to a slowly drifting cadence, e.g. barycentric
+    corrections), least-squares spacing delta and origin t_ref, deviations
+    e = t - t_ref - slot * delta. Returns (gp, slot, delta, t_ref, max|e|) or
+    None if the stamps do not form a usable grid: duplicate slots, more than
+    max_fill * N slots (sparse data: the walk visits every slot) or
+    max|e| >= delta / 4.
+    """
+    t = numpy.asarray(t, dtype=float)
+    n = len(t)
+    if n < 16:
+        return None
+    dt = numpy.diff(t)
+    if numpy.all(dt > 0):  # usual case: sorted input
+        srt = numpy.arange(n)
+        ts = t
+    else:
+        srt = numpy.argsort(t, kind="mergesort")
+        ts = t[srt]
+        dt = numpy.diff(ts)
+    if not numpy.all(dt > 0):
+        return None
+    d0 = float(numpy.median(dt))
+    inc = numpy.rint(dt / d0)
+    if numpy.any(inc < 1):
+        return None
+    g = numpy.concatenate(([0.0], numpy.cumsum(inc)))
+    G = int(g[-1]) + 1
+    if G > max_fill * n or G >= numpy.iinfo(index_dtype).max:
+        return None
+    x = ts - ts[0]
+    gm, xm = g.mean(), x.mean()
+    delta = float(numpy.sum((g - gm) * (x - xm)) / numpy.sum((g - gm) ** 2))
+    origin = xm - delta * gm
+    e = x - (origin + g * delta)
+    emax = float(numpy.max(numpy.abs(e)))
+    if not delta > 0 or emax >= 0.25 * delta:
+        return None
+    slot = numpy.empty(n, dtype=index_dtype)
+    slot[srt] = g.astype(index_dtype)
+    gp = numpy.full(G, -1, dtype=index_dtype)
+    gp[slot] = numpy.arange(n, dtype=index_dtype)
+    return gp, slot, delta, float(ts[0] + origin), emax
+
+
+# Walk-fold gate (data-driven, no machine constants): a probe period passes
+# if the walk's insertion repair needs no more moves than the bucket path's
+# own repair at that period, since the walk itself (G slot steps, sequential
+# writes) is cheaper than the counting pass plus scatter. In the search, the
+# walk gives up after WALK_SEARCH_WORK * N moves and the bucket path takes over.
+# Some periods fail sporadically (alpha close to a fraction with a small
+# denominator: near-tied grid phases), more of them towards short P. A failed
+# period costs about as much as two folds, a successful one saves about half
+# a fold, so the walk is used where at least WALK_PASS_FRACTION of the probes
+# at and above the period pass.
+WALK_SEARCH_WORK = 0.5
+WALK_PROBE_RATIO = 1.25  # spacing of the probe periods
+WALK_PASS_FRACTION = 0.75
+
+
+def regular_grid_crossover(
+    t, walk, time_span, index_dtype=numpy.int64, period_range=None
+):
+    """Data-driven crossover period P*: the walk is used for P >= P*.
+
+    Probe periods are log-spaced (ratio WALK_PROBE_RATIO) from time_span / 2
+    down to max(16 delta, time_span / 2000), restricted to period_range =
+    (min, max) of the searched periods if given; the walk's repair work falls
+    with P (it scales like max|e| N / P). A probe passes if the walk's repair
+    work is at most the bucket path's. P* is the shortest passing probe at
+    which at least WALK_PASS_FRACTION of the probes at and above it pass;
+    inf if there is none.
+    """
+    delta = walk[2]
+    p_hi = time_span / 2
+    p_lo = max(16 * delta, time_span / 2000)
+    if period_range is not None:
+        p_hi = min(p_hi, float(period_range[1]))
+        p_lo = max(p_lo, float(period_range[0]))
+    p_hi = max(p_hi, p_lo)
+    count = 1 + int(numpy.ceil(numpy.log(p_hi / p_lo) / numpy.log(WALK_PROBE_RATIO)))
+    periods = numpy.geomspace(p_hi, p_lo, count)
+    work = walk_repair_work(t, periods, walk, index_dtype)
+    passed = (work[:, 0] >= 0) & (work[:, 0] <= work[:, 1])
+    fraction = numpy.cumsum(passed) / numpy.arange(1, len(passed) + 1)
+    ok = passed & (fraction >= WALK_PASS_FRACTION)
+    return float(numpy.min(periods[ok])) if numpy.any(ok) else numpy.inf
+
+
+def walk_disabled(index_dtype=numpy.int64):
+    """Kernel argument for problems without a usable grid (never walks)."""
+    empty = numpy.zeros(0, dtype=index_dtype)
+    return (empty, empty, 1.0, 0.0, 0.0, numpy.inf)
 
 
 @numba.njit(cache=True)
@@ -306,6 +627,7 @@ def search_period_fused(
     vbuf,
     invariants,
     screen=None,
+    walk=None,
 ):
     """Returns (chi2_min, template row, depth) for one trial period.
 
@@ -323,6 +645,11 @@ def search_period_fused(
     screen: optional coarse-PL certificates. Only candidates whose upper gain
     can improve the relevant incumbent receive the original full correlation.
     None specializes this path away; the default PL backend does not use it.
+
+    walk: regular-grid data for the three-gap walk fold (regular_grid plus
+    the crossover period P*, see FusedProblem.set_walk; idea L12). For
+    P >= P* the stable phase order comes from the walk instead of the
+    counting scatter; the permutation is identical. None: never walk.
 
     nbins/boff/a_bin/a2_bin: stride-binned templates (see bin_templates). With
     nbins[u] == 0 (default, exact) the full-resolution correlation is used;
@@ -512,7 +839,19 @@ def search_period_fused(
                     dd_w[k + 1] = a_w
                     s_w += wk - mu_w
     else:
-        fold_order_into(t, period, phases, counts, bucket, keys, folded)
+        # Regular time grid and P >= P*: three-gap walk instead of the
+        # counting scatter (idea L12; identical permutation, step 51)
+        walked = False
+        if walk is not None:
+            if period >= walk[5]:
+                if not folded:
+                    _foldfast_into(t, period, phases)
+                    folded = True
+                budget = int(WALK_SEARCH_WORK * n)
+                work = fold_walk_into(period, phases, walk, counts, bucket, budget)
+                walked = work >= 0
+        if not walked:
+            fold_order_into(t, period, phases, counts, bucket, keys, folded)
         if uniform_weights:
             # w = w0 everywhere: no weight arrays (w, cum_w) needed
             for k in range(m):
@@ -1248,6 +1587,39 @@ class FusedProblem:
         self.dtype = numpy.float64
         self.set_binning(0)
         self.set_pl(0)
+        # walk fold: configured by set_walk (backends: with the searched
+        # periods, before the search; else lazily by the first search)
+        self._walk_ready = False
+        self.walk = walk_disabled(self.index_dtype)
+        self.walk_grid = None
+
+    def set_walk(self, enabled=None, periods=None):
+        """Three-gap walk fold (idea L12, exact) if the time stamps lie on a
+        regular grid: grid detection (once) and the crossover period P* from
+        a few probe periods within the range of `periods` (the searched
+        periods; None: the default grid's range). Backends call this before
+        the search (SearchBackend.plan); otherwise the first search() does.
+        Environment TLS_WALK=0 disables it."""
+        if enabled is None:
+            enabled = os.environ.get("TLS_WALK", "1") != "0"
+        self._walk_ready = True
+        self.walk = walk_disabled(self.index_dtype)
+        self.walk_grid = None
+        if not enabled:
+            return
+        if not hasattr(self, "_grid"):
+            self._grid = regular_grid(self.t, self.index_dtype)
+        if self._grid is None:
+            return
+        span = None
+        if periods is not None and len(periods) > 0:
+            span = (numpy.min(periods), numpy.max(periods))
+        p_star = regular_grid_crossover(
+            self.t, self._grid, self.time_span, self.index_dtype, span
+        )
+        self.walk_grid = self._grid + (p_star,)
+        if numpy.isfinite(p_star):
+            self.walk = self.walk_grid
 
     def set_pl(
         self,
@@ -1359,6 +1731,8 @@ class FusedProblem:
             self._invariants_dtype = self.dtype
 
     def search(self, period):
+        if not self._walk_ready:
+            self.set_walk()
         p = self.problem
         chi2, row, depth = search_period_fused(
             float(period),
@@ -1381,6 +1755,7 @@ class FusedProblem:
             *self.workspace(),
             self.invariants,
             self.screen,
+            self.walk,
         )
         return period, chi2, row, depth
 
@@ -1446,6 +1821,7 @@ def search_periods_fused_parallel(
     invariants,
     index_dtype,
     screen=None,
+    walk=None,
 ):
     """search_period_fused for many periods, numba threads (prange over
     n_chunks chunks, each with its own work buffers)."""
@@ -1508,6 +1884,7 @@ def search_periods_fused_parallel(
                 vbuf,
                 invariants,
                 screen,
+                walk,
             )
             chi2[p] = c
             row[p] = r
