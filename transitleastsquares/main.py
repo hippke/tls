@@ -340,7 +340,7 @@ class transitleastsquares(object):
                 duration=duration * maxwidth_in_samples * fill_half,
                 maxwidth=maxwidth_in_samples / stretch,
                 depth=1 - depth,
-                samples=int(len(self.t / len(transit_times))),
+                samples=int(len(self.t)),  # was: int(len(self.t / len(transit_times))) == len(t)
                 per=self.per,
                 rp=self.rp,
                 a=self.a,

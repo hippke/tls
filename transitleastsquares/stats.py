@@ -382,7 +382,7 @@ def intransit_stats(t, y, transit_times, transit_duration_in_days):
                 mean_flux = numpy.nan
         intransit_points = numpy.size(y[idx_intransit])
         transit_depths[i] = mean_flux
-        if len(y[idx_intransit] > 0):
+        if intransit_points > 0:
             transit_depths_uncertainties[i] = numpy.std(y[idx_intransit]) / numpy.sqrt(
                 intransit_points
             )
