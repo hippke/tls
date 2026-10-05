@@ -13,8 +13,11 @@ from transitleastsquares import tls_constants as C
 from transitleastsquares.backends import SearchProblem
 from transitleastsquares.core import foldfast
 from transitleastsquares.core_fused import (
+    WALK_PHASE_EPS,
     FusedProblem,
+    _grid_phase,
     _three_gap_steps,
+    _walk_certified,
     fold_walk_into,
     regular_grid,
     regular_grid_crossover,
@@ -88,6 +91,71 @@ def test_regular_grid_rejects_irregular_data():
     sparse = numpy.sort(rng.choice(30000, 3000, replace=False)) * 0.01
     assert regular_grid(sparse) is None  # walk would visit 10x more slots
     assert regular_grid(numpy.arange(10) * 0.1) is None  # too short
+
+
+def certified(period, walk):
+    """Python twin of _walk_certified (formula cross-check for the tests)."""
+    gp, delta, t_ref, emax = walk[0], walk[2], walk[3], walk[4]
+    G = len(gp)
+    alpha = _grid_phase(delta / period)
+    a, b = _three_gap_steps(G, alpha)
+    dev = (emax + 8.0 * WALK_PHASE_EPS * (abs(t_ref) + G * delta + emax)) / period
+    dev += WALK_PHASE_EPS
+    A = a * alpha - numpy.floor(a * alpha)
+    B = 1.0 - (b * alpha - numpy.floor(b * alpha))
+    d_a = A if A <= 0.5 else A - 1.0
+    d_b = B if B <= 0.5 else B - 1.0
+    s = A + B - 1.0
+    d_ab = s - 1.0 if s > 0.5 else (s + 1.0 if s < -0.5 else s)
+    ok = d_a > 2 * dev and d_b > 2 * dev and d_ab > 2 * dev
+    W = (G - a) * d_a + (G - b) * d_b + (a + b - G) * d_ab
+    return bool(ok and abs(W - 1) <= 0.25), _walk_certified(period, walk, a, b)
+
+
+@pytest.mark.parametrize("name", [n for n, _ in grids(numpy.random.default_rng(1))])
+def test_walk_certified_no_scan(name):
+    """Step 54 (idea N1): when the certified path skips the repair scan the
+    assembled order must still be exactly the stable order, and the
+    certification must never fire when the full scan would have found an
+    inversion. certify=False forces the scan for comparison."""
+    rng = numpy.random.default_rng(4)
+    t = dict(grids(rng))[name]
+    n = len(t)
+    walk = regular_grid(t)
+    assert walk is not None, name
+    span = numpy.ptp(t)
+    d = walk[2]
+    periods = list(rng.uniform(16 * d, span / 2, 200))
+    periods += [m * d * (1 + 1e-9) for m in (17, 97, 360, 720)]  # near-multiples
+    ph = numpy.empty(n)
+    buf = numpy.empty(n + 1, dtype=numpy.int64)
+    order = numpy.empty(n, dtype=numpy.int64)
+    used = scans = 0
+    for p in periods:
+        ph[:] = foldfast(t, p)
+        work_c = fold_walk_into(p, ph, walk, buf, order, 10**12)
+        if work_c < 0:
+            continue
+        used += 1
+        numpy.testing.assert_array_equal(order, numpy.argsort(ph, kind="mergesort"))
+        py_certified, njit_certified = certified(p, walk)
+        assert py_certified == njit_certified
+        order_c = order.copy()
+        work_s = fold_walk_into(p, ph, walk, buf, order, 10**12, certify=False)
+        assert work_s >= 0
+        numpy.testing.assert_array_equal(order, order_c)
+        if work_s > 0:  # the scan found an inversion: must not be certified
+            assert not njit_certified
+        else:
+            scans += 1
+        if njit_certified:
+            assert work_c == 0  # skipped the scan exactly when certified
+    assert used >= len(periods) // 2
+    # the exact grids are certified nearly everywhere (that is the point)
+    if name in ("regular", "gappy", "integer", "negative"):
+        assert scans >= used - 2
+    if name in ("regular", "gappy", "negative"):
+        assert sum(certified(p, walk)[1] for p in periods) >= len(periods) * 0.9
 
 
 def problem(t, weighted, seed=3):

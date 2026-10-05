@@ -282,8 +282,65 @@ def _grid_phase(x):
     return x - numpy.floor(x)
 
 
+# float64 machine epsilon (numpy.finfo(numpy.float64).eps), used in the
+# rigorous bound on the foldfast rounding inside fold_walk_into.
+WALK_PHASE_EPS = 2.220446049250313e-16
+
+
 @numba.njit(cache=True)
-def fold_walk_into(period, phases, walk, buf, order, budget):
+def _walk_certified(period, walk, a, b):
+    """Certified no-scan walk (idea N1, step 54): is the assembled walk order
+    provably the stable phase order?
+
+    A step of the walk (+a, -b or +a-b) moves the *grid* phase
+    frac(phi0 + g * alpha), alpha = frac(delta / P), by a constant of its
+    type, whatever the descent returned for near-rational alpha (the branch
+    conditions depend only on the slot, so every slot's step of a type has
+    the same displacement):
+        A = frac(a * alpha),  B = 1 - frac(b * alpha),  (A + B - 1) mod 1.
+    Every actual phase frac(t_i / P) is within
+        dev = (emax + 8 * eps * max|t|) / P + eps
+    of its grid phase (circularly): emax bounds the stamp deviations
+    e_i = t_i - (t_ref + g_i * delta) (regular_grid), 8 * eps * max|t| / P
+    covers the foldfast rounding of t/P (incl. fastmath reassociation), eps
+    the rotation alpha; max|t| <= |t_ref| + G * delta + emax is rigorous.
+
+    If all three step displacements (as signed minimal displacements) lie in
+    (2 * dev, 1/2] - strictly forward, by more than twice the phase
+    deviation - and the walk winds exactly once around the phase circle
+    (W = (G - a) d_a + (G - b) d_b + (a + b - G) d_ab = 1; W is an integer
+    by telescoping over the cycle, so |W - 1| <= 1/4 decides it), the walk
+    visits the slots in grid-phase order with consecutive gaps > 2 * dev.
+    The actual phases inherit that order strictly - also across the wrapped
+    ends, where a misplacement would require two grid phases closer than
+    2 * dev < the smallest gap - so the assembled order is the unique stable
+    order (no ties) and the insertion-repair scan can be skipped.
+    """
+    gp, delta, t_ref, emax = walk[0], walk[2], walk[3], walk[4]
+    G = len(gp)
+    alpha = _grid_phase(delta / period)
+    dev = (emax + 8.0 * WALK_PHASE_EPS * (abs(t_ref) + G * delta + emax)) / period
+    dev += WALK_PHASE_EPS
+    A = a * alpha - numpy.floor(a * alpha)
+    B = 1.0 - (b * alpha - numpy.floor(b * alpha))
+    d_a = A if A <= 0.5 else A - 1.0
+    d_b = B if B <= 0.5 else B - 1.0
+    s = A + B - 1.0  # exact displacement of +a-b steps, before the mod
+    if s > 0.5:
+        d_ab = s - 1.0
+    elif s < -0.5:
+        d_ab = s + 1.0
+    else:
+        d_ab = s
+    twice = 2.0 * dev
+    if not (d_a > twice and d_b > twice and d_ab > twice):
+        return False
+    W = (G - a) * d_a + (G - b) * d_b + (a + b - G) * d_ab
+    return abs(W - 1.0) <= 0.25
+
+
+@numba.njit(cache=True)
+def fold_walk_into(period, phases, walk, buf, order, budget, certify=True):
     """Stable phase permutation of a regular-grid light curve (idea L12).
 
     phases: actual (foldfast) phases. walk = (slot map gp[G] -> data index or
@@ -293,6 +350,7 @@ def fold_walk_into(period, phases, walk, buf, order, budget):
     `budget` moves; `order` must then be rebuilt by fold_order_into.
     The result is the same permutation as fold_order_into: sorted by phase,
     ties by index (the repair compares (phase, index) lexicographically).
+    certify=False always runs the repair scan (testing hook for step 54).
     """
     gp, slot, delta, t_ref, emax = walk[0], walk[1], walk[2], walk[3], walk[4]
     n = len(phases)
@@ -409,6 +467,16 @@ def fold_walk_into(period, phases, walk, buf, order, budget):
         if phases[buf[q]] >= 0.5:
             order[out] = buf[q]
             out += 1
+    # Certified no-scan walk (step 54): skip the repair scan when the
+    # assembled order is provably the stable order (_walk_certified); only
+    # the two boundary pairs are verified, and any surprise falls back to
+    # the scan (the result never depends on the certification).
+    if certify and _walk_certified(period, walk, a, b):
+        if (
+            phases[order[0]] <= phases[order[1]]
+            and phases[order[n - 2]] <= phases[order[n - 1]]
+        ):
+            return 0
     # exact stable order: insertion repair on (phase, index)
     work = 0
     pv = order[0]

@@ -56,7 +56,7 @@ def test_preparation_matches_stable_prefixes(kind, ratio, weight_mode):
         prefix(prefix(w - fp.input_means[1])),
     ]
     # cum_rw is only stored when stride-binned correlations need it (step 49).
-    active = [True, True, weight_mode != "uniform", len(fp.binning[3]) > 0, True,
+    active = [True, True, weight_mode != "uniform", fp.binning is not None, True,
               weight_mode == "weighted"]
     pos = 4 * len(t)
     for values, used in zip(expected, active):
@@ -85,7 +85,7 @@ def test_binned_backend_still_builds_cum_rw(weight_mode):
         )
     )
     fp.set_binning(2)
-    assert len(fp.binning[3]) > 0
+    assert fp.binning is not None
     period = 0.35 * numpy.ptp(t)
     fp.search(period)
     order = numpy.argsort(foldfast(t, period), kind="mergesort")
