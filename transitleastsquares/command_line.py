@@ -14,117 +14,122 @@ except:
 
 
 def main():
-    pass
+    # BUGFIX: all code ran at import time and main() was empty, so the
+    # console entry point only worked as a side effect of importing.
+    print(tls_constants.TLS_VERSION)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("lightcurve", help="path to lightcurve file")
+    parser.add_argument("-o", "--output", help="path to output directory")
+    parser.add_argument("-c", "--config", help="path to configuration file")
+    args = parser.parse_args()
+
+    # Read config file if possible
+    use_config_file = False
+    if args.config is not None:
+        try:
+            config = ConfigParser()
+            config.read(args.config)
+            R_star = float(config["Grid"]["R_star"])
+            R_star_min = float(config["Grid"]["R_star_min"])
+            R_star_max = float(config["Grid"]["R_star_max"])
+            M_star = float(config["Grid"]["M_star"])
+            M_star_min = float(config["Grid"]["M_star_min"])
+            M_star_max = float(config["Grid"]["M_star_max"])
+            period_min = float(config["Grid"]["period_min"])
+            period_max = float(config["Grid"]["period_max"])
+            n_transits_min = int(config["Grid"]["n_transits_min"])
+            transit_template = config["Template"]["transit_template"]
+            duration_grid_step = float(config["Speed"]["duration_grid_step"])
+            transit_depth_min = float(config["Speed"]["transit_depth_min"])
+            oversampling_factor = int(config["Speed"]["oversampling_factor"])
+            T0_fit_margin = float(config["Speed"]["T0_fit_margin"])
+            use_threads = int(config["Speed"]["use_threads"])
+            delimiter = config["File"]["delimiter"]  # BUGFIX: was int(",") -> always failed
+            use_config_file = True
+            print("Using TLS configuration from config file", args.config)
+        except:
+            print(
+                "Using default values because of broken or missing configuration file",
+                args.config,
+            )
+    else:
+        print("No config file given. Using default values")
+
+    # Load data
+    if use_config_file:
+        data = numpy.genfromtxt(args.lightcurve, delimiter=delimiter)  # BUGFIX: args has no .delimiter
+    else:
+        data = numpy.genfromtxt(args.lightcurve, delimiter=",")
+
+    t = data[:, 0]
+    y = data[:, 1]
 
 
-print(tls_constants.TLS_VERSION)
-parser = argparse.ArgumentParser()
-parser.add_argument("lightcurve", help="path to lightcurve file")
-parser.add_argument("-o", "--output", help="path to output directory")
-parser.add_argument("-c", "--config", help="path to configuration file")
-args = parser.parse_args()
-
-# Read config file if possible
-use_config_file = False
-if args.config is not None:
+    # Initiate transitleastsquares model
     try:
-        config = ConfigParser()
-        config.read(args.config)
-        R_star = float(config["Grid"]["R_star"])
-        R_star_min = float(config["Grid"]["R_star_min"])
-        R_star_max = float(config["Grid"]["R_star_max"])
-        M_star = float(config["Grid"]["M_star"])
-        M_star_min = float(config["Grid"]["M_star_min"])
-        M_star_max = float(config["Grid"]["M_star_max"])
-        period_min = float(config["Grid"]["period_min"])
-        period_max = float(config["Grid"]["period_max"])
-        n_transits_min = int(config["Grid"]["n_transits_min"])
-        transit_template = config["Template"]["transit_template"]
-        duration_grid_step = float(config["Speed"]["duration_grid_step"])
-        transit_depth_min = float(config["Speed"]["transit_depth_min"])
-        oversampling_factor = int(config["Speed"]["oversampling_factor"])
-        T0_fit_margin = float(config["Speed"]["T0_fit_margin"])
-        use_threads = int(config["Speed"]["use_threads"])
-        delimiter = int(config["File"]["delimiter"])
-        use_config_file = True
-        print("Using TLS configuration from config file", args.config)
+        dy = data[:, 2]
+        model = transitleastsquares(t, y, dy)
     except:
-        print(
-            "Using default values because of broken or missing configuration file",
-            args.config,
+        model = transitleastsquares(t, y)
+
+    if use_config_file:
+        results = model.power(
+            R_star=R_star,
+            R_star_min=R_star_min,
+            R_star_max=R_star_max,
+            M_star=M_star,
+            M_star_min=M_star_min,
+            M_star_max=M_star_max,
+            period_min=period_min,
+            period_max=period_max,
+            n_transits_min=n_transits_min,
+            transit_template=transit_template,
+            duration_grid_step=duration_grid_step,
+            transit_depth_min=transit_depth_min,
+            oversampling_factor=oversampling_factor,
+            T0_fit_margin=T0_fit_margin,
+            use_threads=use_threads,
         )
-else:
-    print("No config file given. Using default values")
-
-# Load data
-if use_config_file:
-    data = numpy.genfromtxt(args.lightcurve, delimiter=args.delimiter)
-else:
-    data = numpy.genfromtxt(args.lightcurve, delimiter=",")
-
-t = data[:, 0]
-y = data[:, 1]
+    else:
+        results = model.power()
 
 
-# Initiate transitleastsquares model
-try:
-    dy = data[:, 2]
-    model = transitleastsquares(t, y, dy)
-except:
-    model = transitleastsquares(t, y)
+    # Save results to CSV files
 
-if use_config_file:
-    results = model.power(
-        R_star=R_star,
-        R_star_min=R_star_min,
-        R_star_max=R_star_max,
-        M_star=M_star,
-        M_star_min=M_star_min,
-        M_star_max=M_star_max,
-        period_min=period_min,
-        period_max=period_max,
-        n_transits_min=n_transits_min,
-        transit_template=transit_template,
-        duration_grid_step=duration_grid_step,
-        transit_depth_min=transit_depth_min,
-        oversampling_factor=oversampling_factor,
-        T0_fit_margin=T0_fit_margin,
-        use_threads=use_threads,
-    )
-else:
-    results = model.power()
+    # Determine path and file names of output files
+    if args.output is None:
+        file_stats = args.lightcurve + "_statistics.csv"
+        file_power = args.lightcurve + "_power.csv"
+    else:
+        file_stats = os.path.join(args.output, args.lightcurve + "_statistics.csv")
+        file_power = os.path.join(args.output, args.lightcurve + "_power.csv")
+
+    # Save
+    try:
+        numpy.savetxt(
+            file_power,
+            numpy.column_stack(
+                [
+                    # BUGFIX: positional slicing [25:26]/[26:27] selected
+                    # in_transit_count/after_transit_count, not periods/power
+                    results.periods,
+                    results.power,
+                ]
+            ),
+            delimiter=",",
+            fmt="%1.6f",
+        )
+        print("SDE-ogram saved to", file_power)
+
+        statistics = dict(list(results.items())[0:28])  # all scalar/per-transit statistics
+        numpy.set_printoptions(precision=8, threshold=10e10)
+        with open(file_stats, "w") as f:
+            for key in statistics.keys():
+                f.write("%s %s\n" % (key, statistics[key]))
+        print("Statistics saved to", file_stats)
+    except IOError:
+        print("Error saving result file")
 
 
-# Save results to CSV files
-
-# Determine path and file names of output files
-if args.output is None:
-    file_stats = args.lightcurve + "_statistics.csv"
-    file_power = args.lightcurve + "_power.csv"
-else:
-    file_stats = os.path.join(args.output, args.lightcurve + "_statistics.csv")
-    file_power = os.path.join(args.output, args.lightcurve + "_power.csv")
-
-# Save
-try:
-    numpy.savetxt(
-        file_power,
-        numpy.column_stack(
-            [
-                list(dict(list(results.items())[25:26]).values())[0],
-                list(dict(list(results.items())[26:27]).values())[0],
-            ]
-        ),
-        delimiter=",",
-        fmt="%1.6f",
-    )
-    print("SDE-ogram saved to", file_stats)
-
-    statistics = dict(list(results.items())[0:25])
-    numpy.set_printoptions(precision=8, threshold=10e10)
-    with open(file_stats, "w") as f:
-        for key in statistics.keys():
-            f.write("%s %s\n" % (key, statistics[key]))
-    print("Statistics saved to", file_stats)
-except IOError:
-    print("Error saving result file")
+if __name__ == "__main__":
+    main()

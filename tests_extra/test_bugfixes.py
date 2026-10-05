@@ -197,3 +197,30 @@ def test_period_grid_fallback_honours_period_range():
             R_star=5, M_star=1, time_span=20, period_min=4.0, period_max=4.05
         )
     assert p.min() > 4.0 and p.max() <= 4.05
+
+def test_command_line_interface(tmp_path):
+    rng = numpy.random.default_rng(5)
+    t = numpy.arange(0, 30, 0.02)
+    y = box_lc(t, 3.3, 1.0, 0.15, 2e-3) + rng.normal(0, 3e-4, len(t))
+    lc = tmp_path / "lc.csv"
+    numpy.savetxt(lc, numpy.column_stack([t, y]), delimiter=",")
+    cfg = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "data", "tls_config.cfg"
+    )
+    out = subprocess.run(
+        [sys.executable, "-m", "transitleastsquares.command_line", str(lc), "-c", cfg],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        timeout=600,
+    )
+    assert "Using TLS configuration from config file" in out.stdout, (
+        out.stdout + out.stderr
+    )
+    power = numpy.loadtxt(str(lc) + "_power.csv", delimiter=",")
+    assert power.shape[1] == 2 and power.shape[0] > 100
+    assert numpy.all(numpy.diff(power[:, 0]) > 0)  # first column = periods
+    p_best = power[numpy.argmax(power[:, 1]), 0]
+    assert abs(p_best - 3.3) < 0.02
+    stats = open(str(lc) + "_statistics.csv").read()
+    assert stats.startswith("SDE ")
