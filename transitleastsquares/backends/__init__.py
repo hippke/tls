@@ -77,6 +77,7 @@ class SearchBackend:
     """Base class. Subclasses must implement :meth:`search`."""
 
     name = "base"
+    exact = True  # reproduces the reference statistic up to rounding
 
     def search(
         self,
@@ -114,6 +115,8 @@ _REGISTRY: Dict[str, Union[str, Callable[[], SearchBackend]]] = {
     "fused": "transitleastsquares.backends.fused:FusedBackend",
     "fused-threads": "transitleastsquares.backends.fused:FusedThreadsBackend",
     "c": "transitleastsquares.backends.c_kernel:CBackend",
+    "fused-binned": "transitleastsquares.backends.fused:FusedBinnedBackend",
+    "fused-pieces": "transitleastsquares.backends.fused:FusedPiecesBackend",
 }
 
 

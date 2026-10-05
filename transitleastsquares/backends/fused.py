@@ -6,9 +6,16 @@ from transitleastsquares.core_fused import FusedProblem
 
 class FusedBackend(ProcessPoolBackend):
     name = "fused"
+    min_stride = 0  # 0: exact correlation; see FusedBinnedBackend
+    pieces = 0  # piecewise-constant templates (B1b); 0: off
+    dtype = "float64"  # dot-product precision
 
     def prepare(self, problem):
-        return FusedProblem(problem)
+        fp = FusedProblem(problem)
+        fp.pieces = self.pieces
+        fp.set_binning(self.min_stride)
+        fp.set_precision(self.dtype)
+        return fp
 
     def evaluate(self, state, period):
         return state.search(period)
@@ -29,6 +36,9 @@ class FusedThreadsBackend(FusedBackend):
         from transitleastsquares.core_fused import search_periods_fused_parallel
 
         fp = FusedProblem(problem)
+        fp.pieces = self.pieces
+        fp.set_binning(self.min_stride)
+        fp.set_precision(self.dtype)
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
         old = numba.get_num_threads()
@@ -50,10 +60,12 @@ class FusedThreadsBackend(FusedBackend):
                         p.R_star_max,
                         p.M_star_min,
                         p.M_star_max,
-                        *fp.templates,
+                        *fp.templates_kernel,
                         float(p.T0_search_margin),
                         float(tls_constants.SIGNAL_DEPTH),
                         fp.prune,
+                        *fp.binning,
+                        int(min(use_threads, numba.config.NUMBA_NUM_THREADS)),
                     )
                 )
                 if progress is not None:
@@ -64,3 +76,28 @@ class FusedThreadsBackend(FusedBackend):
         rows = numpy.concatenate([x[1] for x in parts])
         depths = numpy.concatenate([x[2] for x in parts])
         return SearchResult.from_unsorted(periods, chi2, rows, depths)
+
+
+class FusedBinnedBackend(FusedBackend):
+    """Approximate: stride-binned correlation for templates with shift stride
+    >= 4 (idea B1, see PERFORMANCE_LOG.md)."""
+
+    name = "fused-binned"
+    min_stride = 4
+    exact = False
+
+
+class FusedBinned32Backend(FusedBinnedBackend):
+    """As fused-binned, with float32 dot products. Experimental, not
+    registered: no speed gain in the full kernel (PERFORMANCE_LOG.md step 11)."""
+
+    name = "fused-binned32"
+    dtype = "float32"
+
+
+class FusedPiecesBackend(FusedBinnedBackend):
+    """As fused-binned, plus piecewise-constant templates (about 100 pieces)
+    for wide templates with shift stride < 4 (idea B1b, experimental)."""
+
+    name = "fused-pieces"
+    pieces = 100

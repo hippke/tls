@@ -158,8 +158,76 @@ class transitleastsquares:
                 f"Using {self.use_threads} of {multiprocessing.cpu_count()} CPU threads"
             )
 
-        found = self._search(backend, periods, lc_cache_overview, lc_arr)
+        self._spectra_oversampling = self.oversampling_factor
+        if self.coarse_to_fine:
+            found = self._search_coarse_to_fine(
+                backend, periods, lc_cache_overview, lc_arr
+            )
+        else:
+            found = self._search(backend, periods, lc_cache_overview, lc_arr)
         return self._results(found, durations, lc_cache_overview, lc_arr, backend)
+
+    def _search_coarse_to_fine(self, backend, periods, lc_cache_overview, lc_arr):
+        """Approximate fast mode (PERFORMANCE_LOG.md, idea B5).
+
+        1. Search every `step`-th period (step = round(oversampling_factor)),
+           i.e. a grid with oversampling ~1.
+        2. Refine the K highest local maxima of the coarse power spectrum at
+           full resolution (+-1 coarse step).
+        3. The coarse spectrum, with the winning coarse point replaced by the
+           best refined period, is returned and used for SDE and all
+           statistics (median kernel scaled to the coarse grid).
+        """
+        step = int(round(self.oversampling_factor))
+        K = 20 if self.coarse_to_fine is True else int(self.coarse_to_fine)
+        fine = numpy.sort(numpy.asarray(periods))  # ascending
+        if step < 2 or len(fine) < 4 * step:
+            return self._search(backend, periods, lc_cache_overview, lc_arr)
+        coarse_idx = numpy.arange(0, len(fine), step)
+        coarse = self._search(backend, fine[coarse_idx], lc_cache_overview, lc_arr)
+        self._spectra_oversampling = self.oversampling_factor / step
+        if numpy.all(coarse.depths == 0):
+            return coarse
+        _, _, power, _, _ = spectra(coarse.chi2, self._spectra_oversampling)
+        chosen = []
+        for j in numpy.argsort(power)[::-1]:  # K highest local maxima
+            if all(abs(j - q) > 1 for q in chosen):
+                chosen.append(int(j))
+            if len(chosen) == K:
+                break
+        refine = numpy.unique(
+            numpy.concatenate(
+                [
+                    numpy.arange(
+                        max(0, coarse_idx[j] - step + 1),
+                        min(len(fine), coarse_idx[j] + step),
+                    )
+                    for j in chosen
+                ]
+            )
+        )
+        refine = refine[refine % step != 0]  # coarse points are known
+        if len(refine) == 0:
+            return coarse
+        old_bar = self.show_progress_bar
+        self.show_progress_bar = False
+        try:
+            fine_found = self._search(backend, fine[refine], lc_cache_overview, lc_arr)
+        finally:
+            self.show_progress_bar = old_bar
+        # winning refined period: lowest chi2 among all refined points
+        b = int(numpy.argmin(fine_found.chi2))
+        jb = int(numpy.argmin(numpy.abs(coarse.periods - fine_found.periods[b])))
+        if fine_found.chi2[b] < coarse.chi2[jb]:
+            coarse.periods = coarse.periods.copy()
+            coarse.chi2 = coarse.chi2.copy()
+            coarse.rows = coarse.rows.copy()
+            coarse.depths = coarse.depths.copy()
+            coarse.periods[jb] = fine_found.periods[b]
+            coarse.chi2[jb] = fine_found.chi2[b]
+            coarse.rows[jb] = fine_found.rows[b]
+            coarse.depths[jb] = fine_found.depths[b]
+        return coarse
 
     # ---------------------------------------------------------------- results
     def _results(self, found, durations, lc_cache_overview, lc_arr, backend):
@@ -196,7 +264,7 @@ class transitleastsquares:
     ):
         t, y, dy = self.t, self.y, self.dy
         SR, power_raw, power, SDE_raw, SDE = spectra(
-            found.chi2, self.oversampling_factor
+            found.chi2, getattr(self, "_spectra_oversampling", self.oversampling_factor)
         )
         index_highest_power = numpy.argmax(power)
         period = found.periods[index_highest_power]

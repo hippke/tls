@@ -204,6 +204,8 @@ def run(name):
     loader, kw = CASES[name]
     t, y, dy = loader()
     kwargs = dict(Q)
+    # The golden set captures the exact statistic: use an exact backend
+    kwargs["backend"] = os.environ.get("TLS_GOLDEN_BACKEND", "fused")
     kwargs.update(kw)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

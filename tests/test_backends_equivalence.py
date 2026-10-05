@@ -6,7 +6,7 @@ import numpy
 import pytest
 from golden_cases import CASES
 
-from transitleastsquares import available_backends, transitleastsquares
+from transitleastsquares import available_backends, get_backend, transitleastsquares
 
 NAMES = [
     "k2_3_window",
@@ -31,7 +31,11 @@ def run(name, backend):
         )
 
 
-@pytest.mark.parametrize("backend", [b for b in available_backends() if b != "numba"])
+EXACT = [b for b in available_backends() if b != "numba" and get_backend(b).exact]
+APPROX = [b for b in available_backends() if not get_backend(b).exact]
+
+
+@pytest.mark.parametrize("backend", EXACT)
 @pytest.mark.parametrize("name", NAMES)
 def test_backend_equivalence(backend, name):
     ref = run(name, "numba")
@@ -43,3 +47,18 @@ def test_backend_equivalence(backend, name):
         numpy.testing.assert_allclose(
             a, b, rtol=1e-7, atol=1e-12, equal_nan=True, err_msg=key
         )
+
+
+@pytest.mark.parametrize("backend", APPROX)
+@pytest.mark.parametrize("name", NAMES)
+def test_approximate_backend_close(backend, name):
+    """Approximate backends: same detection (P, T0, duration), small changes of
+    the statistic. Sensitivity is validated separately (injection-recovery)."""
+    ref = run(name, "fused")
+    cur = run(name, backend)
+    numpy.testing.assert_allclose(cur.chi2, ref.chi2, rtol=5e-3)
+    for key in ["period", "T0", "duration"]:
+        a, b = numpy.asarray(cur[key], float), numpy.asarray(ref[key], float)
+        numpy.testing.assert_allclose(a, b, rtol=1e-9, equal_nan=True, err_msg=key)
+    if numpy.isfinite(ref.SDE) and ref.SDE > 0:
+        assert abs(cur.SDE - ref.SDE) < 0.02 * ref.SDE + 0.05

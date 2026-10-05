@@ -41,7 +41,7 @@ def test_env_var(monkeypatch):
     monkeypatch.setenv("TLS_BACKEND", "numba")
     assert isinstance(get_backend(), NumbaBackend)
     monkeypatch.delenv("TLS_BACKEND")
-    assert isinstance(get_backend(), FusedBackend)
+    assert get_backend().name == "fused-binned"  # package default
 
 
 class CountingBackend(NumbaBackend):
@@ -107,3 +107,14 @@ def test_T0_search_margin():
     numpy.testing.assert_array_equal(ref.chi2, same.chi2)
     fine = transitleastsquares(t, y).power(T0_search_margin=0, **kw)
     assert numpy.all(fine.chi2 <= ref.chi2 + 1e-9)  # denser search: never worse
+
+
+def test_coarse_to_fine_mode():
+    """Approximate fast mode: same detection, about 1/3 of the periods."""
+    t, y = lc()
+    ref = transitleastsquares(t, y).power(use_threads=1, **Q)
+    fast = transitleastsquares(t, y).power(use_threads=1, coarse_to_fine=True, **Q)
+    assert len(fast.periods) < 0.4 * len(ref.periods)
+    assert abs(fast.period / ref.period - 1) < 1e-3
+    assert abs(fast.T0 - ref.T0) < 0.01
+    assert fast.SDE > 0.7 * ref.SDE

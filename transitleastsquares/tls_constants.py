@@ -128,10 +128,15 @@ PROGRESSBAR_THRESHOLD = 5000
 MINIMUM_PERIOD_GRID_SIZE = 100
 
 # Search backend used by default (see transitleastsquares.backends):
-# "fused" (fast, default) or "numba" (reference implementation of TLS 1.33).
+#   "fused-binned"  default: fused kernel; for templates whose phase shifts are
+#                   thinned by T0_search_margin (stride >= 4) the correlation
+#                   is evaluated on stride-aligned bins (approximate; no loss
+#                   of sensitivity in injection-recovery tests)
+#   "fused"         same kernel, exact correlation (reference up to rounding)
+#   "numba"         original TLS 1.33 implementation
 # Can be overridden per call (power(backend=...)) or by the environment
 # variable TLS_BACKEND.
-DEFAULT_BACKEND = "fused"
+DEFAULT_BACKEND = "fused-binned"
 
 # Warn the user if unknown **kwargs are given as parameters
 VALID_PARAMETERS = [
@@ -163,4 +168,5 @@ VALID_PARAMETERS = [
     "transit_template",
     "verbose",
     "backend",
+    "coarse_to_fine",
 ]
