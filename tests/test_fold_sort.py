@@ -35,3 +35,32 @@ def test_fold_sort_matches_mergesort(case, period):
     f2, w2 = reference(t, y, w, period)
     numpy.testing.assert_array_equal(f1, f2)
     numpy.testing.assert_array_equal(w1, w2)
+
+
+@pytest.mark.parametrize("case", list(CASES))
+def test_fold_sort_without_weights(case):
+    """move_w=False (uniform weights): same flux order, weights untouched."""
+    from transitleastsquares.core_fused import fold_sort_into
+
+    rng = numpy.random.default_rng(1)
+    t = CASES[case](rng)
+    n = len(t)
+    y = rng.normal(1, 1e-3, n)
+    w = numpy.ones(n)
+    flux = numpy.empty(n)
+    w_out = numpy.full(n, -7.0)
+    fold_sort_into(
+        t,
+        y,
+        w,
+        1.7,
+        numpy.empty(n),
+        numpy.empty(n + 1, dtype=numpy.int64),
+        numpy.empty(n, dtype=numpy.int64),
+        numpy.empty(n),
+        flux,
+        w_out,
+        False,
+    )
+    numpy.testing.assert_array_equal(flux, reference(t, y, w, 1.7)[0])
+    assert numpy.all(w_out == -7.0)

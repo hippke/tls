@@ -58,9 +58,12 @@ def _foldfast_into(t, period, out):
 
 
 @numba.njit(cache=True)
-def fold_sort_into(t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w):
+def fold_sort_into(
+    t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w, move_w
+):
     """Phase-fold and write flux and weights sorted by phase (stable order)
     into `flux` and `w` (work arrays: phases, keys: n; counts: n+1; bucket: n).
+    move_w=False: `w` is not written (all weights equal; saves memory traffic).
 
     Bucket sort: phases are near-uniform in [0, 1), so N buckets hold about
     one point each. A stable counting scatter followed by an insertion sort
@@ -87,28 +90,32 @@ def fold_sort_into(t, y, inv_dy2, period, phases, counts, bucket, keys, flux, w)
         counts[bucket[i]] = pos + 1
         keys[pos] = phases[i]
         flux[pos] = y[i]
-        w[pos] = inv_dy2[i]
+        if move_w:
+            w[pos] = inv_dy2[i]
     work = 0
     for i in range(1, n):
         kv = keys[i]
         if kv < keys[i - 1]:
             fv = flux[i]
-            wv = w[i]
+            wv = w[i] if move_w else 0.0
             j = i - 1
             while j >= 0 and keys[j] > kv:
                 keys[j + 1] = keys[j]
                 flux[j + 1] = flux[j]
-                w[j + 1] = w[j]
+                if move_w:
+                    w[j + 1] = w[j]
                 j -= 1
             keys[j + 1] = kv
             flux[j + 1] = fv
-            w[j + 1] = wv
+            if move_w:
+                w[j + 1] = wv
             work += i - 1 - j
             if work > 8 * n:  # clustered phases: use the O(N log N) sort
                 order = numpy.argsort(phases[:n], kind="mergesort")
                 for q in range(n):
                     flux[q] = y[order[q]]
-                    w[q] = inv_dy2[order[q]]
+                    if move_w:
+                        w[q] = inv_dy2[order[q]]
                 return
 
 
@@ -129,6 +136,7 @@ def fold_sort(t, y, inv_dy2, period):
         numpy.empty(n),
         flux,
         w,
+        True,
     )
     return flux, w
 
@@ -180,19 +188,6 @@ def _pl_eval(c, pos, dd):
     for t in range(len(c)):
         acc += c[t] * dd[pos[t]]
     return acc
-
-
-@numba.njit(cache=True)
-def _double_prefix(x, m, mu, dd):
-    """dd[k] = sum_{l<k} S[l], S[l] = sum_{q<l} (x[q] - mu), for k = 0..m+1."""
-    s = 0.0
-    acc = 0.0
-    dd[0] = 0.0
-    for k in range(m + 1):
-        acc += s
-        dd[k + 1] = acc
-        if k < m:
-            s += x[k] - mu
 
 
 @numba.njit(fastmath=True, cache=True)
@@ -291,36 +286,81 @@ def search_period_fused(
 
     # Phase fold and sort (stable order, as in the reference)
     fold_sort_into(
-        t, y, inv_dy2, period, phases, counts, bucket, keys, flux_sorted, w_sorted
+        t,
+        y,
+        inv_dy2,
+        period,
+        phases,
+        counts,
+        bucket,
+        keys,
+        flux_sorted,
+        w_sorted,
+        not uniform_weights,
     )
+    w0 = inv_dy2[0]
+    has_pl = len(pl_c) > 0
+    # Double prefix sums for the piecewise-linear templates (in the same
+    # pass; mean removed for precision, its contribution mu * sum(p) is added
+    # back). The means come from the unsorted data (any constant is exact).
+    mu_rw = 0.0
+    mu_w = 0.0
+    if has_pl:
+        for i in range(n):
+            mu_rw += (1.0 - y[i]) * inv_dy2[i]
+            mu_w += inv_dy2[i]
+        mu_rw /= n
+        mu_w /= n
     cum_rw[0] = 0.0
     cum[0] = 0.0
     cum_r2[0] = 0.0
     cum_w[0] = 0.0
+    dd_rw[0] = 0.0
+    dd_w[0] = 0.0
+    s_rw = 0.0
+    a_rw = 0.0
+    s_w = 0.0
+    a_w = 0.0
     total = 0.0
-    for k in range(m):
-        src = k if k < n else k - n
-        f = flux_sorted[src]
-        wk = w_sorted[src]
-        w[k] = wk
-        rw[k] = (1.0 - f) * wk
-        cum[k + 1] = cum[k] + f
-        cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
-        cum_w[k + 1] = cum_w[k] + wk
-        cum_rw[k + 1] = cum_rw[k] + (1.0 - f) * wk
-        if k < n:
-            total += (f - 1.0) ** 2 * wk
-
-    # Double prefix sums for the piecewise-linear templates (mean removed for
-    # precision; the mean's contribution mu * sum(p) is added back)
-    mu_rw = 0.0
-    mu_w = 0.0
-    if len(pl_c) > 0:
-        mu_rw = cum_rw[n] / n
-        _double_prefix(rw, m, mu_rw, dd_rw)
-        if not uniform_weights:
-            mu_w = cum_w[n] / n
-            _double_prefix(w, m, mu_w, dd_w)
+    if uniform_weights:
+        # w = w0 everywhere: no weight arrays (w, cum_w) needed
+        for k in range(m):
+            src = k if k < n else k - n
+            f = flux_sorted[src]
+            rk = (1.0 - f) * w0
+            rw[k] = rk
+            cum[k + 1] = cum[k] + f
+            cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * w0
+            cum_rw[k + 1] = cum_rw[k] + rk
+            if k < n:
+                total += (f - 1.0) ** 2 * w0
+            if has_pl:
+                a_rw += s_rw
+                dd_rw[k + 1] = a_rw
+                s_rw += rk - mu_rw
+    else:
+        for k in range(m):
+            src = k if k < n else k - n
+            f = flux_sorted[src]
+            wk = w_sorted[src]
+            rk = (1.0 - f) * wk
+            w[k] = wk
+            rw[k] = rk
+            cum[k + 1] = cum[k] + f
+            cum_r2[k + 1] = cum_r2[k] + (1.0 - f) * (1.0 - f) * wk
+            cum_w[k + 1] = cum_w[k] + wk
+            cum_rw[k + 1] = cum_rw[k] + rk
+            if k < n:
+                total += (f - 1.0) ** 2 * wk
+            if has_pl:
+                a_rw += s_rw
+                dd_rw[k + 1] = a_rw
+                s_rw += rk - mu_rw
+                a_w += s_w
+                dd_w[k + 1] = a_w
+                s_w += wk - mu_w
+    dd_rw[m + 1] = a_rw + s_rw
+    dd_w[m + 1] = a_w + s_w
 
     # Physically plausible template widths for this period
     # M_star_min / M_star_max are the masses paired with R_star_min (shortest
@@ -335,7 +375,6 @@ def search_period_fused(
     best_gain = 0.0
     best_row = 0
     best_depth = 0.0
-    w0 = inv_dy2[0]
 
     # Seed for pruning: the gain at the deepest box position of each duration.
     # These shifts are evaluated again in the main loop, so the result is
@@ -372,9 +411,13 @@ def search_period_fused(
             length = lengths[u]
             prof = profile[offsets[u] : offsets[u] + length]
             k = 1 / (signal_depth / (best_mean * overshoot[u]))
-            ar, a2 = _dot2(
-                prof, rw[best_i : best_i + length], w[best_i : best_i + length]
-            )
+            if uniform_weights:
+                ar = _dot1(prof, rw[best_i : best_i + length])
+                a2 = sum_a2[u] * w0
+            else:
+                ar, a2 = _dot2(
+                    prof, rw[best_i : best_i + length], w[best_i : best_i + length]
+                )
             gain = 2 * k * ar - k * k * a2
             if gain > seed:
                 seed = gain
@@ -438,7 +481,8 @@ def search_period_fused(
                     if hi > m:
                         break
                     brw_buf[base + kb] = cum_rw[hi] - cum_rw[lo]
-                    bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
+                    if not uniform_weights:
+                        bw_buf[base + kb] = cum_w[hi] - cum_w[lo]
             brw = brw_buf
             bw = bw_buf
             ab = a_bin[boff[u] : boff[u] + nb]
