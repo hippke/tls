@@ -48,7 +48,7 @@ If you have trouble installing, please [open an issue](https://github.com/hippke
 
 
 ## Getting started
-Here is a short animation of a real search for planets in Kepler K2 data (K2-3, searched in 0.4 s with TLS 2.0). For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).
+Here is a terminal recording of a real TLS 2.0 search: 231,000 trial periods on 8 CPU cores in about 6 seconds (3 years of simulated photometry of a solar-type star with an Earth-like planet). For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).
 
 ![image](docs/source/animation.gif)
 
