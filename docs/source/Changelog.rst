@@ -10,6 +10,14 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 2.0.1 (11 October 2026)
+------------------------------------
+
+:Fixed: A float or fractional ``oversampling_factor`` (e.g. ``3.0`` or ``3.14``) raised an error in the SDE detrending (issue #105). Integer values and the results for them are unchanged.
+:Changed: Documentation of the period grid: the default minimum period assumes a Roche limit at 3 stellar radii, which is appropriate for solar-type stars (issue #108).
+:Changed: New logo with a version badge.
+
+
 Version 2.0 (5 October 2026)
 ------------------------------------
 
