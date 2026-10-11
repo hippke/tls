@@ -161,11 +161,11 @@ def period_uncertainty(periods, power):
 def _sde_kernel(oversampling_factor, factor=1):
     """Odd running-median kernel of the SDE detrend (factor 1: "median").
 
-    For factor 1 the expression is the one of TLS <= 1.33 (no int cast, so a
-    fractional oversampling_factor behaves exactly as before)."""
-    kernel = oversampling_factor * tls_constants.SDE_MEDIAN_KERNEL_SIZE * factor
-    if factor != 1:
-        kernel = int(kernel)
+    The kernel is always an int, so a float or fractional oversampling_factor
+    works (issue #105). For an integer oversampling_factor, or a float whose
+    product with the kernel size is a whole number, the value is the one of
+    TLS <= 1.33."""
+    kernel = int(oversampling_factor * tls_constants.SDE_MEDIAN_KERNEL_SIZE * factor)
     if kernel % 2 == 0:
         kernel = kernel + 1
     return kernel
