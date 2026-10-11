@@ -20,6 +20,8 @@ We present a new method to detect planetary transits from time-series photometry
 * **Opt-in analytic SDE background** detrending: `power(SDE_detrend="hybrid")` (see the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html)).
 * Pluggable search backends (`power(backend=...)`), modern packaging (`pyproject.toml`), and a golden test set that freezes all result fields.
 
+See the [changelog](https://transitleastsquares.readthedocs.io/en/latest/Changelog.html) for the full list of changes.
+
 ## Installation
 
 TLS can be installed conveniently using: `pip install transitleastsquares`
