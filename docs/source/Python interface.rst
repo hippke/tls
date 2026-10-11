@@ -40,7 +40,7 @@ Parameters used for the period search grid and the transit duration search grid.
 :M_star_min: *(float, default: 0.1)* Minimum stellar mass to be considered (in units of solar masses)
 :M_star_max:  *(float, default: 1.0)* Maximum stellar mass to be considered (in units of solar masses)
 
-:period_min:  *(float)* Minimum trial period (in units of days). If none is given, the limit is derived from the Roche limit
+:period_min:  *(float)* Minimum trial period (in units of days). If none is given, the limit is derived from the Roche limit, assumed at a semi-major axis of :math:`3 R_\star` (a low-density planet around a solar-type star, 0.6 d for the Sun). A given ``period_min`` can only raise this limit, not lower it. For stars of a very different density, see the :ref:`note on the Roche limit <period-grid-roche>`
 :period_max: *(float)* Maximum trial period (in units of days). Default: Half the duration of the time series
 :n_transits_min: *(int, default: 2)* Minimum number of transits required. Overrules ``period_max=time_span/n_transits_min``
 
@@ -185,6 +185,18 @@ with
 where :math:`M` and :math:`R` are the stellar mass and radius, :math:`G` is the gravitational constant, :math:`S` is the time span of the dataset and :math:`OS` is the oversampling parameter to ensure that the peak is not missed between frequency samples. The search edges can be found at the Roche limit,
 
 .. math:: f_{\rm max}=\frac{1}{2 \pi} \sqrt{\frac{GM}{(3R)^3}}; f_{\rm min}=2/S
+
+.. _period-grid-roche:
+
+.. note::
+    The upper frequency limit :math:`f_{\rm max}` places the shortest period at a semi-major axis of :math:`a = 3 R_\star`, following `Ofir (2014) <https://ui.adsabs.harvard.edu/#abs/2014A&A...561A.138O/abstract>`_. This is the Roche limit of a fluid, low-density planet (:math:`\rho_p \approx 1` g/cm³) around a **solar-type star**: :math:`a \approx 2.44 R_\star (\rho_\star/\rho_p)^{1/3} \approx 2.7 R_\star` for the solar density of 1.4 g/cm³. The factor 3 does *not* adapt to the stellar density, which depends on the ``M_star`` and ``R_star`` you provide. For other stars, the default minimum period can be wrong:
+
+    * Dense stars (e.g., M dwarfs, :math:`\rho_\star \gtrsim 10` g/cm³): the Roche limit lies farther out, at up to :math:`\sim 6 R_\star` or more. TLS then also searches periods that are not physically possible. This is harmless but costs computing time. For a 0.3 :math:`M_\odot`, 0.3 :math:`R_\odot` star, the default minimum is 0.18 d, while the fluid Roche limit corresponds to 0.52 d.
+    * Low-density stars (e.g., red giants and red clump stars): the Roche limit can fall inside the star, so the planet orbit is bounded by :math:`a \gtrsim R_\star` instead. The default :math:`3 R_\star` then cuts away short periods which are physically possible. For a 1.2 :math:`M_\odot`, 11 :math:`R_\odot` giant, the default minimum is 20 d, while :math:`a = R_\star` corresponds to 3.9 d.
+
+    The orbital period at a given semi-major axis follows from Kepler's third law, :math:`P = 2\pi \sqrt{a^3/(GM_\star)}`, with :math:`a = \max\left[2.44 R_\star (\rho_\star/\rho_p)^{1/3},\, R_\star\right]` for a fluid body or :math:`a = R_\star (2 \rho_\star/\rho_p)^{1/3}` for a rigid body. Choose the :math:`\rho_p` that is plausible for your target population.
+
+    ``period_min`` is applied after the grid has been generated, so it can only *raise* the lower limit, which is the right tool for dense stars (set it to the Roche period). It cannot extend the search below the default minimum, so for low-density stars the searched range cannot currently be extended to shorter periods with ``period_min``. The default minimum is set by ``M_star`` and ``R_star`` alone, through :math:`f_{\rm max} \propto \sqrt{M_\star / R_\star^3}`, and these also set the period sampling, so they should not be changed just to move the lower limit.
 
 .. function:: period_grid(parameters)
 
