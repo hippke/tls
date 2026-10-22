@@ -76,7 +76,7 @@ archivePrefix = {arXiv},
 }
 ```
 
-## Contributing Code, Bugfixes, or Feedback
-We welcome and encourage contributions. If you have any trouble, [open an issue](https://github.com/hippke/tls/issues).
+## Contributing
+All my repositories embrace collaboration between humans and AI. Contributions are welcome, whether they are written by you, by an AI assistant, or by both together, and they will be handled promptly. Please open an [issue](https://github.com/hippke/tls/issues) or a pull request.
 
 Copyright 2019-2026 Michael Hippke & René Heller.
