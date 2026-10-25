@@ -544,15 +544,15 @@ def all_transit_times(T0, t, period):
 
 
 def calculate_transit_duration_in_days(t, period, transit_times, duration):
-    """Return estimate for transit duration in days"""
+    """Return estimate for transit duration in days.
 
-    # Difference between (time series duration / period) and epochs
-    transit_duration_in_days_raw = (
-        duration * calculate_stretch(t, period, transit_times) * period
-    )
-
-    # Correct the duration for gaps in the data
-    return transit_duration_in_days_raw * calculate_fill_factor(t)
+    ``duration`` is the template width as a fraction of the phase-folded light
+    curve, so it is converted with the period alone (and the epoch stretch).
+    Gaps between observing blocks do not shrink the folded curve, so the
+    duration must not be scaled by ``calculate_fill_factor``: doing so made the
+    duration collapse for multi-sector/multi-year data (issue #83).
+    """
+    return duration * calculate_stretch(t, period, transit_times) * period
 
 
 def calculate_stretch(t, period, transit_times):

@@ -49,10 +49,10 @@ def test_multi_planet():
     model_second_run = transitleastsquares(t_second_run, y_second_run)
     results_second_run = model_second_run.power()
     numpy.testing.assert_almost_equal(
-        results_second_run.duration, 0.15061016994013998, decimal=3
+        results_second_run.duration, 0.16645293714851986, decimal=3
     )
     numpy.testing.assert_almost_equal(
-        results_second_run.SDE, 34.987371359756565, decimal=3
+        results_second_run.SDE, 34.98452719159753, decimal=3
     )
     numpy.testing.assert_almost_equal(
         results_second_run.rp_rs, 0.025480893577558485, decimal=3

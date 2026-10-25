@@ -27,7 +27,7 @@ def test_shapes():
     model_box = transitleastsquares(t, y_filt)
     results_box = model_box.power(transit_template="box")
     numpy.testing.assert_almost_equal(
-        results_box.duration, 0.06111785726416931, decimal=5
+        results_box.duration, 0.06461111641424293, decimal=5
     )
     numpy.testing.assert_almost_equal(results_box.rp_rs, 0.08836981203437415, decimal=5)
 
@@ -36,7 +36,7 @@ def test_shapes():
     results_grazing = model_grazing.power(transit_template="grazing")
 
     numpy.testing.assert_almost_equal(
-        results_grazing.duration, 0.08948265482047034, decimal=5
+        results_grazing.duration, 0.0945971355420931, decimal=5
     )
     numpy.testing.assert_almost_equal(
         min(results_grazing.chi2red), 0.06759475703796078, decimal=5
