@@ -10,6 +10,12 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 2.0.2 (28 October 2026)
+------------------------------------
+
+:Fixed: For light curves with long gaps (e.g., TESS sectors observed years apart), ``duration`` was scaled by the fill factor and came out much too short, which also biased the in-/out-of-transit selection for ``snr``, ``snr_per_transit``, ``transit_depths`` and the related statistics (issue #83, PR #115 by Louis Perner). Periods, T0, SDE and the power spectrum are unchanged; durations of gapped data (e.g., K2) increase by a few percent.
+
+
 Version 2.0.1 (11 October 2026)
 ------------------------------------
 
