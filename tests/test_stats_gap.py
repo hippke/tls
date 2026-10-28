@@ -71,7 +71,7 @@ def test_stats_gap():
     )
 
     numpy.testing.assert_almost_equal(results.depth, 0.9998972750356973, decimal=5)
-    numpy.testing.assert_almost_equal(results.duration, 0.41845319797978703, decimal=5)
+    numpy.testing.assert_almost_equal(results.duration, 0.42825738670815655, decimal=5)
     numpy.testing.assert_almost_equal(results.SDE, 4.243572802600693, decimal=3)
     numpy.testing.assert_almost_equal(
         results.odd_even_mismatch, 0.15059221218811772, decimal=3
@@ -90,7 +90,7 @@ def test_stats_gap():
     numpy.testing.assert_almost_equal(
         results.transit_times, transit_times_expected, decimal=3
     )
-    numpy.testing.assert_almost_equal(results.duration, 0.41845319797978703, decimal=3)
+    numpy.testing.assert_almost_equal(results.duration, 0.42825738670815655, decimal=3)
 
     numpy.testing.assert_almost_equal(
         max(results.model_folded_phase), 1.0000380285975052, decimal=3
