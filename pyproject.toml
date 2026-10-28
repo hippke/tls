@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "transitleastsquares"
 dynamic = ["version"]
 description = "An optimized transit-fitting algorithm to search for periodic transits of small planets"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Michael Hippke", email = "michael@hippke.org" }]
 requires-python = ">=3.9"
 dependencies = [
@@ -17,7 +18,6 @@ dependencies = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
