@@ -38,3 +38,9 @@ def test_duration_independent_of_gaps(blocks):
     )
     assert results.period == pytest.approx(PERIOD, abs=0.01)
     assert results.duration == pytest.approx(T14_DAYS, rel=0.15)
+    # the plotted phase-folded model must have the same width (#83, second part)
+    model = numpy.asarray(results.model_folded_model)
+    phase = numpy.asarray(results.model_folded_phase)
+    in_transit = phase[model < 1]
+    width = (in_transit.max() - in_transit.min()) * results.period
+    assert width == pytest.approx(T14_DAYS, rel=0.15)

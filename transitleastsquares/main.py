@@ -15,7 +15,6 @@ from transitleastsquares.results import transitleastsquaresresults
 from transitleastsquares.stats import (
     FAP,
     all_transit_times,
-    calculate_fill_factor,
     calculate_stretch,
     calculate_transit_duration_in_days,
     count_stats,
@@ -315,14 +314,13 @@ class transitleastsquares:
         # (not at cadence: len(y)/2), so the model is stretched accordingly.
         # Note: unlike the cache, maxwidth is *not* rounded up to an even number here
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(t))
-        fill_half = 1 - ((1 - calculate_fill_factor(t)) * 0.5)
         stretch = calculate_stretch(t, period, transit_times)
         internal_samples = (
             int(len(y) / len(transit_times))
         ) * tls_constants.OVERSAMPLE_MODEL_LIGHT_CURVE
         template = self._template_params()
         model_folded_model = fractional_transit(
-            duration=duration * maxwidth_in_samples * fill_half,
+            duration=duration * maxwidth_in_samples,
             maxwidth=maxwidth_in_samples / stretch,
             depth=1 - depth,
             samples=int(len(t)),
