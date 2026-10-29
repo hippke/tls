@@ -24,6 +24,37 @@ _LIB = None
 CFLAGS = ["-O3", "-march=native", "-ffast-math", "-fopenmp", "-shared", "-fPIC"]
 
 
+def _openmp_flags(cc):
+    """OpenMP flags for the C compiler. Apple clang rejects a plain -fopenmp: it
+    needs -Xpreprocessor -fopenmp plus an external libomp (e.g. Homebrew)."""
+    if sys.platform != "darwin":
+        return ["-fopenmp"]
+    try:
+        version = subprocess.run(
+            [cc, "--version"], capture_output=True, text=True
+        ).stdout
+    except OSError:
+        return ["-fopenmp"]
+    if "Apple" not in version:
+        return ["-fopenmp"]
+    for prefix in (
+        os.environ.get("LIBOMP_PREFIX", ""),
+        "/opt/homebrew/opt/libomp",
+        "/usr/local/opt/libomp",
+    ):
+        if prefix and os.path.exists(os.path.join(prefix, "include", "omp.h")):
+            lib = os.path.join(prefix, "lib")
+            return [
+                "-Xpreprocessor",
+                "-fopenmp",
+                "-I" + os.path.join(prefix, "include"),
+                "-L" + lib,
+                "-lomp",
+                "-Wl,-rpath," + lib,
+            ]
+    return ["-fopenmp"]
+
+
 def _cache_dir():
     if os.environ.get("TLS_CACHE_DIR"):
         return os.environ["TLS_CACHE_DIR"]
@@ -41,18 +72,27 @@ def load_library():
     with open(_SRC, "rb") as f:
         source = f.read()
     cc = os.environ.get("CC", "cc")
-    key = hashlib.sha256(source + " ".join([cc] + CFLAGS).encode()).hexdigest()[:16]
+    flags = [g for f in CFLAGS for g in (_openmp_flags(cc) if f == "-fopenmp" else [f])]
+    key = hashlib.sha256(source + " ".join([cc] + flags).encode()).hexdigest()[:16]
     os.makedirs(_cache_dir(), exist_ok=True)
     path = os.path.join(
         _cache_dir(), f"tls_kernel_{key}{'.dll' if sys.platform == 'win32' else '.so'}"
     )
     if not os.path.exists(path):
         tmp = path + f".{os.getpid()}.tmp"
-        cmd = [cc, *CFLAGS, _SRC, "-o", tmp, "-lm"]
+        cmd = [cc, *flags, _SRC, "-o", tmp, "-lm"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
+            hint = ""
+            if sys.platform == "darwin" and "fopenmp" in result.stderr:
+                hint = (
+                    "\nOn macOS, Apple clang needs an external OpenMP runtime: "
+                    "`brew install libomp` (or set LIBOMP_PREFIX), or set CC to a "
+                    "compiler with OpenMP (e.g. Homebrew gcc or llvm)."
+                )
             raise RuntimeError(
                 f"Compiling the TLS C kernel failed:\n{' '.join(cmd)}\n{result.stderr}"
+                + hint
             )
         os.replace(tmp, path)
     lib = ctypes.CDLL(path)
