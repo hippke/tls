@@ -10,6 +10,14 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 2.0.3 (29 October 2026)
+------------------------------------
+
+:Fixed: For light curves with long gaps, the phase-folded model ``model_folded_model`` was too narrow (e.g., about half the width for TESS sectors years apart). It now matches ``duration`` (issue #83, PR #116 by Louis Perner). Only the plotted model changes; all other results are unchanged.
+:Fixed: The optional C backend (``backend="c"``) now compiles on macOS with Apple clang, using an external OpenMP runtime (``brew install libomp``, or set ``LIBOMP_PREFIX``). Linux builds are unchanged (PR #117 by Louis Perner). We don't have an Apple device for testing, so feedback from Mac users is welcome.
+:Changed: Packaging metadata uses an SPDX license expression (no change for users).
+
+
 Version 2.0.2 (28 October 2026)
 ------------------------------------
 
