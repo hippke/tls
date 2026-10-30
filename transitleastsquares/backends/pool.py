@@ -26,10 +26,13 @@ from Python 3.14), where every worker imports TLS and loads the kernels.
 """
 
 import atexit
+import contextlib
+import importlib.machinery
 import mmap
 import multiprocessing
 import os
 import pickle
+import sys
 import tempfile
 import threading
 import uuid
@@ -167,7 +170,8 @@ class _Persistent:
                     return None
                 cls._close_locked()
             if cls.pool is None:
-                cls.pool = ctx.Pool(processes=processes)
+                with _main_not_reimported(backend):
+                    cls.pool = ctx.Pool(processes=processes)
                 cls.key = key
                 if not cls.registered:
                     atexit.register(shutdown_workers)
@@ -224,6 +228,31 @@ def persistent_enabled(backend):
     if float(getattr(tls_constants, "WORKER_IDLE_TIMEOUT", 0) or 0) <= 0:
         return False
     return type(backend).__module__.startswith("transitleastsquares.")
+
+
+@contextlib.contextmanager
+def _main_not_reimported(backend):
+    """Start workers without re-running the user's main script (issue #104).
+
+    With "spawn" (macOS, Windows) and "forkserver" (Linux from Python 3.14),
+    each new worker re-imports the main script. A script without an
+    ``if __name__ == "__main__":`` guard then calls power() again inside the
+    worker, which dies with multiprocessing's bootstrapping RuntimeError, and
+    the pool silently replaces it forever: power() hangs. The workers of the
+    built-in backends only run TLS code, so they do not need the main script:
+    a ``__main__`` spec name makes multiprocessing skip it. Custom backends
+    may be defined in the main script and keep the default behaviour."""
+    main = sys.modules.get("__main__")
+    builtin = type(backend).__module__.startswith("transitleastsquares.")
+    if main is None or not builtin:
+        yield
+        return
+    spec = getattr(main, "__spec__", None)
+    main.__spec__ = importlib.machinery.ModuleSpec("__main__", None)
+    try:
+        yield
+    finally:
+        main.__spec__ = spec
 
 
 def chunks(periods, use_threads, per_thread=16):
@@ -353,11 +382,12 @@ class ProcessPoolBackend(SearchBackend):
         if pool is not None:
             self._search_persistent(pool, work, states, results, progress)
         elif use_threads > 1:
-            pool = ctx.Pool(
-                processes=use_threads,
-                initializer=_init_worker,
-                initargs=(self, states, _config_snapshot()),
-            )
+            with _main_not_reimported(self):
+                pool = ctx.Pool(
+                    processes=use_threads,
+                    initializer=_init_worker,
+                    initargs=(self, states, _config_snapshot()),
+                )
             joined = False
             try:
                 for task, block in pool.imap_unordered(_search_task_chunk, work):
