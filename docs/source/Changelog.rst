@@ -10,6 +10,12 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 2.0.4 (30 October 2026)
+------------------------------------
+
+:Fixed: Scripts without an ``if __name__ == "__main__":`` guard hung in ``power()`` with ``use_threads > 1`` under the "spawn" start method (default on macOS and Windows) and "forkserver" (default on Linux from Python 3.14): every worker re-ran the script, died, and was silently replaced. The workers of the built-in backends no longer re-run the main script (issue #104, PR #118). Diagnosed and tested on Apple Silicon by Louis Perner. Results are unchanged.
+
+
 Version 2.0.3 (29 October 2026)
 ------------------------------------
 
