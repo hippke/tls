@@ -51,6 +51,7 @@ If you have trouble installing, please [open an issue](https://github.com/hippke
 
 ## Getting started
 Here is a terminal recording of a real TLS 2.0 search: 231,000 trial periods on 8 CPU cores in about 6 seconds (3 years of simulated photometry of a solar-type star with an Earth-like planet). For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html).
+The [📑Grand Tour](https://github.com/hippke/tls/blob/master/tutorials/12%20The%20Grand%20Tour%20-%20from%20download%20to%20posterior.ipynb) goes from a raw TESS light curve to a planet's posterior: download with lightkurve, detrending with [wotan](https://github.com/hippke/wotan), the search with TLS, and the fit with [pizzetti](https://github.com/hippke/pizzetti).
 
 ![image](docs/source/animation.gif)
 
