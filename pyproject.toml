@@ -33,7 +33,7 @@ Documentation = "https://transitleastsquares.readthedocs.io"
 transitleastsquares = "transitleastsquares.command_line:main"
 
 [tool.setuptools]
-packages = ["transitleastsquares", "transitleastsquares.backends"]
+packages = ["transitleastsquares", "transitleastsquares.backends", "transitleastsquares.gp"]
 
 [tool.setuptools.package-data]
 transitleastsquares = ["*.csv"]

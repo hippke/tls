@@ -1,0 +1,191 @@
+"""Baseline models: Gaussian processes for the stellar (and instrumental)
+variability that is marginalised in the transit search.
+
+Public units: time in days, flux normalised to ~1, amplitudes (sigma,
+sigma_slow, jitter) in relative flux. Internally the state-space code works
+in ppt.
+"""
+
+import math
+
+import numpy as np
+
+from transitleastsquares.gp import fitting
+from transitleastsquares.gp.statespace import gp_mean, log_likelihood, rotation_model, spline_model
+
+PPT = 1e3
+
+
+def robust_errors(y):
+    """Per-point flux uncertainty from the point-to-point scatter (robust
+    against slow variability and outliers), for data without dy."""
+    d = np.diff(y)
+    return 1.4826 * np.median(np.abs(d - np.median(d))) / math.sqrt(2)
+
+
+def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
+    """Peak of the Lomb-Scargle periodogram (numpy only), as the starting
+    point of the rotation fit."""
+    yc = y - np.mean(y)
+    span = t.max() - t.min()
+    df = 1 / (oversample * span)
+    freqs = np.arange(1 / period_max, 1 / period_min, df)
+    power = np.empty(len(freqs))
+    for i in range(0, len(freqs), 256):  # chunks: memory O(256 N)
+        w = 2 * np.pi * freqs[i : i + 256, None]
+        tau = np.arctan2(np.sum(np.sin(2 * w * t), 1), np.sum(np.cos(2 * w * t), 1)) / (2 * w[:, 0])
+        arg = w * (t - tau[:, None])
+        c, s = np.cos(arg), np.sin(arg)
+        power[i : i + 256] = (c @ yc) ** 2 / np.sum(c * c, 1) + (s @ yc) ** 2 / np.sum(s * s, 1)
+    return 1 / freqs[np.argmax(power)]
+
+
+class Baseline:
+    """A Gaussian-process model of the baseline (base class)."""
+
+    def _model(self, t, dy):
+        raise NotImplementedError
+
+    def log_likelihood(self, t, y, dy):
+        """Gaussian log likelihood of the flux y (relative units) under this
+        baseline plus white noise dy, with the GP integrated out."""
+        t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
+        ll_ppt = log_likelihood(self._model(t, dy), t, (y - 1) * PPT, dy * PPT)
+        return ll_ppt + (len(t) - self._model(t, dy).n_diffuse) * math.log(PPT)
+
+    def trend(self, t, y, dy, use=None):
+        """Posterior mean of the baseline at all t (relative flux),
+        conditioned on the points with use=True (default: all)."""
+        t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
+        use = np.ones(len(t), bool) if use is None else np.asarray(use, bool)
+        yerr = np.where(use, dy, 1e6) * PPT  # excluded points carry no information
+        return 1 + gp_mean(self._model(t, dy), t, (y - 1) * PPT * use, yerr) / PPT
+
+    def as_dict(self):
+        raise NotImplementedError
+
+    def __repr__(self):
+        args = ", ".join(f"{k}={v!r}" for k, v in self.as_dict().items())
+        return f"{type(self).__name__}({args})"
+
+class RotationBaseline(Baseline):
+    """Rotation GP (celerite2's RotationTerm: damped oscillators at the
+    rotation period and half of it), a slow non-periodic damped oscillator
+    (Q = 1/sqrt(2)), a free mean, and white-noise jitter added to dy.
+
+    sigma, sigma_slow, jitter: relative flux; period, rho_slow: days;
+    Q0, dQ, f: dimensionless."""
+
+    KEYS = ("sigma", "period", "Q0", "dQ", "f", "sigma_slow", "rho_slow", "jitter")
+    _AMPLITUDES = ("sigma", "sigma_slow", "jitter")
+
+    def __init__(self, sigma, period, Q0, dQ, f, sigma_slow, rho_slow, jitter=0.0):
+        values = dict(sigma=sigma, period=period, Q0=Q0, dQ=dQ, f=f,
+                      sigma_slow=sigma_slow, rho_slow=rho_slow, jitter=jitter)
+        # stored exactly as used internally (ppt), so that fits and warm
+        # starts see bit-identical values
+        self._p = {k: (v * PPT if k in self._AMPLITUDES else v) for k, v in values.items()}
+
+    def __getattr__(self, name):
+        p = self.__dict__.get("_p")
+        if p is None or name not in p:
+            raise AttributeError(name)
+        return p[name] / PPT if name in self._AMPLITUDES else p[name]
+
+    def as_dict(self):
+        return {k: getattr(self, k) for k in self.KEYS}
+
+    def __eq__(self, other):
+        return type(self) is type(other) and self._p == other._p
+
+    def _model(self, t, dy):
+        return rotation_model(self._p)
+
+    @classmethod
+    def _from_ppt(cls, p):
+        b = cls.__new__(cls)
+        b._p = {k: p[k] for k in cls.KEYS}
+        return b
+
+    @classmethod
+    def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=4, use_threads=None, start=None):
+        """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
+        peak); use: points to fit (default all); n_starts (1-4) starting
+        points in up to use_threads threads (default: numba's thread count);
+        start: a previous RotationBaseline (single pass from there).
+        Returns (baseline, log likelihood)."""
+        t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
+        if period_guess is None:
+            m = slice(None) if use is None else np.asarray(use, bool)
+            period_guess = rotation_period_guess(t[m], y[m])
+        p, ll_ppt = fitting.fit_rotation(
+            t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
+            start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
+        )
+        n = len(t) if use is None else int(np.sum(use))
+        return cls._from_ppt(p), ll_ppt + (n - 1) * math.log(PPT)
+
+
+class SplineBaseline(Baseline):
+    """Cubic smoothing spline as a GP (integrated Wiener process), with
+    smoothing length h (days; the equivalent-kernel width), a free mean and
+    white-noise jitter (relative flux). sigma_ref (relative flux) and cadence
+    (days) fix the process noise q = sigma_ref^2 cadence / h^4; by default
+    they are taken from the data (median dy, median time step) when used."""
+
+    def __init__(self, h, jitter=0.0, sigma_ref=None, cadence=None):
+        self.h, self.cadence = h, cadence
+        self._jitter = jitter * PPT  # internal units (ppt), see RotationBaseline
+        self._sigma_ref = None if sigma_ref is None else sigma_ref * PPT
+
+    jitter = property(lambda self: self._jitter / PPT)
+    sigma_ref = property(lambda self: None if self._sigma_ref is None else self._sigma_ref / PPT)
+
+    def as_dict(self):
+        return dict(h=self.h, jitter=self.jitter, sigma_ref=self.sigma_ref, cadence=self.cadence)
+
+    def __eq__(self, other):
+        return type(self) is type(other) and (self.h, self._jitter, self._sigma_ref, self.cadence) == \
+            (other.h, other._jitter, other._sigma_ref, other.cadence)
+
+    def _model(self, t, dy):
+        sig = np.median(dy) * PPT if self._sigma_ref is None else self._sigma_ref
+        cad = np.median(np.diff(t)) if self.cadence is None else self.cadence
+        return spline_model(self.h, sig, cad, self._jitter)
+
+    @classmethod
+    def fit(cls, t, y, dy, use=None, h_range=(0.05, 5.0), use_threads=None, start=None):
+        """Type-II maximum likelihood for h and the jitter (3 starts in up to
+        use_threads threads, or a single pass from start, a previous
+        SplineBaseline). Returns (baseline, log likelihood)."""
+        t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
+        s = None if start is None else dict(h=start.h, jitter=start._jitter)
+        p, ll_ppt = fitting.fit_spline(t, (y - 1) * PPT, dy * PPT, mask=use, h_range=h_range,
+                                       start=s, use_threads=use_threads)
+        b = cls(p["h"], cadence=p["cadence"])
+        b._jitter, b._sigma_ref = p["jitter"], p["sigma"]
+        n = len(t) if use is None else int(np.sum(use))
+        return b, ll_ppt + (n - 3) * math.log(PPT)
+
+
+def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs):
+    """Fit a baseline ("rotation" or "spline") and iteratively remove
+    positive outliers (flares) of its residuals; dips (transits) are never
+    clipped. Each round is warm-started from the previous one.
+    Returns (baseline, log likelihood, use) with use = points kept."""
+    cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
+    if kind == "rotation" and fit_kwargs.get("period_guess") is None:
+        # once, before clipping: it also sets the fit's period bounds
+        fit_kwargs["period_guess"] = rotation_period_guess(t, y)
+    use = np.ones(len(t), bool)
+    b = None
+    for _ in range(max_iter):
+        b, ll = cls.fit(t, y, dy, use=use, start=b, **fit_kwargs)
+        resid = y - b.trend(t, y, dy)  # conditioned on all points (as validated)
+        r = resid[use]
+        mad = 1.4826 * np.median(np.abs(r - np.median(r)))
+        new = use & (resid < nsigma * mad)
+        if new.sum() == use.sum():
+            break
+        use = new
+    return b, ll, use
