@@ -171,8 +171,10 @@ class SplineBaseline(Baseline):
 def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs):
     """Fit a baseline ("rotation" or "spline") and iteratively remove
     positive outliers (flares) of its residuals; dips (transits) are never
-    clipped. Each round is warm-started from the previous one.
-    Returns (baseline, log likelihood, use) with use = points kept."""
+    clipped. Each round is warm-started from the previous one. A round that
+    would remove more than 20 % of the points, or a degenerate trend, ends
+    the clipping. Returns (baseline, log likelihood, use) with use = points
+    kept."""
     cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
     if kind == "rotation" and fit_kwargs.get("period_guess") is None:
         # once, before clipping: it also sets the fit's period bounds
@@ -184,8 +186,10 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs
         resid = y - b.trend(t, y, dy)  # conditioned on all points (as validated)
         r = resid[use]
         mad = 1.4826 * np.median(np.abs(r - np.median(r)))
+        if not (np.isfinite(mad) and mad > 0):
+            break  # degenerate trend: keep the current points
         new = use & (resid < nsigma * mad)
-        if new.sum() == use.sum():
-            break
+        if new.sum() == use.sum() or new.sum() < 0.8 * use.sum():
+            break  # converged, or a round would remove > 20 % (not flares)
         use = new
     return b, ll, use

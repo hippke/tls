@@ -59,8 +59,9 @@ class Spline:
 
 
 class SHO:
-    """celerite SHOTerm with standard deviation sigma, undamped period and Q
-    (Q != 0.5). Stationary: Q_d = P_inf - A P_inf A'."""
+    """celerite SHOTerm with standard deviation sigma, undamped period and Q.
+    Stationary: Q_d = P_inf - A P_inf A'. A = exp(F dt) in closed form (as in
+    _block_transition), valid also at and near critical damping (Q = 1/2)."""
 
     dim = 2
     n_diffuse = 0
@@ -72,12 +73,23 @@ class SHO:
         return np.diag([self.sigma**2, (self.w0 * self.sigma) ** 2])
 
     def discretize(self, dt):
-        w0, Q = self.w0, self.Q
-        F = np.array([[0.0, 1.0], [-(w0**2), -w0 / Q]])
-        lam, V = np.linalg.eig(F)
-        Vi = np.linalg.inv(V)
-        E = np.exp(lam[None, :] * dt[:, None])  # (n, 2)
-        A = np.real(np.einsum("ij,nj,jk->nik", V, E, Vi))
+        w0 = self.w0
+        a = w0 / (2 * self.Q)
+        disc = w0 * w0 - a * a
+        if disc > 1e-14 * w0 * w0:
+            bb = np.sqrt(disc)
+            c, sb = np.cos(bb * dt), np.sin(bb * dt) / bb
+        elif disc < -1e-14 * w0 * w0:
+            bb = np.sqrt(-disc)
+            c, sb = np.cosh(bb * dt), np.sinh(bb * dt) / bb
+        else:  # critically damped limit
+            c, sb = np.ones_like(dt), np.asarray(dt, float).copy()
+        ex = np.exp(-a * dt)
+        A = np.empty((len(dt), 2, 2))
+        A[:, 0, 0] = ex * (c + a * sb)
+        A[:, 0, 1] = ex * sb
+        A[:, 1, 0] = -ex * w0 * w0 * sb
+        A[:, 1, 1] = ex * (c - a * sb)
         Pinf = self.p0()
         Qd = Pinf[None] - A @ Pinf @ A.transpose(0, 2, 1)
         return A, Qd, Pinf
@@ -214,14 +226,35 @@ def whiten(y, A, K, S, H):
 @numba.njit(cache=True)
 def _chol_solve(Pm, B, L, X):
     """Solve Pm X = B for symmetric positive definite Pm (d x d, small) by
-    Cholesky; L is workspace. No LAPACK (which numba would take from SciPy)."""
+    Cholesky; L is workspace. No LAPACK (which numba would take from SciPy).
+    If Pm is singular (e.g. a component with zero variance), a ridge of
+    1e-12 * max(diag) is added: the solution then sets the undetermined
+    components to ~0, which is irrelevant for the smoother (their covariance
+    is zero). Positive definite Pm are solved unchanged."""
     d = Pm.shape[0]
-    for i in range(d):
-        for j in range(i + 1):
-            acc = Pm[i, j]
-            for k in range(j):
-                acc -= L[i, k] * L[j, k]
-            L[i, j] = math.sqrt(acc) if i == j else acc / L[j, j]
+    ridge = 0.0
+    for attempt in range(2):
+        good = True
+        for i in range(d):
+            for j in range(i + 1):
+                acc = Pm[i, j] + (ridge if i == j else 0.0)
+                for k in range(j):
+                    acc -= L[i, k] * L[j, k]
+                if i == j:
+                    if not acc > 0.0:
+                        good = False
+                        break
+                    L[i, j] = math.sqrt(acc)
+                else:
+                    L[i, j] = acc / L[j, j]
+            if not good:
+                break
+        if good:
+            break
+        dmax = 0.0
+        for i in range(d):
+            dmax = max(dmax, abs(Pm[i, i]))
+        ridge = 1e-12 * dmax + 1e-300
     for c in range(B.shape[1]):
         for i in range(d):  # forward: L z = b
             acc = B[i, c]

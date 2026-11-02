@@ -129,3 +129,42 @@ def test_baseline_parameters_round_trip():
 def test_rotation_period_guess():
     t, f, e = k2_25()
     assert abs(rotation_period_guess(t, f) - 1.8764) < 0.01  # astropy LombScargle: 1.8764 d
+
+
+# --- degenerate hyperparameters (found in the validation runs) ------------
+def test_sho_critical_damping():
+    """Q = 1/2 (critically damped) is continuous with its neighbours (the
+    eigendecomposition used before was singular there)."""
+    from transitleastsquares.gp.statespace import SHO
+
+    dt = np.array([0.0, 0.0204, 0.5, 3.0])
+    A0, Q0, _ = SHO(2.0, 3.0, 0.5).discretize(dt)
+    for q in (0.5 - 1e-6, 0.5 + 1e-6):
+        A1, Q1, _ = SHO(2.0, 3.0, q).discretize(dt)
+        np.testing.assert_allclose(A1, A0, atol=1e-5)
+        np.testing.assert_allclose(Q1, Q0, atol=1e-4)
+    assert np.all(np.isfinite(A0)) and np.all(np.isfinite(Q0))
+
+
+def test_zero_variance_component_trend():
+    """A component with zero amplitude (f = 0: no P/2 term) makes the
+    predicted covariance singular; the smoother must still work."""
+    t, f, e = synthetic(days=12.0)
+    d = ROT_SYN.as_dict()
+    d["f"] = 0.0
+    trend = gp.RotationBaseline(**d).trend(t, f, e)
+    assert np.all(np.isfinite(trend)) and np.std(f / trend) < np.std(f)
+
+
+def test_flare_clipping_guards(monkeypatch):
+    """A degenerate trend (NaN) or a round that would clip > 20 % of the
+    points ends the clipping instead of removing everything."""
+    from transitleastsquares.gp import baselines
+
+    t, f, e = synthetic(days=12.0)
+    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None: np.full(len(t), np.nan))
+    b, ll, use = baselines.fit_with_flare_clipping("rotation", t, f, e, period_guess=2.3, n_starts=1)
+    assert use.all()
+    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None: y - np.arange(len(y)))
+    b, ll, use = baselines.fit_with_flare_clipping("rotation", t, f, e, period_guess=2.3, n_starts=1)
+    assert use.sum() >= 0.8 * len(t)
