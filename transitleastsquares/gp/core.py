@@ -71,7 +71,8 @@ def _search(
 
     A, Q, P0, R = model.matrices(t, yerr)
     clock("matrices")
-    K, S, _, _ = kalman_gains(A, Q, model.H, R, P0)
+    K, S, _, _ = kalman_gains(A, Q, model.H, R, P0, False, False)  # the search needs no covariances
+    del Q  # N x d x d, not needed after the gains
     ey, _, _ = whiten(y, A, K, S, model.H)
     nd = model.n_diffuse
     ey[:nd] = 0.0  # diffuse start: no information

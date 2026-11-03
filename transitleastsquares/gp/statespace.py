@@ -147,15 +147,17 @@ class Model:
 
 # --------------------------------------------------------------- Kalman core
 @numba.njit(cache=True)
-def kalman_gains(A, Q, H, R, P0):
+def kalman_gains(A, Q, H, R, P0, store_pred=True, store_filt=True):
     """Data-independent pass: gains K, innovation variances S, and the
-    predicted / filtered covariances (for the smoother). Explicit loops: no
-    BLAS calls, which numba would take from SciPy."""
+    predicted / filtered covariances (for the smoother). store_pred,
+    store_filt False: placeholders of length 1 instead (each saves an
+    N x d x d array; the search needs neither, the smoother only Pfilt).
+    Explicit loops: no BLAS calls, which numba would take from SciPy."""
     n, d = A.shape[0], A.shape[1]
     K = np.empty((n, d))
     S = np.empty(n)
-    Ppred = np.empty((n, d, d))
-    Pfilt = np.empty((n, d, d))
+    Ppred = np.empty((n if store_pred else 1, d, d))
+    Pfilt = np.empty((n if store_filt else 1, d, d))
     P = P0.copy()
     M = np.empty((d, d))
     PH = np.empty(d)
@@ -173,7 +175,8 @@ def kalman_gains(A, Q, H, R, P0):
                     for l in range(d):
                         acc += M[r, l] * A[t, c, l]
                     P[r, c] = acc
-        Ppred[t] = P
+        if store_pred:
+            Ppred[t] = P
         s = R[t]
         for r in range(d):
             acc = 0.0
@@ -189,7 +192,8 @@ def kalman_gains(A, Q, H, R, P0):
                 v = 0.5 * ((P[r, c] - K[t, r] * PH[c]) + (P[c, r] - K[t, c] * PH[r]))
                 P[r, c] = v
                 P[c, r] = v
-        Pfilt[t] = P
+        if store_filt:
+            Pfilt[t] = P
     return K, S, Ppred, Pfilt
 
 
@@ -269,12 +273,15 @@ def _chol_solve(Pm, B, L, X):
 
 
 @numba.njit(cache=True)
-def rts_smooth(A, xpred, xfilt, Ppred, Pfilt):
+def rts_smooth(A, Q, xpred, xfilt, Pfilt):
     """Rauch-Tung-Striebel smoother: posterior mean of the state.
-    G = Pf A' Pp^-1, so G' solves Pp G' = A Pf (Pp, Pf symmetric)."""
+    G = Pf A' Pp^-1, so G' solves Pp G' = A Pf (Pp, Pf symmetric). The
+    predicted covariance Pp_{t+1} = A Pf_t A' + Q is recomputed here in the
+    order of kalman_gains (bit-identical) instead of being stored."""
     n, d = A.shape[0], A.shape[1]
     xs = xfilt.copy()
     B = np.empty((d, d))
+    Pp = np.empty((d, d))
     GT = np.empty((d, d))
     L = np.zeros((d, d))
     for t in range(n - 2, -1, -1):
@@ -284,7 +291,13 @@ def rts_smooth(A, xpred, xfilt, Ppred, Pfilt):
                 for l in range(d):
                     acc += A[t + 1, r, l] * Pfilt[t, l, c]
                 B[r, c] = acc
-        _chol_solve(Ppred[t + 1], B, L, GT)
+        for r in range(d):  # Pp = B A' + Q
+            for c in range(d):
+                acc = Q[t + 1, r, c]
+                for l in range(d):
+                    acc += B[r, l] * A[t + 1, c, l]
+                Pp[r, c] = acc
+        _chol_solve(Pp, B, L, GT)
         for r in range(d):  # xs = xf + G (xs_{t+1} - xp_{t+1})
             acc = 0.0
             for l in range(d):
@@ -423,9 +436,9 @@ def log_likelihood(model, t, y, yerr):
 def gp_mean(model, t, y, yerr):
     """Posterior mean of the baseline at t (RTS smoother)."""
     A, Q, P0, R = model.matrices(t, yerr)
-    K, S, Ppred, Pfilt = kalman_gains(A, Q, model.H, R, P0)
+    K, S, _, Pfilt = kalman_gains(A, Q, model.H, R, P0, False, True)
     _, xpred, xfilt = whiten(y, A, K, S, model.H)
-    xs = rts_smooth(A, xpred, xfilt, Ppred, Pfilt)
+    xs = rts_smooth(A, Q, xpred, xfilt, Pfilt)
     return xs @ model.H
 
 
