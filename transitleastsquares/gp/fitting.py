@@ -47,6 +47,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=4, us
     m = np.ones(len(t), bool) if mask is None else mask
     tm, ym, em = t[m], y[m], yerr[m]
     std = np.std(ym)
+    amp_max = 10 * std  # amplitudes and jitter: at most 10x the scatter of the data
     if start is None:
         if not 1 <= n_starts <= len(ROT_START_SHIFTS):
             raise ValueError(f"n_starts must be 1-{len(ROT_START_SHIFTS)}")
@@ -59,6 +60,11 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=4, us
         with np.errstate(over="ignore"):  # far-out simplex vertices: penalised below
             p = dict(zip(ROT_KEYS, np.exp(lx)))
         if not (0.3 * period_guess < p["period"] < 3 * period_guess and 0.5 < p["rho_slow"] < 100):
+            return 1e25
+        # physical bounds: without them a fit can run away (seen once in 434
+        # validation light curves: sigma = 378 x the flux, dQ = 1e121)
+        if max(p["sigma"], p["sigma_slow"], p["jitter"]) > amp_max or p["Q0"] > 1e4 or p["dQ"] > 1e5 \
+                or p["f"] > 100:
             return 1e25
         try:
             v = -log_likelihood(rotation_model(p), tm, ym, em)
