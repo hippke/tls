@@ -35,12 +35,12 @@ def k2_25(flares=False):
     return t[keep], f[keep], e[keep]
 
 
-def synthetic(days=30.0, seed=11):
+def synthetic(days=30.0, seed=11, cadence=0.0204):
     """Rotation-like variability drawn with the state-space model itself,
     gaps, dropped points, cadence jitter, varying errors, and a transit
-    (P = 3.1 d, duration 0.11 d, depth 2 ppt)."""
+    (P = 3.1 d, duration 0.11 d, depth 2 ppt). Default cadence: K2 (29.4 min)."""
     rng = np.random.default_rng(seed)
-    cad = 0.0204
+    cad = cadence
     t = np.arange(0, days, cad) + rng.uniform(-0.02, 0.02, int(np.ceil(days / cad))) * cad
     keep = rng.uniform(size=len(t)) > 0.05  # 5 % dropped
     keep &= ~((t > 0.3 * days) & (t < 0.3 * days + 1.0))  # 1 d gap

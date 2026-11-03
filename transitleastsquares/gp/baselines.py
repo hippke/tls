@@ -25,7 +25,13 @@ def robust_errors(y):
 
 def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
     """Peak of the Lomb-Scargle periodogram (numpy only), as the starting
-    point of the rotation fit."""
+    point of the rotation fit. The cost is (points x frequencies), both
+    growing with the span: data with a cadence below period_min / 16 are
+    binned to period_min / 8 first (8 samples per shortest period)."""
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    width = period_min / 8
+    if len(t) > 1 and np.median(np.diff(t)) < 0.5 * width:
+        t, y, _, _ = fitting.bin_series(t, y, np.ones(len(y)), width)
     yc = y - np.mean(y)
     span = t.max() - t.min()
     df = 1 / (oversample * span)
@@ -38,6 +44,9 @@ def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
         c, s = np.cos(arg), np.sin(arg)
         power[i : i + 256] = (c @ yc) ** 2 / np.sum(c * c, 1) + (s @ yc) ** 2 / np.sum(s * s, 1)
     return 1 / freqs[np.argmax(power)]
+
+
+FIT_BIN_WIDTH = 10.0 / 1440  # days; rotation fits bin data with a cadence below half of it
 
 
 class Baseline:
@@ -108,12 +117,15 @@ class RotationBaseline(Baseline):
         return b
 
     @classmethod
-    def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None):
+    def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None,
+            bin_width=FIT_BIN_WIDTH):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
         peak); use: points to fit (default all); n_starts (1-4, default 1) starting
         points in up to use_threads threads (default: numba's thread count);
-        start: a previous RotationBaseline (single pass from there).
-        Returns (baseline, log likelihood)."""
+        start: a previous RotationBaseline (single pass from there);
+        bin_width: fit on data binned to this width (days, default 10 min)
+        if the cadence is shorter than half of it (None: never bin).
+        Returns (baseline, log likelihood of the unbinned data)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:
             m = slice(None) if use is None else np.asarray(use, bool)
@@ -121,6 +133,7 @@ class RotationBaseline(Baseline):
         p, ll_ppt = fitting.fit_rotation(
             t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
             start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
+            bin_width=bin_width,
         )
         n = len(t) if use is None else int(np.sum(use))
         return cls._from_ppt(p), ll_ppt + (n - 1) * math.log(PPT)

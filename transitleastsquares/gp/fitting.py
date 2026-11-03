@@ -35,7 +35,19 @@ def _thread_map(fn, items, use_threads):
         return list(ex.map(fn, items))
 
 
-def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None):
+def bin_series(t, y, yerr, width):
+    """Mean of t and y in bins of the given width (days); errors of the mean
+    sqrt(sum yerr^2) / n; n = points per bin. Empty bins are dropped."""
+    k = np.floor((t - t[0]) / width).astype(np.int64)
+    _, idx, n = np.unique(k, return_index=True, return_counts=True)
+    tb = np.add.reduceat(t, idx) / n
+    yb = np.add.reduceat(y, idx) / n
+    eb = np.sqrt(np.add.reduceat(yerr**2, idx)) / n
+    return tb, yb, eb, n
+
+
+def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
+                 bin_width=None):
     """Type-II maximum likelihood for the rotation model.
 
     Without start: n_starts (1-4, default 1) generic starting points, each
@@ -43,10 +55,23 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     numba's thread count); the best optimum wins (the likelihood is
     multimodal, see PERF_PLAN.md). With start (a
     previous solution, e.g. from the last flare-clipping round): a single
-    pass from there."""
+    pass from there.
+
+    bin_width (days): fit the likelihood of the data binned to this width
+    when the cadence is shorter than half of it (the kernel timescales are
+    >= 0.5 d, so the GP is smooth within a bin). The jitter is fitted per bin
+    and converted to per point (x sqrt(median points per bin)); the returned
+    log likelihood is that of the unbinned data."""
     m = np.ones(len(t), bool) if mask is None else mask
     tm, ym, em = t[m], y[m], yerr[m]
     std = np.std(ym)
+    binned = bin_width is not None and np.median(np.diff(tm)) < 0.5 * bin_width
+    if binned:
+        t_all, y_all, e_all = tm, ym, em
+        tm, ym, em, nb = bin_series(tm, ym, em, bin_width)
+        jit_scale = np.sqrt(np.median(nb))  # per-point jitter = per-bin jitter x jit_scale
+        if start is not None:
+            start = dict(start, jitter=start["jitter"] / jit_scale)
     amp_max = 10 * std  # amplitudes and jitter: at most 10x the scatter of the data
     if start is None:
         if not 1 <= n_starts <= len(ROT_START_SHIFTS):
@@ -81,7 +106,11 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         return best
 
     best = min(_thread_map(run, x0s, use_threads), key=lambda r: r.fun)
-    return dict(zip(ROT_KEYS, np.exp(best.x))), -best.fun
+    p = dict(zip(ROT_KEYS, np.exp(best.x)))
+    if not binned:
+        return p, -best.fun
+    p["jitter"] *= jit_scale
+    return p, log_likelihood(rotation_model(p), t_all, y_all, e_all)
 
 
 def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None):

@@ -7,6 +7,7 @@ import numpy as np
 
 from transitleastsquares import tls_constants
 from transitleastsquares.gp.baselines import (
+    FIT_BIN_WIDTH,
     Baseline,
     RotationBaseline,
     SplineBaseline,
@@ -75,6 +76,7 @@ def search(
     clip_flares=True,
     rotation_period=None,
     n_starts=1,
+    fit_bin_width=FIT_BIN_WIDTH,
     period_min=0,
     period_max=float("inf"),
     oversampling_factor=tls_constants.OVERSAMPLING_FACTOR,
@@ -98,6 +100,9 @@ def search(
         Lomb-Scargle peak); n_starts: rotation fit starting points (1-4,
         default 1; more starts find better optima in ~1/4 of the cases, but
         did not find more planets in injection tests).
+    fit_bin_width: the rotation fit uses data binned to this width (days,
+        default 10 min) if the cadence is shorter than half of it; the
+        search always uses the unbinned data. None: never bin.
     period_min, period_max, oversampling_factor, duration_grid_step,
         n_transits_min: search grid, as in TLS (stellar limits: TLS defaults).
     t0_step: transit-time grid step (default cadence / 4); t0_step_duration:
@@ -119,7 +124,8 @@ def search(
         if isinstance(baseline, str):
             if baseline not in BASELINES:
                 raise ValueError(f"baseline must be one of {sorted(BASELINES)} or a Baseline instance")
-            kw = dict(period_guess=rotation_period, n_starts=n_starts) if baseline == "rotation" else {}
+            kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width) \
+                if baseline == "rotation" else {}
             if clip_flares:
                 b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, **kw)
             else:
