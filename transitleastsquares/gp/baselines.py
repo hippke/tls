@@ -108,9 +108,9 @@ class RotationBaseline(Baseline):
         return b
 
     @classmethod
-    def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=4, use_threads=None, start=None):
+    def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
-        peak); use: points to fit (default all); n_starts (1-4) starting
+        peak); use: points to fit (default all); n_starts (1-4, default 1) starting
         points in up to use_threads threads (default: numba's thread count);
         start: a previous RotationBaseline (single pass from there).
         Returns (baseline, log likelihood)."""
@@ -170,7 +170,8 @@ class SplineBaseline(Baseline):
 
 def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs):
     """Fit a baseline ("rotation" or "spline") and iteratively remove
-    positive outliers (flares) of its residuals; dips (transits) are never
+    positive outliers (flares) of its residuals against the trend of the
+    points kept so far; dips (transits) are never
     clipped. Each round is warm-started from the previous one. A round that
     would remove more than 20 % of the points, or a degenerate trend, ends
     the clipping. Returns (baseline, log likelihood, use) with use = points
@@ -183,7 +184,7 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs
     b = None
     for _ in range(max_iter):
         b, ll = cls.fit(t, y, dy, use=use, start=b, **fit_kwargs)
-        resid = y - b.trend(t, y, dy)  # conditioned on all points (as validated)
+        resid = y - b.trend(t, y, dy, use)  # conditioned on the kept points: a clipped flare no longer pulls the trend
         r = resid[use]
         mad = 1.4826 * np.median(np.abs(r - np.median(r)))
         if not (np.isfinite(mad) and mad > 0):

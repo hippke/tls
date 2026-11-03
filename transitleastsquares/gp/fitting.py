@@ -35,10 +35,10 @@ def _thread_map(fn, items, use_threads):
         return list(ex.map(fn, items))
 
 
-def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=4, use_threads=None):
+def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None):
     """Type-II maximum likelihood for the rotation model.
 
-    Without start: n_starts (1-4, default 4) generic starting points, each
+    Without start: n_starts (1-4, default 1) generic starting points, each
     with 3 Nelder-Mead passes, run in up to use_threads threads (default:
     numba's thread count); the best optimum wins (the likelihood is
     multimodal, see PERF_PLAN.md). With start (a

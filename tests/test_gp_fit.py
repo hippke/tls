@@ -1,10 +1,11 @@
 """transitleastsquares.gp: baseline fits.
 
 The fits with flare clipping on K2-25 must reach at least the reference
-likelihood (best known, logL in ppt units -4612.8931 for the rotation GP;
--6470.8783 for the spline) with the same flares clipped: optimizer changes
-must not cost fit quality. Parallel fit starts must equal sequential ones,
-and the search result must not depend on the number of threads.
+likelihood (best known, logL in ppt units -4597.2701 for the rotation GP,
+reached by 1 start as by 4; -6457.6451 for the spline) with the same flares
+clipped: optimizer changes must not cost fit quality. Parallel fit starts
+must equal sequential ones, and the search result must not depend on the
+number of threads.
 """
 
 import numpy as np
@@ -16,12 +17,12 @@ from transitleastsquares.gp.baselines import fit_with_flare_clipping
 
 # kind -> (logL in ppt units, flares clipped); the flux-unit likelihood adds
 # (n - n_diffuse) ln 1000 with n_diffuse = 1 (rotation) and 3 (spline)
-REFERENCE = {"rotation": (-4612.8931, 17, 1), "spline": (-6470.8783, 10, 3)}
+REFERENCE = {"rotation": (-4597.2701, 19, 1), "spline": (-6457.6451, 12, 3)}
 
 
 @pytest.mark.parametrize("kind", list(REFERENCE))
 def test_fit_quality(kind):
-    t, f, e = k2_25()  # the 70 flares of the file removed; clipping finds 17 more
+    t, f, e = k2_25()  # the 70 flares of the file removed; clipping finds 19 more
     kw = dict(period_guess=1.876) if kind == "rotation" else {}
     b, ll, use = fit_with_flare_clipping(kind, t, f, e, **kw)
     ll_ref, nclip_ref, nd = REFERENCE[kind]
