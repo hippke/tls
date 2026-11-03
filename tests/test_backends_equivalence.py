@@ -32,7 +32,10 @@ def run(name, backend):
 
 
 EXACT = [b for b in available_backends() if b != "numba" and get_backend(b).exact]
-APPROX = [b for b in available_backends() if not get_backend(b).exact]
+# approximations of TLS's statistic; backends with a statistic of their own
+# (same_statistic = False, e.g. "events") have their own tests
+APPROX = [b for b in available_backends()
+          if not get_backend(b).exact and getattr(get_backend(b), "same_statistic", True)]
 
 
 @pytest.mark.parametrize("backend", EXACT)
