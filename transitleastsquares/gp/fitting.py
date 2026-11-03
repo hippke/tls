@@ -81,6 +81,9 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         x0s = [base + sh for sh in ROT_START_SHIFTS[:n_starts]]
     else:
         x0s, passes = [np.log([start[k] for k in ROT_KEYS])], 1
+    threads = numba.get_num_threads() if use_threads is None else max(1, int(use_threads))
+    # one start: the threads go into the likelihood; several: one start per thread
+    ll_threads = threads if len(x0s) == 1 else 1
 
     def nll(lx):
         with np.errstate(over="ignore"):  # far-out simplex vertices: penalised below
@@ -93,7 +96,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
                 or p["f"] > 100:
             return 1e25
         try:
-            v = -log_likelihood(rotation_model(p), tm, ym, em)
+            v = -log_likelihood(rotation_model(p), tm, ym, em, ll_threads)
         except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
             return 1e25
         return v if np.isfinite(v) else 1e25
@@ -111,7 +114,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     if not binned:
         return p, -best.fun
     p["jitter"] *= jit_scale
-    return p, log_likelihood(rotation_model(p), t_all, y_all, e_all)
+    return p, log_likelihood(rotation_model(p), t_all, y_all, e_all, threads)
 
 
 def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None):

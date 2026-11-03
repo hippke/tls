@@ -148,11 +148,13 @@ class Model:
 # --------------------------------------------------------------- Kalman core
 @numba.njit(cache=True)
 def kalman_gains(A, Q, H, R, P0, store_pred=True, store_filt=True):
-    """Data-independent pass: gains K, innovation variances S, and the
-    predicted / filtered covariances (for the smoother). store_pred,
-    store_filt False: placeholders of length 1 instead (each saves an
-    N x d x d array; the search needs neither, the smoother only Pfilt).
-    Explicit loops: no BLAS calls, which numba would take from SciPy."""
+    """Data-independent pass on dense per-point matrices (Model.matrices):
+    gains K, innovation variances S, and the predicted / filtered
+    covariances. store_pred, store_filt False: placeholders of length 1
+    instead. The search and the smoother use the block-structured kernels
+    (kalman_whiten, smoothed_mean); this generic filter is the reference
+    of the tests. Explicit loops: no BLAS calls, which numba would take
+    from SciPy."""
     n, d = A.shape[0], A.shape[1]
     K = np.empty((n, d))
     S = np.empty(n)
@@ -272,40 +274,6 @@ def _chol_solve(Pm, B, L, X):
             X[i, c] = acc / L[i, i]
 
 
-@numba.njit(cache=True)
-def rts_smooth(A, Q, xpred, xfilt, Pfilt):
-    """Rauch-Tung-Striebel smoother: posterior mean of the state.
-    G = Pf A' Pp^-1, so G' solves Pp G' = A Pf (Pp, Pf symmetric). The
-    predicted covariance Pp_{t+1} = A Pf_t A' + Q is recomputed here in the
-    order of kalman_gains (bit-identical) instead of being stored."""
-    n, d = A.shape[0], A.shape[1]
-    xs = xfilt.copy()
-    B = np.empty((d, d))
-    Pp = np.empty((d, d))
-    GT = np.empty((d, d))
-    L = np.zeros((d, d))
-    for t in range(n - 2, -1, -1):
-        for r in range(d):  # B = A_{t+1} Pf_t
-            for c in range(d):
-                acc = 0.0
-                for l in range(d):
-                    acc += A[t + 1, r, l] * Pfilt[t, l, c]
-                B[r, c] = acc
-        for r in range(d):  # Pp = B A' + Q
-            for c in range(d):
-                acc = Q[t + 1, r, c]
-                for l in range(d):
-                    acc += B[r, l] * A[t + 1, c, l]
-                Pp[r, c] = acc
-        _chol_solve(Pp, B, L, GT)
-        for r in range(d):  # xs = xf + G (xs_{t+1} - xp_{t+1})
-            acc = 0.0
-            for l in range(d):
-                acc += GT[l, r] * (xs[t + 1, l] - xpred[t + 1, l])
-            xs[t, r] = xfilt[t, r] + acc
-    return xs
-
-
 # ------------------------------------------------- fused log likelihood
 @numba.njit(cache=True, nogil=True)
 def _block_transition(kind, par, dt, A2, Q2):
@@ -352,57 +320,69 @@ def _block_transition(kind, par, dt, A2, Q2):
 
 
 @numba.njit(cache=True, nogil=True)
-def kalman_loglik(t, y, R, kinds, starts, pars, P0, n_diffuse):
-    """Log likelihood of a block-diagonal state-space GP, allocation-free.
-    The prediction A P A' uses the block structure of A (blocks of 1 or 2)."""
-    nb, d, n = len(kinds), P0.shape[0], len(t)
-    size = np.empty(nb, np.int64)
-    for k in range(nb):
+def _predict(kinds, starts, size, Ab, Qb, P, M, x, xp):
+    """P = A P A' + Q and x = A x for block-diagonal A (blocks of 1 or 2)."""
+    nb, d = len(kinds), P.shape[0]
+    for k in range(nb):  # M = A P (rows of block k)
+        s0, sz = starts[k], size[k]
+        for r in range(sz):
+            for c in range(d):
+                acc = 0.0
+                for l in range(sz):
+                    acc += Ab[k, r, l] * P[s0 + l, c]
+                M[s0 + r, c] = acc
+    for k in range(nb):  # P = M A' + Q (columns of block k)
+        s0, sz = starts[k], size[k]
+        for r in range(d):
+            for c in range(sz):
+                acc = 0.0
+                for l in range(sz):
+                    acc += M[r, s0 + l] * Ab[k, c, l]
+                P[r, s0 + c] = acc
+        for r in range(sz):
+            for c in range(sz):
+                P[s0 + r, s0 + c] += Qb[k, r, c]
+    for k in range(nb):  # x = A x
+        s0, sz = starts[k], size[k]
+        for r in range(sz):
+            acc = 0.0
+            for l in range(sz):
+                acc += Ab[k, r, l] * x[s0 + l]
+            xp[s0 + r] = acc
+    for r in range(d):
+        x[r] = xp[r]
+
+
+@numba.njit(cache=True, nogil=True)
+def _block_sizes(kinds):
+    size = np.empty(len(kinds), np.int64)
+    for k in range(len(kinds)):
         size[k] = 1 if kinds[k] == 0 else 2
+    return size
+
+
+@numba.njit(cache=True, nogil=True)
+def _filter_segment(t, y, R, kinds, starts, pars, x, P, i0, i1, n_diffuse):
+    """Kalman filter over the points i0..i1-1 from the filtered state (x, P)
+    of point i0-1 (for i0 = 0: the prior; no prediction step). Updates x
+    and P in place; returns the log likelihood of the segment."""
+    nb, d = len(kinds), P.shape[0]
+    size = _block_sizes(kinds)
     Ab = np.zeros((nb, 2, 2))
     Qb = np.zeros((nb, 2, 2))
-    P = P0.copy()
     M = np.empty((d, d))
     PH = np.empty(d)
-    x = np.zeros(d)
     xp = np.zeros(d)
     ll = 0.0
     dt_last = -1.0
-    for i in range(n):
+    for i in range(i0, i1):
         dt = t[i] - t[i - 1] if i > 0 else 0.0
         if i > 0:
             if dt != dt_last:  # regular cadence: most steps reuse A, Q
                 for k in range(nb):
                     _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
                 dt_last = dt
-            for k in range(nb):  # M = A P (rows of block k)
-                s0, sz = starts[k], size[k]
-                for r in range(sz):
-                    for c in range(d):
-                        acc = 0.0
-                        for l in range(sz):
-                            acc += Ab[k, r, l] * P[s0 + l, c]
-                        M[s0 + r, c] = acc
-            for k in range(nb):  # P = M A' + Q (columns of block k)
-                s0, sz = starts[k], size[k]
-                for r in range(d):
-                    for c in range(sz):
-                        acc = 0.0
-                        for l in range(sz):
-                            acc += M[r, s0 + l] * Ab[k, c, l]
-                        P[r, s0 + c] = acc
-                for r in range(sz):
-                    for c in range(sz):
-                        P[s0 + r, s0 + c] += Qb[k, r, c]
-            for k in range(nb):  # x = A x
-                s0, sz = starts[k], size[k]
-                for r in range(sz):
-                    acc = 0.0
-                    for l in range(sz):
-                        acc += Ab[k, r, l] * x[s0 + l]
-                    xp[s0 + r] = acc
-            for r in range(d):
-                x[r] = xp[r]
+            _predict(kinds, starts, size, Ab, Qb, P, M, x, xp)
         # update; H picks the first state of every block
         s = R[i]
         hx = 0.0
@@ -427,19 +407,568 @@ def kalman_loglik(t, y, R, kinds, starts, pars, P0, n_diffuse):
     return ll
 
 
-def log_likelihood(model, t, y, yerr):
+@numba.njit(cache=True, nogil=True)
+def kalman_loglik(t, y, R, kinds, starts, pars, P0, n_diffuse):
+    """Log likelihood of a block-diagonal state-space GP, allocation-free.
+    The prediction A P A' uses the block structure of A (blocks of 1 or 2)."""
+    return _filter_segment(t, y, R, kinds, starts, pars, np.zeros(P0.shape[0]), P0.copy(), 0, len(t), n_diffuse)
+
+
+@numba.njit(cache=True, nogil=True)
+def _segment_element(t, y, R, kinds, starts, pars, i0, i1, F, c, P, J, eta):
+    """The Kalman filter over the points i0..i1-1 (i0 > 0) conditioned on an
+    exactly known filtered state s at point i0-1: the filtered state at
+    i1-1 is N(F s + c, P), and the log likelihood of the segment is
+    -const/2 - s'J s/2 + eta's. Fills F, c, P, J, eta; returns const.
+    (The elements of the parallel-in-time Kalman filter of Sarkka &
+    Garcia-Fernandez 2021, for one segment instead of one point.)"""
+    nb, d = len(kinds), P.shape[0]
+    size = _block_sizes(kinds)
+    Ab = np.zeros((nb, 2, 2))
+    Qb = np.zeros((nb, 2, 2))
+    M = np.empty((d, d))
+    PH = np.empty(d)
+    hF = np.empty(d)
+    xp = np.zeros(d)
+    P[:] = 0.0
+    F[:] = 0.0
+    for r in range(d):
+        F[r, r] = 1.0
+    c[:] = 0.0
+    J[:] = 0.0
+    eta[:] = 0.0
+    const = 0.0
+    dt_last = -1.0
+    for i in range(i0, i1):
+        dt = t[i] - t[i - 1]
+        if dt != dt_last:
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+            dt_last = dt
+        _predict(kinds, starts, size, Ab, Qb, P, M, c, xp)
+        for col in range(d):  # F = A F, column by column
+            for r in range(d):
+                M[r, 0] = F[r, col]
+            for k in range(nb):
+                s0, sz = starts[k], size[k]
+                for r in range(sz):
+                    acc = 0.0
+                    for l in range(sz):
+                        acc += Ab[k, r, l] * M[s0 + l, 0]
+                    F[s0 + r, col] = acc
+        s = R[i]
+        v0 = y[i]
+        for r in range(d):
+            acc = 0.0
+            for k in range(nb):
+                acc += P[r, starts[k]]
+            PH[r] = acc
+        for col in range(d):
+            acc = 0.0
+            for k in range(nb):
+                acc += F[starts[k], col]
+            hF[col] = acc
+        for k in range(nb):
+            s += PH[starts[k]]
+            v0 -= c[starts[k]]
+        const += math.log(2 * math.pi * s) + v0 * v0 / s
+        for r in range(d):
+            u = hF[r] / s
+            eta[r] += u * v0
+            for col in range(r, d):  # upper triangle; mirrored after the loop
+                J[r, col] += u * hF[col]
+        for r in range(d):
+            k_r = PH[r] / s
+            c[r] += k_r * v0
+            for col in range(d):
+                F[r, col] -= k_r * hF[col]
+        for r in range(d):
+            for col in range(r, d):
+                v = P[r, col] - PH[r] * PH[col] / s
+                P[r, col] = v
+                P[col, r] = v
+    for r in range(d):
+        for col in range(r + 1, d):
+            J[col, r] = J[r, col]
+    return const
+
+
+@numba.njit(cache=True, nogil=True)
+def _lu_solve(Am, B, X):
+    """Solve Am X = B (d x d, Gaussian elimination with partial pivoting);
+    returns log|det Am|. Am and B are overwritten."""
+    d = Am.shape[0]
+    logdet = 0.0
+    for k in range(d):
+        p = k
+        for i in range(k + 1, d):
+            if abs(Am[i, k]) > abs(Am[p, k]):
+                p = i
+        if p != k:
+            for j in range(d):
+                Am[k, j], Am[p, j] = Am[p, j], Am[k, j]
+                B[k, j], B[p, j] = B[p, j], B[k, j]
+        logdet += math.log(abs(Am[k, k]))
+        for i in range(k + 1, d):
+            f = Am[i, k] / Am[k, k]
+            for j in range(k, d):
+                Am[i, j] -= f * Am[k, j]
+            for j in range(B.shape[1]):
+                B[i, j] -= f * B[k, j]
+    for j in range(B.shape[1]):
+        for i in range(d - 1, -1, -1):
+            acc = B[i, j]
+            for k in range(i + 1, d):
+                acc -= Am[i, k] * X[k, j]
+            X[i, j] = acc / Am[i, i]
+    return logdet
+
+
+@numba.njit(cache=True, nogil=True)
+def _combine(x, P, F, c, Pe, J, eta, const):
+    """Condition the filtered state N(x, P) at the start of a segment on the
+    segment's element (F, c, Pe, J, eta, const) and propagate it to the
+    segment's end (in place); returns the segment's log likelihood given
+    the data before it."""
+    d = len(x)
+    Am = np.eye(d)
+    for i in range(d):  # Am = I + P J
+        for j in range(d):
+            acc = 0.0
+            for l in range(d):
+                acc += P[i, l] * J[l, j]
+            Am[i, j] += acc
+    B = P.copy()
+    Pc = np.empty((d, d))
+    logdet = _lu_solve(Am, B, Pc)  # Pc = (I + P J)^-1 P = (P^-1 + J)^-1
+    g = eta.copy()
+    quad = 0.0
+    for i in range(d):
+        acc = 0.0
+        for j in range(d):
+            acc += J[i, j] * x[j]
+        g[i] -= acc
+        quad += -0.5 * x[i] * acc + eta[i] * x[i]
+    xc = x.copy()
+    for i in range(d):
+        acc = 0.0
+        for j in range(d):
+            acc += Pc[i, j] * g[j]
+        quad += 0.5 * g[i] * acc
+        xc[i] += acc
+    for i in range(d):  # x = F xc + c, P = F Pc F' + Pe (symmetrised)
+        acc = c[i]
+        for j in range(d):
+            acc += F[i, j] * xc[j]
+        x[i] = acc
+    M = np.empty((d, d))
+    for i in range(d):
+        for j in range(d):
+            acc = 0.0
+            for l in range(d):
+                acc += F[i, l] * Pc[l, j]
+            M[i, j] = acc
+    for i in range(d):
+        for j in range(d):
+            acc = Pe[i, j]
+            for l in range(d):
+                acc += M[i, l] * F[j, l]
+            P[i, j] = acc
+    for i in range(d):
+        for j in range(i + 1, d):
+            v = 0.5 * (P[i, j] + P[j, i])
+            P[i, j] = v
+            P[j, i] = v
+    return -0.5 * const + quad - 0.5 * logdet
+
+
+@numba.njit(cache=True, parallel=True)
+def kalman_loglik_parallel(t, y, R, kinds, starts, pars, P0, n_diffuse, nseg):
+    """kalman_loglik with the data split into nseg segments, filtered in
+    parallel (the first one from the prior, the others conditioned on their
+    unknown start state) and combined in order. Exact up to rounding; the
+    result depends on nseg, not on the number of threads."""
+    n, d = len(t), P0.shape[0]
+    edges = np.empty(nseg + 1, np.int64)
+    for k in range(nseg + 1):
+        edges[k] = (k * n) // nseg
+    F = np.empty((nseg, d, d))
+    c = np.empty((nseg, d))
+    P = np.empty((nseg, d, d))
+    J = np.empty((nseg, d, d))
+    eta = np.empty((nseg, d))
+    const = np.empty(nseg)
+    for k in numba.prange(nseg):
+        if k == 0:
+            c[0] = 0.0
+            P[0] = P0
+            const[0] = _filter_segment(t, y, R, kinds, starts, pars, c[0], P[0], 0, edges[1], n_diffuse)
+        else:
+            const[k] = _segment_element(t, y, R, kinds, starts, pars, edges[k], edges[k + 1],
+                                        F[k], c[k], P[k], J[k], eta[k])
+    x = c[0].copy()
+    Pf = P[0].copy()
+    ll = const[0]
+    for k in range(1, nseg):
+        ll += _combine(x, Pf, F[k], c[k], P[k], J[k], eta[k], const[k])
+    return ll
+
+
+@numba.njit(cache=True, nogil=True)
+def _forward_store(t, y, R, kinds, starts, pars, x, P, i0, i1, xpred, xfilt, Pfilt):
+    """_filter_segment, storing the predicted and filtered means and the
+    filtered covariances of the points i0..i1-1 (global indices)."""
+    nb, d = len(kinds), P.shape[0]
+    size = _block_sizes(kinds)
+    Ab = np.zeros((nb, 2, 2))
+    Qb = np.zeros((nb, 2, 2))
+    M = np.empty((d, d))
+    PH = np.empty(d)
+    xp = np.zeros(d)
+    dt_last = -1.0
+    for i in range(i0, i1):
+        if i > 0:
+            dt = t[i] - t[i - 1]
+            if dt != dt_last:
+                for k in range(nb):
+                    _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+                dt_last = dt
+            _predict(kinds, starts, size, Ab, Qb, P, M, x, xp)
+        s = R[i]
+        hx = 0.0
+        for r in range(d):
+            acc = 0.0
+            for k in range(nb):
+                acc += P[r, starts[k]]
+            PH[r] = acc
+        for k in range(nb):
+            s += PH[starts[k]]
+            hx += x[starts[k]]
+        xpred[i] = x
+        innov = y[i] - hx
+        for r in range(d):
+            x[r] += PH[r] * innov / s
+        for r in range(d):
+            for c in range(r, d):
+                v = P[r, c] - PH[r] * PH[c] / s
+                P[r, c] = v
+                P[c, r] = v
+        xfilt[i] = x
+        Pfilt[i] = P
+
+
+@numba.njit(cache=True, nogil=True)
+def _backward_gains(t, kinds, starts, pars, i0, bnd, xpred, xfilt, Pfilt, Gam, gam):
+    """RTS gains G_i = Pf_i A' Pp_{i+1}^-1 for i = bnd-1 .. i0, stored in
+    place of Pfilt[i] (no longer needed), and the affine map of the
+    smoothed mean from the boundary point bnd to i0:
+    xs_i0 = Gam xs_bnd + gam."""
+    nb, d = len(kinds), Pfilt.shape[1]
+    size = _block_sizes(kinds)
+    Ab = np.zeros((nb, 2, 2))
+    Qb = np.zeros((nb, 2, 2))
+    B = np.empty((d, d))
+    Pp = np.empty((d, d))
+    GT = np.empty((d, d))
+    L = np.zeros((d, d))
+    T = np.empty((d, d))
+    h = np.empty(d)
+    Gam[:] = 0.0
+    for r in range(d):
+        Gam[r, r] = 1.0
+    gam[:] = 0.0
+    dt_last = -1.0
+    for i in range(bnd - 1, i0 - 1, -1):
+        dt = t[i + 1] - t[i]
+        if dt != dt_last:
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+            dt_last = dt
+        for k in range(nb):  # B = A Pf (rows of block k)
+            s0, sz = starts[k], size[k]
+            for r in range(sz):
+                for c in range(d):
+                    acc = 0.0
+                    for l in range(sz):
+                        acc += Ab[k, r, l] * Pfilt[i, s0 + l, c]
+                    B[s0 + r, c] = acc
+        for k in range(nb):  # Pp = B A' + Q (columns of block k)
+            s0, sz = starts[k], size[k]
+            for r in range(d):
+                for c in range(sz):
+                    acc = 0.0
+                    for l in range(sz):
+                        acc += B[r, s0 + l] * Ab[k, c, l]
+                    Pp[r, s0 + c] = acc
+            for r in range(sz):
+                for c in range(sz):
+                    Pp[s0 + r, s0 + c] += Qb[k, r, c]
+        _chol_solve(Pp, B, L, GT)  # GT = G'
+        for r in range(d):
+            for c in range(d):
+                Pfilt[i, r, c] = GT[c, r]
+        # xs_i = G xs_{i+1} + h, h = xf_i - G xp_{i+1}; compose with the map so far
+        for r in range(d):
+            acc = xfilt[i, r]
+            for l in range(d):
+                acc -= GT[l, r] * xpred[i + 1, l]
+            h[r] = acc
+        for r in range(d):
+            acc = h[r]
+            for l in range(d):
+                acc += GT[l, r] * gam[l]
+            T[r, 0] = acc
+            for c in range(d):
+                acc = 0.0
+                for l in range(d):
+                    acc += GT[l, r] * Gam[l, c]
+                B[r, c] = acc
+        for r in range(d):
+            gam[r] = T[r, 0]
+            for c in range(d):
+                Gam[r, c] = B[r, c]
+
+
+@numba.njit(cache=True, nogil=True)
+def _backward_mean(kinds, starts, i0, bnd, xs_bnd, xpred, xfilt, G, out):
+    """Smoothed means xs_i = xf_i + G_i (xs_{i+1} - xp_{i+1}) for
+    i = bnd-1 .. i0 from the known xs at bnd; out[i] = H xs_i."""
+    nb, d = len(kinds), G.shape[1]
+    xs = xs_bnd.copy()
+    tmp = np.empty(d)
+    for i in range(bnd - 1, i0 - 1, -1):
+        for r in range(d):
+            acc = xfilt[i, r]
+            for l in range(d):
+                acc += G[i, r, l] * (xs[l] - xpred[i + 1, l])
+            tmp[r] = acc
+        hx = 0.0
+        for r in range(d):
+            xs[r] = tmp[r]
+        for k in range(nb):
+            hx += xs[starts[k]]
+        out[i] = hx
+
+
+@numba.njit(cache=True, parallel=True)
+def smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg):
+    """Posterior mean H xs of a block-diagonal state-space GP (RTS
+    smoother), in nseg segments in parallel: (1) segment elements, joined
+    in order: the filtered state before each segment; (2) forward filter per
+    segment; (3) backward gains per segment and the affine map of the
+    smoothed mean across it, joined backwards in order; (4) the smoothed
+    means per segment. Exact up to rounding for any nseg (nseg = 1: the
+    sequential smoother)."""
+    n, d = len(t), P0.shape[0]
+    nb = len(kinds)
+    edges = np.empty(nseg + 1, np.int64)
+    for k in range(nseg + 1):
+        edges[k] = (k * n) // nseg
+    F = np.empty((nseg, d, d))
+    c = np.empty((nseg, d))
+    Pe = np.empty((nseg, d, d))
+    J = np.empty((nseg, d, d))
+    eta = np.empty((nseg, d))
+    const = np.empty(nseg)
+    xpred = np.empty((n, d))
+    xfilt = np.empty((n, d))
+    Pfilt = np.empty((n, d, d))
+    x0 = np.zeros((nseg, d))  # filtered state before each segment (k >= 1)
+    P0s = np.empty((nseg, d, d))
+    for k in numba.prange(nseg):
+        if k == 0:  # the first segment: forward filter from the prior
+            c[0] = 0.0
+            Pe[0] = P0
+            _forward_store(t, y, R, kinds, starts, pars, c[0], Pe[0], 0, edges[1], xpred, xfilt, Pfilt)
+        else:
+            const[k] = _segment_element(t, y, R, kinds, starts, pars, edges[k], edges[k + 1],
+                                        F[k], c[k], Pe[k], J[k], eta[k])
+    x = c[0].copy()
+    P = Pe[0].copy()
+    for k in range(1, nseg):
+        x0[k] = x
+        P0s[k] = P
+        _combine(x, P, F[k], c[k], Pe[k], J[k], eta[k], const[k])
+    for k in numba.prange(1, nseg):
+        xk = x0[k].copy()
+        Pk = P0s[k].copy()
+        _forward_store(t, y, R, kinds, starts, pars, xk, Pk, edges[k], edges[k + 1], xpred, xfilt, Pfilt)
+    Gam = np.empty((nseg, d, d))
+    gam = np.empty((nseg, d))
+    bnd = np.empty(nseg, np.int64)
+    for k in range(nseg):
+        bnd[k] = min(edges[k + 1], n - 1)
+    for k in numba.prange(nseg):
+        _backward_gains(t, kinds, starts, pars, edges[k], bnd[k], xpred, xfilt, Pfilt, Gam[k], gam[k])
+    xs_b = np.empty((nseg, d))  # smoothed mean at each segment's boundary point
+    v = xfilt[n - 1].copy()
+    for k in range(nseg - 1, -1, -1):
+        xs_b[k] = v
+        w = gam[k].copy()
+        for r in range(d):
+            for l in range(d):
+                w[r] += Gam[k, r, l] * v[l]
+        v = w
+    out = np.empty(n)
+    hx = 0.0
+    for kk in range(nb):
+        hx += xfilt[n - 1, starts[kk]]
+    out[n - 1] = hx
+    for k in numba.prange(nseg):
+        _backward_mean(kinds, starts, edges[k], bnd[k], xs_b[k], xpred, xfilt, Pfilt, out)
+    return out
+
+
+TASK_POINTS = 4096  # points per parallel task when filling per-point arrays
+
+
+@numba.njit(cache=True, parallel=True)
+def transition_matrices(t, kinds, starts, pars, d):
+    """Dense per-point transitions A_i (A_0 = I) of a block-diagonal model,
+    filled in parallel (for the single events and tail operators)."""
+    n, nb = len(t), len(kinds)
+    size = _block_sizes(kinds)
+    A = np.zeros((n, d, d))
+    ntask = (n + TASK_POINTS - 1) // TASK_POINTS
+    for task in numba.prange(ntask):
+        Ab = np.zeros((nb, 2, 2))
+        Qb = np.zeros((nb, 2, 2))
+        dt_last = -1.0
+        for i in range(max(1, task * TASK_POINTS), min(n, (task + 1) * TASK_POINTS)):
+            dt = t[i] - t[i - 1]
+            if dt != dt_last:
+                for k in range(nb):
+                    _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+                dt_last = dt
+            for k in range(nb):
+                s0, sz = starts[k], size[k]
+                for r in range(sz):
+                    for c in range(sz):
+                        A[i, s0 + r, s0 + c] = Ab[k, r, c]
+    for r in range(d):
+        A[0, r, r] = 1.0
+    return A
+
+
+@numba.njit(cache=True, nogil=True)
+def _gains_segment(t, y, R, kinds, starts, pars, x, P, i0, i1, K, S, ey):
+    """_filter_segment, storing the gains K, innovation variances S and
+    normalised innovations ey of the points i0..i1-1."""
+    nb, d = len(kinds), P.shape[0]
+    size = _block_sizes(kinds)
+    Ab = np.zeros((nb, 2, 2))
+    Qb = np.zeros((nb, 2, 2))
+    M = np.empty((d, d))
+    PH = np.empty(d)
+    xp = np.zeros(d)
+    dt_last = -1.0
+    for i in range(i0, i1):
+        if i > 0:
+            dt = t[i] - t[i - 1]
+            if dt != dt_last:
+                for k in range(nb):
+                    _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+                dt_last = dt
+            _predict(kinds, starts, size, Ab, Qb, P, M, x, xp)
+        s = R[i]
+        hx = 0.0
+        for r in range(d):
+            acc = 0.0
+            for k in range(nb):
+                acc += P[r, starts[k]]
+            PH[r] = acc
+        for k in range(nb):
+            s += PH[starts[k]]
+            hx += x[starts[k]]
+        innov = y[i] - hx
+        S[i] = s
+        ey[i] = innov / math.sqrt(s)
+        for r in range(d):
+            K[i, r] = PH[r] / s
+            x[r] += K[i, r] * innov
+        for r in range(d):
+            for c in range(r, d):
+                v = P[r, c] - PH[r] * PH[c] / s
+                P[r, c] = v
+                P[c, r] = v
+
+
+@numba.njit(cache=True, parallel=True)
+def kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg):
+    """Gains K, innovation variances S and normalised innovations ey
+    (= L^-1 y) of a block-diagonal model, in nseg segments in parallel:
+    segment elements joined in order give the filtered state before each
+    segment, then every segment is filtered from it. Exact up to rounding
+    (nseg = 1: the sequential filter)."""
+    n, d = len(t), P0.shape[0]
+    edges = np.empty(nseg + 1, np.int64)
+    for k in range(nseg + 1):
+        edges[k] = (k * n) // nseg
+    K = np.empty((n, d))
+    S = np.empty(n)
+    ey = np.empty(n)
+    F = np.empty((nseg, d, d))
+    c = np.empty((nseg, d))
+    Pe = np.empty((nseg, d, d))
+    J = np.empty((nseg, d, d))
+    eta = np.empty((nseg, d))
+    const = np.empty(nseg)
+    for k in numba.prange(nseg):
+        if k == 0:
+            c[0] = 0.0
+            Pe[0] = P0
+            _gains_segment(t, y, R, kinds, starts, pars, c[0], Pe[0], 0, edges[1], K, S, ey)
+        else:
+            const[k] = _segment_element(t, y, R, kinds, starts, pars, edges[k], edges[k + 1],
+                                        F[k], c[k], Pe[k], J[k], eta[k])
+    x0 = np.zeros((nseg, d))
+    P0s = np.empty((nseg, d, d))
+    x = c[0].copy()
+    P = Pe[0].copy()
+    for k in range(1, nseg):
+        x0[k] = x
+        P0s[k] = P
+        _combine(x, P, F[k], c[k], Pe[k], J[k], eta[k], const[k])
+    for k in numba.prange(1, nseg):
+        xk = x0[k].copy()
+        Pk = P0s[k].copy()
+        _gains_segment(t, y, R, kinds, starts, pars, xk, Pk, edges[k], edges[k + 1], K, S, ey)
+    return K, S, ey
+
+
+SEGMENT_MIN = 1024  # points per segment of the parallel passes, at least
+
+
+def n_segments(n, threads):
+    """Segments of the parallel passes: 2 per thread, >= SEGMENT_MIN points
+    each; 1 (sequential) for one thread, as the segment elements cost 1.75x
+    the sequential filter."""
+    return max(1, min(2 * threads, n // SEGMENT_MIN)) if threads > 1 else 1
+
+
+def log_likelihood(model, t, y, yerr, threads=1):
+    """Gaussian log likelihood (data in ppt). threads > 1: in parallel
+    segments (2 per thread, >= SEGMENT_MIN points each) if the data are long
+    enough, exact up to rounding (~1e-15 relative), in numba's current
+    number of threads; the segment work is 1.75x that of the sequential
+    filter, so one thread always runs sequentially."""
     kinds, starts, pars, P0 = model.blocks()
     R = yerr**2 + model.jitter**2
-    return kalman_loglik(np.asarray(t, float), np.asarray(y, float), R, kinds, starts, pars, P0, model.n_diffuse)
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    nseg = n_segments(len(t), threads)
+    if nseg >= 2:
+        return kalman_loglik_parallel(t, y, R, kinds, starts, pars, P0, model.n_diffuse, nseg)
+    return kalman_loglik(t, y, R, kinds, starts, pars, P0, model.n_diffuse)
 
 
-def gp_mean(model, t, y, yerr):
-    """Posterior mean of the baseline at t (RTS smoother)."""
-    A, Q, P0, R = model.matrices(t, yerr)
-    K, S, _, Pfilt = kalman_gains(A, Q, model.H, R, P0, False, True)
-    _, xpred, xfilt = whiten(y, A, K, S, model.H)
-    xs = rts_smooth(A, Q, xpred, xfilt, Pfilt)
-    return xs @ model.H
+def gp_mean(model, t, y, yerr, threads=1):
+    """Posterior mean of the baseline at t (RTS smoother). threads > 1: in
+    parallel segments (as log_likelihood), exact up to rounding."""
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    nseg = n_segments(len(t), threads)
+    return smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)
 
 
 # --------------------------------------------------------- model builders

@@ -8,6 +8,7 @@ in ppt.
 
 import math
 
+import numba
 import numpy as np
 
 from transitleastsquares.gp import fitting
@@ -23,11 +24,36 @@ def robust_errors(y):
     return 1.4826 * np.median(np.abs(d - np.median(d))) / math.sqrt(2)
 
 
+@numba.njit(cache=True, parallel=True)
+def _ls_power(t, yc, freqs):
+    """Lomb-Scargle power at each frequency (in parallel over frequencies):
+    one pass over the data with the sums C = y cos, S = y sin, CC, SS, CS
+    of wt; the phase w tau = atan2(2 CS, CC - SS) / 2 rotates them."""
+    power = np.empty(len(freqs))
+    for i in numba.prange(len(freqs)):
+        w = 2 * math.pi * freqs[i]
+        C = S = CC = SS = CS = 0.0
+        for k in range(len(t)):
+            c, s = math.cos(w * t[k]), math.sin(w * t[k])
+            C += yc[k] * c
+            S += yc[k] * s
+            CC += c * c
+            SS += s * s
+            CS += c * s
+        phi = 0.5 * math.atan2(2 * CS, CC - SS)
+        cp, sp = math.cos(phi), math.sin(phi)
+        yc_c, yc_s = C * cp + S * sp, S * cp - C * sp
+        cc = CC * cp * cp + 2 * CS * cp * sp + SS * sp * sp
+        ss = SS * cp * cp - 2 * CS * cp * sp + CC * sp * sp
+        power[i] = yc_c * yc_c / cc + yc_s * yc_s / ss
+    return power
+
+
 def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
-    """Peak of the Lomb-Scargle periodogram (numpy only), as the starting
-    point of the rotation fit. The cost is (points x frequencies), both
-    growing with the span: data with a cadence below period_min / 16 are
-    binned to period_min / 8 first (8 samples per shortest period)."""
+    """Peak of the Lomb-Scargle periodogram, as the starting point of the
+    rotation fit. The cost is (points x frequencies), both growing with the
+    span: data with a cadence below period_min / 16 are binned to
+    period_min / 8 first (8 samples per shortest period)."""
     t, y = np.asarray(t, float), np.asarray(y, float)
     width = period_min / 8
     if len(t) > 1 and np.median(np.diff(t)) < 0.5 * width:
@@ -36,14 +62,7 @@ def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
     span = t.max() - t.min()
     df = 1 / (oversample * span)
     freqs = np.arange(1 / period_max, 1 / period_min, df)
-    power = np.empty(len(freqs))
-    for i in range(0, len(freqs), 256):  # chunks: memory O(256 N)
-        w = 2 * np.pi * freqs[i : i + 256, None]
-        tau = np.arctan2(np.sum(np.sin(2 * w * t), 1), np.sum(np.cos(2 * w * t), 1)) / (2 * w[:, 0])
-        arg = w * (t - tau[:, None])
-        c, s = np.cos(arg), np.sin(arg)
-        power[i : i + 256] = (c @ yc) ** 2 / np.sum(c * c, 1) + (s @ yc) ** 2 / np.sum(s * s, 1)
-    return 1 / freqs[np.argmax(power)]
+    return 1 / freqs[np.argmax(_ls_power(t, yc, freqs))]
 
 
 FIT_BIN_WIDTH = 10.0 / 1440  # days; rotation fits bin data with a cadence below half of it
@@ -62,13 +81,15 @@ class Baseline:
         ll_ppt = log_likelihood(self._model(t, dy), t, (y - 1) * PPT, dy * PPT)
         return ll_ppt + (len(t) - self._model(t, dy).n_diffuse) * math.log(PPT)
 
-    def trend(self, t, y, dy, use=None):
+    def trend(self, t, y, dy, use=None, threads=None):
         """Posterior mean of the baseline at all t (relative flux),
-        conditioned on the points with use=True (default: all)."""
+        conditioned on the points with use=True (default: all); in up to
+        `threads` threads (default: numba's thread count)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         use = np.ones(len(t), bool) if use is None else np.asarray(use, bool)
         yerr = np.where(use, dy, 1e6) * PPT  # excluded points carry no information
-        return 1 + gp_mean(self._model(t, dy), t, (y - 1) * PPT * use, yerr) / PPT
+        threads = numba.get_num_threads() if threads is None else int(threads)
+        return 1 + gp_mean(self._model(t, dy), t, (y - 1) * PPT * use, yerr, threads) / PPT
 
     def as_dict(self):
         raise NotImplementedError

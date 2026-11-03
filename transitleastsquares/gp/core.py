@@ -3,6 +3,7 @@ public entry point is transitleastsquares.gp.search)."""
 
 import time
 
+import numba
 import numpy as np
 
 from transitleastsquares import tls_constants
@@ -15,7 +16,7 @@ from transitleastsquares.gp.events import (
     tail_operators,
     template_table,
 )
-from transitleastsquares.gp.statespace import kalman_gains, whiten
+from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
@@ -69,11 +70,12 @@ def _search(
     texp = cad if texp is None else texp
     delta = cad / 4 if t0_step is None else t0_step
 
-    A, Q, P0, R = model.matrices(t, yerr)
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    nseg = n_segments(len(t), numba.get_num_threads())
+    A = transition_matrices(t, kinds, starts, pars, model.dim)
     clock("matrices")
-    K, S, _, _ = kalman_gains(A, Q, model.H, R, P0, False, False)  # the search needs no covariances
-    del Q  # N x d x d, not needed after the gains
-    ey, _, _ = whiten(y, A, K, S, model.H)
+    K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
     nd = model.n_diffuse
     ey[:nd] = 0.0  # diffuse start: no information
     chi2_0 = float(np.sum(ey**2))
@@ -97,7 +99,7 @@ def _search(
     tc = t.min() + delta * np.arange(int(span / delta) + 1)
     table = template_table()
     clock("grids")
-    W, w = tail_operators(A, K, S, model.H, ey)
+    W, w = tail_operators(A, K, S, model.H, ey, nseg)
     clock("tail_operators")
     strided = t0_step_duration is not None
     if strided:
