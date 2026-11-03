@@ -47,11 +47,12 @@ def bin_series(t, y, yerr, width):
 
 
 def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
-                 bin_width=None):
+                 bin_width=None, passes=1, tol=1e-3):
     """Type-II maximum likelihood for the rotation model.
 
     Without start: n_starts (1-4, default 1) generic starting points, each
-    with 3 Nelder-Mead passes, run in up to use_threads threads (default:
+    with `passes` Nelder-Mead passes (tolerance tol in log parameters and
+    log likelihood), run in up to use_threads threads (default:
     numba's thread count); the best optimum wins (the likelihood is
     multimodal, see PERF_PLAN.md). With start (a
     previous solution, e.g. from the last flare-clipping round): a single
@@ -77,7 +78,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         if not 1 <= n_starts <= len(ROT_START_SHIFTS):
             raise ValueError(f"n_starts must be 1-{len(ROT_START_SHIFTS)}")
         base = np.log([std, period_guess, 1.0, 1.0, 0.5, 0.3 * std, 5.0, np.median(em) * 0.5])
-        x0s, passes = [base + sh for sh in ROT_START_SHIFTS[:n_starts]], 3
+        x0s = [base + sh for sh in ROT_START_SHIFTS[:n_starts]]
     else:
         x0s, passes = [np.log([start[k] for k in ROT_KEYS])], 1
 
@@ -100,7 +101,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     def run(x0):
         best = None
         for _ in range(passes):  # restarts from the last optimum
-            r = nelder_mead(nll, x0 if best is None else best.x, maxiter=4000, xatol=1e-4, fatol=1e-4)
+            r = nelder_mead(nll, x0 if best is None else best.x, maxiter=4000, xatol=tol, fatol=tol)
             if best is None or r.fun < best.fun:
                 best = r
         return best

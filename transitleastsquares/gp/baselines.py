@@ -118,13 +118,21 @@ class RotationBaseline(Baseline):
 
     @classmethod
     def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None,
-            bin_width=FIT_BIN_WIDTH):
+            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
         peak); use: points to fit (default all); n_starts (1-4, default 1) starting
         points in up to use_threads threads (default: numba's thread count);
         start: a previous RotationBaseline (single pass from there);
         bin_width: fit on data binned to this width (days, default 10 min)
-        if the cadence is shorter than half of it (None: never bin).
+        if the cadence is shorter than half of it (None: never bin);
+        passes, tol: Nelder-Mead passes from a cold start and their
+        tolerance (default 1 and 1e-3).
+        The hyperparameters are nuisance parameters of the search: the
+        likelihood is flat and multimodal, and the defaults find the same
+        planets as passes=3, tol=1e-4 (400 K2 injections) at 2x less fit
+        time, but not always the same optimum. For better optima (e.g. to
+        use the rotation period), fit with n_starts=4, passes=3, tol=1e-4
+        and pass the baseline to gp.search.
         Returns (baseline, log likelihood of the unbinned data)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:
@@ -133,7 +141,7 @@ class RotationBaseline(Baseline):
         p, ll_ppt = fitting.fit_rotation(
             t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
             start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
-            bin_width=bin_width,
+            bin_width=bin_width, passes=passes, tol=tol,
         )
         n = len(t) if use is None else int(np.sum(use))
         return cls._from_ppt(p), ll_ppt + (n - 1) * math.log(PPT)

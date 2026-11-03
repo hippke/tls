@@ -36,8 +36,9 @@ def test_k2_cadence_not_binned():
 @pytest.fixture(scope="module")
 def short_cadence():
     t, f, e = synthetic(days=8.0, cadence=CAD_2MIN)
-    unbinned = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, use_threads=1, bin_width=None)
-    binned = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, use_threads=1)
+    kw = dict(period_guess=2.3, use_threads=1, passes=3, tol=1e-4)  # thorough: test the binning alone
+    unbinned = gp.RotationBaseline.fit(t, f, e, bin_width=None, **kw)
+    binned = gp.RotationBaseline.fit(t, f, e, **kw)  # default: 10 min bins
     return (t, f, e), unbinned, binned
 
 
@@ -50,7 +51,7 @@ def test_binned_fit_matches_unbinned(short_cadence):
     (t, f, e), (bu, llu), (bb, llb) = short_cadence
     assert llb > llu - 5.0
     assert abs(bb.period - 2.3) / 2.3 < 0.05 and abs(bu.period - 2.3) / 2.3 < 0.05
-    assert abs(bb.jitter - bu.jitter) < 0.2 * bu.jitter
+    assert abs(bb.jitter - bu.jitter) < 0.1 * bu.jitter
 
 
 def test_binned_fit_returns_unbinned_likelihood(short_cadence):
