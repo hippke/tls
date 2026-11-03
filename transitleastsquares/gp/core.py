@@ -7,9 +7,11 @@ import numpy as np
 
 from transitleastsquares import tls_constants
 from transitleastsquares.gp.events import (
+    compact_offsets,
     multiple_events,
     multiple_events_strided,
     single_events,
+    single_events_compact,
     tail_operators,
     template_table,
 )
@@ -101,7 +103,11 @@ def _search(
         mstep = np.maximum(1, np.floor(t0_step_duration * durs / delta)).astype(np.int64)
     else:
         mstep = np.ones(len(durs), np.int64)
-    ab = single_events(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, strided)
+    if strided:  # compact layout: per duration only the epochs it uses
+        off = compact_offsets(len(tc), mstep)
+        ab = single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
+    else:
+        ab = single_events(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub)
     clock("single_events")
 
     s2 = (depth_prior * 1e3) ** 2
@@ -112,7 +118,7 @@ def _search(
         )
     else:
         dchi2, k0, jb, bA, bB, lse, ntrials = multiple_events_strided(
-            ab, periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
+            ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
             bayes_factor,
         )
     clock("multiple_events")

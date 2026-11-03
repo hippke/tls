@@ -84,68 +84,91 @@ def tail_operators(A, K, S, H, ey):
     return W, w
 
 
+@numba.njit(cache=True)
+def _single(t, ey, A, K, H, S, W, w, tcm, D, table, texp, nsub, x, xp):
+    """a = (L^-1 s)'(L^-1 y) and b = |L^-1 s|^2 for one transit at tcm with
+    duration D: the filter runs over the template support only, the rest is
+    the closed-form tail (tail_operators). x, xp: work arrays of length d."""
+    n, d = len(t), A.shape[1]
+    t_start = tcm - 0.5 * D - 0.5 * texp
+    t_end = tcm + 0.5 * D + 0.5 * texp
+    i = np.searchsorted(t, t_start)
+    x[:] = 0.0
+    aa = 0.0
+    bb = 0.0
+    last = -1
+    while i < n and t[i] < t_end:
+        hx = 0.0
+        for r in range(d):  # predict
+            acc = 0.0
+            for c in range(d):
+                acc += A[i, r, c] * x[c]
+            xp[r] = acc
+            hx += H[r] * acc
+        innov = _template(t[i], tcm, D, table, texp, nsub) - hx
+        e = innov / math.sqrt(S[i])
+        aa += e * ey[i]
+        bb += e * e
+        for r in range(d):  # update
+            x[r] = xp[r] + K[i, r] * innov
+        last = i
+        i += 1
+    if last >= 0:
+        for r in range(d):
+            aa += w[last, r] * x[r]
+            acc = 0.0
+            for c in range(d):
+                acc += W[last, r, c] * x[c]
+            bb += x[r] * acc
+    return aa, bb
+
+
 @numba.njit(cache=True, parallel=True)
-def single_events(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, jmajor):
-    """a[m, j] = (L^-1 s)'(L^-1 y) and b[m, j] = |L^-1 s|^2 for a single
-    transit at tc[m] with duration durs[j]: the filter runs over the template
-    support only, the rest is the closed-form tail (tail_operators).
-    Only grid points m that are multiples of mstep[j] are computed (the
-    others stay 0). Layout (M, 2, J), or (J, 2, M) with jmajor."""
-    M, J, n, d = len(tc), len(durs), len(t), A.shape[1]
-    if jmajor:
-        ab = np.zeros((J, 2, M))  # strided fold: contiguous in m per duration
-    else:
-        ab = np.zeros((M, 2, J))  # a and b of one k adjacent, each contiguous in j
+def single_events(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub):
+    """a[m, 0, j] and b[m, 1, j] for a single transit at tc[m] with duration
+    durs[j], on the full epoch grid; layout (M, 2, J) (the uniform fold)."""
+    M, J, d = len(tc), len(durs), A.shape[1]
+    ab = np.zeros((M, 2, J))  # a and b of one k adjacent, each contiguous in j
     for mj in numba.prange(M * J):
         m, j = mj // J, mj % J
-        if m % mstep[j] != 0:
-            continue
-        D = durs[j]
-        t_start = tc[m] - 0.5 * D - 0.5 * texp
-        t_end = tc[m] + 0.5 * D + 0.5 * texp
-        i = np.searchsorted(t, t_start)
         x = np.zeros(d)
         xp = np.empty(d)
-        aa = 0.0
-        bb = 0.0
-        last = -1
-        while i < n and t[i] < t_end:
-            hx = 0.0
-            for r in range(d):  # predict
-                acc = 0.0
-                for c in range(d):
-                    acc += A[i, r, c] * x[c]
-                xp[r] = acc
-                hx += H[r] * acc
-            innov = _template(t[i], tc[m], D, table, texp, nsub) - hx
-            e = innov / math.sqrt(S[i])
-            aa += e * ey[i]
-            bb += e * e
-            for r in range(d):  # update
-                x[r] = xp[r] + K[i, r] * innov
-            last = i
-            i += 1
-        if last >= 0:
-            for r in range(d):
-                aa += w[last, r] * x[r]
-                acc = 0.0
-                for c in range(d):
-                    acc += W[last, r, c] * x[c]
-                bb += x[r] * acc
-        if jmajor:
-            ab[j, 0, m] = aa
-            ab[j, 1, m] = bb
-        else:
-            ab[m, 0, j] = aa
-            ab[m, 1, j] = bb
+        aa, bb = _single(t, ey, A, K, H, S, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
+        ab[m, 0, j] = aa
+        ab[m, 1, j] = bb
+    return ab
+
+
+def compact_offsets(M, mstep):
+    """Start of each duration's block in the compact layout: duration j keeps
+    the epochs m = kk * mstep[j], kk < (M - 1) // mstep[j] + 1."""
+    sizes = (M - 1) // np.asarray(mstep, np.int64) + 1
+    return np.concatenate(([0], np.cumsum(sizes))).astype(np.int64)
+
+
+@numba.njit(cache=True, parallel=True)
+def single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, off):
+    """Single events for the strided fold, compact: duration j only at the
+    epochs tc[kk * mstep[j]], stored contiguously from row off[j]; a and b
+    of one epoch side by side (row = (a, b)). Memory sum_j M / mstep[j]
+    instead of J x M, and the fold reads consecutive rows."""
+    J, d = len(durs), A.shape[1]
+    ab = np.zeros((off[J], 2))
+    for i in numba.prange(off[J]):
+        j = np.searchsorted(off, i, side="right") - 1
+        m = (i - off[j]) * mstep[j]
+        x = np.zeros(d)
+        xp = np.empty(d)
+        aa, bb = _single(t, ey, A, K, H, S, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
+        ab[i, 0] = aa
+        ab[i, 1] = bb
     return ab
 
 
 def single_event_sums(t, ey, A, K, S, H, tc, durs, table, texp, nsub=7):
     """Convenience wrapper: tail operators + single events."""
     W, w = tail_operators(A, K, S, H, ey)
-    ones = np.ones(len(durs), np.int64)
-    ab = single_events(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, ones, False)
+    ab = single_events(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub)
     return ab[:, 0, :], ab[:, 1, :]
 
 
@@ -227,12 +250,12 @@ def multiple_events(ab, periods, delta, jlo, jhi, ntr_min, s2, bayes):
 
 
 @numba.njit(cache=True, parallel=True)
-def multiple_events_strided(abT, periods, delta, mstep, jlo, jhi, ntr_min, s2, bayes):
+def multiple_events_strided(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, s2, bayes):
     """Like multiple_events, but duration j only uses every mstep[j]-th point
     of the grid: its transit times lie on a grid of step mstep[j] * delta
-    (a coarser T0 grid for long durations). abT has the layout (J, 2, M).
-    With all mstep = 1 the result equals multiple_events."""
-    M = abT.shape[2]
+    (a coarser T0 grid for long durations). ab is the compact layout of
+    single_events_compact (duration j in rows off[j]...). With all mstep = 1
+    the result equals multiple_events."""
     NP = len(periods)
     dchi2 = np.zeros(NP)
     best_k0 = np.zeros(NP, np.int64)
@@ -245,25 +268,26 @@ def multiple_events_strided(abT, periods, delta, mstep, jlo, jhi, ntr_min, s2, b
         P = periods[p]
         mx = -np.inf
         acc = 0.0
-        off = np.empty(int(M * delta / P) + 2, np.int64)
+        toff = np.empty(int(M * delta / P) + 2, np.int64)
         for j in range(jlo[p], jhi[p] + 1):
             m = mstep[j]
             dj = m * delta
-            Mj = (M - 1) // m + 1  # coarse grid: k = m * kk
+            Mj = off[j + 1] - off[j]  # coarse grid: k = m * kk
+            o = off[j]
             nph = max(1, int(P / dj))
             ntr = int(Mj * dj / P) + 2
             for nn in range(ntr):
-                off[nn] = int(round(nn * P / dj))
+                toff[nn] = int(round(nn * P / dj))
             for kk0 in range(nph):
                 sA = 0.0
                 sB = 0.0
                 sN = 0
                 for nn in range(ntr):
-                    kk = kk0 + off[nn]
+                    kk = kk0 + toff[nn]
                     if kk >= Mj:
                         break
-                    bb = abT[j, 1, kk * m]
-                    sA += abT[j, 0, kk * m]
+                    bb = ab[o + kk, 1]
+                    sA += ab[o + kk, 0]
                     sB += bb
                     sN += bb > 0
                 if sN < ntr_min or sB <= 0:
