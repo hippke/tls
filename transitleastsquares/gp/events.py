@@ -37,6 +37,95 @@ def _template(tt, tc, D, table, texp, nsub):
     return -acc / nsub
 
 
+@numba.njit(cache=True)
+def transition_blocks(A):
+    """Diagonal blocks of the per-point transitions A (n, d, d), from their
+    non-zero pattern over all points: (starts, sizes); a model that is not
+    block-diagonal is one block of size d. The models of transitleastsquares.gp
+    have blocks of 1 (offset) and 2 (spline, SHO)."""
+    n, d = A.shape[0], A.shape[1]
+    Z = np.zeros((d, d), np.bool_)
+    for i in range(n):
+        for r in range(d):
+            for c in range(d):
+                if A[i, r, c] != 0.0:
+                    Z[r, c] = True
+    starts = np.empty(d, np.int64)
+    sizes = np.empty(d, np.int64)
+    nb = 0
+    s = 0
+    while s < d:
+        e = s
+        k = s
+        while k <= e:  # grow the block while its rows/columns couple to later indices
+            for c in range(d):
+                if (Z[k, c] or Z[c, k]) and c > e:
+                    e = c
+            k += 1
+        starts[nb] = s
+        sizes[nb] = e - s + 1
+        nb += 1
+        s = e + 1
+    return starts[:nb], sizes[:nb]
+
+
+@numba.njit(cache=True, parallel=True)
+def pack_blocks(A, starts, sizes):
+    """The diagonal blocks of A per point: Ap[i, k] = A[i, block k]
+    (zero-padded to the largest block)."""
+    n, nb = A.shape[0], len(starts)
+    B = 1
+    for k in range(nb):
+        B = max(B, sizes[k])
+    Ap = np.zeros((n, nb, B, B))
+    for i in numba.prange(n):
+        for k in range(nb):
+            s0 = starts[k]
+            for r in range(sizes[k]):
+                for c in range(sizes[k]):
+                    Ap[i, k, r, c] = A[i, s0 + r, s0 + c]
+    return Ap
+
+
+@numba.njit(cache=True, inline="always")
+def _predict_blocks(Ap, starts, sizes, i, x, xp):
+    """xp = A_i x for block-diagonal A_i: the products with the zeros outside
+    the blocks are skipped, the rest summed in the same order (0 + first
+    term + second term, no fused multiply-add), so the result equals the
+    dense product bit for bit. Blocks of 1 and 2 written out (no inner loop)."""
+    for k in range(len(starts)):
+        s0, sz = starts[k], sizes[k]
+        if sz == 2:
+            x0 = x[s0]
+            x1 = x[s0 + 1]
+            xp[s0] = (0.0 + Ap[i, k, 0, 0] * x0) + Ap[i, k, 0, 1] * x1
+            xp[s0 + 1] = (0.0 + Ap[i, k, 1, 0] * x0) + Ap[i, k, 1, 1] * x1
+        elif sz == 1:
+            xp[s0] = 0.0 + Ap[i, k, 0, 0] * x[s0]
+        else:
+            for r in range(sz):
+                acc = 0.0
+                for c in range(sz):
+                    acc += Ap[i, k, r, c] * x[s0 + c]
+                xp[s0 + r] = acc
+
+
+@numba.njit(cache=True, inline="always")
+def _template_inv(tt, tc, invD, table, texp, nsub):
+    """_template with the reciprocal duration (no division per sample)."""
+    L = table.shape[0]
+    acc = 0.0
+    for k in range(nsub):
+        off = (k + 0.5) / nsub - 0.5
+        u = (tt + off * texp - tc) * invD
+        if -0.5 < u < 0.5:
+            x = (u + 0.5) * (L - 1)
+            i = min(int(x), L - 2)
+            f = x - i
+            acc += table[i] * (1 - f) + table[i + 1] * f
+    return -acc / nsub
+
+
 @numba.njit(cache=True, nogil=True)
 def _tail_step(A, K, S, H, ey, i, Wn, wn, Wm, wm, F, gv, tmp):
     """One backward step m = i - 1 of the tail recursion: from W_{m+1} = Wn,
@@ -149,28 +238,26 @@ def tail_operators(A, K, S, H, ey, nseg=1):
 
 
 @numba.njit(cache=True)
-def _single(t, ey, A, K, H, S, W, w, tcm, D, table, texp, nsub, x, xp):
+def _single(t, ey, Ap, starts, sizes, K, H, hidx, isS, W, w, tcm, D, table, texp, nsub, x, xp):
     """a = (L^-1 s)'(L^-1 y) and b = |L^-1 s|^2 for one transit at tcm with
     duration D: the filter runs over the template support only, the rest is
     the closed-form tail (tail_operators). x, xp: work arrays of length d."""
-    n, d = len(t), A.shape[1]
+    n, d = len(t), len(x)  # Ap, starts, sizes: the diagonal blocks of the transitions (pack_blocks)
     t_start = tcm - 0.5 * D - 0.5 * texp
     t_end = tcm + 0.5 * D + 0.5 * texp
+    invD = 1.0 / D
     i = np.searchsorted(t, t_start)
     x[:] = 0.0
     aa = 0.0
     bb = 0.0
     last = -1
     while i < n and t[i] < t_end:
+        _predict_blocks(Ap, starts, sizes, i, x, xp)  # predict
         hx = 0.0
-        for r in range(d):  # predict
-            acc = 0.0
-            for c in range(d):
-                acc += A[i, r, c] * x[c]
-            xp[r] = acc
-            hx += H[r] * acc
-        innov = _template(t[i], tcm, D, table, texp, nsub) - hx
-        e = innov / math.sqrt(S[i])
+        for r in hidx:  # the zeros of H add nothing
+            hx += H[r] * xp[r]
+        innov = _template_inv(t[i], tcm, invD, table, texp, nsub) - hx
+        e = innov * isS[i]
         aa += e * ey[i]
         bb += e * e
         for r in range(d):  # update
@@ -192,12 +279,16 @@ def single_events(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub):
     """a[m, 0, j] and b[m, 1, j] for a single transit at tc[m] with duration
     durs[j], on the full epoch grid; layout (M, 2, J) (the uniform fold)."""
     M, J, d = len(tc), len(durs), A.shape[1]
+    starts, sizes = transition_blocks(A)
+    Ap = pack_blocks(A, starts, sizes)
+    isS = 1.0 / np.sqrt(S)
+    hidx = np.nonzero(H)[0]
     ab = np.zeros((M, 2, J))  # a and b of one k adjacent, each contiguous in j
     for mj in numba.prange(M * J):
         m, j = mj // J, mj % J
         x = np.zeros(d)
         xp = np.empty(d)
-        aa, bb = _single(t, ey, A, K, H, S, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
+        aa, bb = _single(t, ey, Ap, starts, sizes, K, H, hidx, isS, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
         ab[m, 0, j] = aa
         ab[m, 1, j] = bb
     return ab
@@ -225,6 +316,10 @@ def single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, 
     tasks (balanced; every row is independent, so the result does not
     depend on the number of threads)."""
     J, d = len(durs), A.shape[1]
+    starts, sizes = transition_blocks(A)
+    Ap = pack_blocks(A, starts, sizes)
+    isS = 1.0 / np.sqrt(S)
+    hidx = np.nonzero(H)[0]
     total = off[J]
     ab = np.zeros((total, 2))
     nblocks = (total + SE_ROWS - 1) // SE_ROWS
@@ -238,14 +333,14 @@ def single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, 
                 while i >= off[j + 1]:
                     j += 1
                 m = (i - off[j]) * mstep[j]
-                aa, bb = _single(t, ey, A, K, H, S, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
+                aa, bb = _single(t, ey, Ap, starts, sizes, K, H, hidx, isS, W, w, tc[m], durs[j], table, texp, nsub, x, xp)
                 ab[i, 0] = aa
                 ab[i, 1] = bb
     return ab
 
 
 @numba.njit(cache=True)
-def _single_split(t, z, eyd, A, K, H, S, W, tcm, D, table, texp, nsub, x, xp):
+def _single_split(t, z, eyd, Ap, starts, sizes, K, H, hidx, isS, W, tcm, D, table, texp, nsub, x, xp):
     """_single through C^-1 y = N^-1 (y - f) (f: the GP posterior mean):
     a = s' C^-1 y = sum s z over the template support, z = (y - f) / sigma^2,
     without the filter; b = |L^-1 s|^2 as in _single (same operations, so
@@ -255,26 +350,24 @@ def _single_split(t, z, eyd, A, K, H, S, W, tcm, D, table, texp, nsub, x, xp):
     innovations before zeroing), so a equals _single's up to rounding
     (spline GP: up to a few % for events that touch the first n_diffuse
     samples, where its three diffuse states are ill-conditioned)."""
-    n, d = len(t), A.shape[1]
+    n, d = len(t), len(x)
     t_start = tcm - 0.5 * D - 0.5 * texp
     t_end = tcm + 0.5 * D + 0.5 * texp
+    invD = 1.0 / D
     i = np.searchsorted(t, t_start)
     x[:] = 0.0
     aa = 0.0
     bb = 0.0
     last = -1
     while i < n and t[i] < t_end:
+        _predict_blocks(Ap, starts, sizes, i, x, xp)  # predict
         hx = 0.0
-        for r in range(d):  # predict
-            acc = 0.0
-            for c in range(d):
-                acc += A[i, r, c] * x[c]
-            xp[r] = acc
-            hx += H[r] * acc
-        s = _template(t[i], tcm, D, table, texp, nsub)
+        for r in hidx:  # the zeros of H add nothing
+            hx += H[r] * xp[r]
+        s = _template_inv(t[i], tcm, invD, table, texp, nsub)
         aa += s * z[i]
         innov = s - hx
-        e = innov / math.sqrt(S[i])
+        e = innov * isS[i]
         if i < len(eyd):
             aa -= e * eyd[i]
         bb += e * e
@@ -301,6 +394,10 @@ def single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, m
     times, errors and hyperparameters (reusable when only the flux changes),
     and the numerator is a white-noise correlation (the GPU path)."""
     J, d = len(durs), A.shape[1]
+    starts, sizes = transition_blocks(A)
+    Ap = pack_blocks(A, starts, sizes)
+    isS = 1.0 / np.sqrt(S)
+    hidx = np.nonzero(H)[0]
     total = off[J]
     ab = np.zeros((total, 2))
     nblocks = (total + SE_ROWS - 1) // SE_ROWS
@@ -314,7 +411,8 @@ def single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, m
                 while i >= off[j + 1]:
                     j += 1
                 m = (i - off[j]) * mstep[j]
-                aa, bb = _single_split(t, z, eyd, A, K, H, S, W, tc[m], durs[j], table, texp, nsub, x, xp)
+                aa, bb = _single_split(t, z, eyd, Ap, starts, sizes, K, H, hidx, isS, W, tc[m], durs[j], table, texp, nsub,
+                                       x, xp)
                 ab[i, 0] = aa
                 ab[i, 1] = bb
     return ab

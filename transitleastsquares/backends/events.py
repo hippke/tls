@@ -54,6 +54,22 @@ def _template(tt, tc, D, table, texp, nsub):
     return -acc / nsub
 
 
+@numba.njit(cache=True, inline="always")
+def _template_inv(tt, tc, invD, table, texp, nsub):
+    """_template with the reciprocal duration (no division per sample)."""
+    L = table.shape[0]
+    acc = 0.0
+    for k in range(nsub):
+        off = (k + 0.5) / nsub - 0.5
+        u = (tt + off * texp - tc) * invD
+        if -0.5 < u < 0.5:
+            x = (u + 0.5) * (L - 1)
+            i = min(int(x), L - 2)
+            f = x - i
+            acc += table[i] * (1 - f) + table[i + 1] * f
+    return -acc / nsub
+
+
 @numba.njit(cache=True, parallel=True)
 def single_events_white(t, r, w, tc, durs, nsubs, table, texp, mstep, off):
     """a = sum s r w and b = sum s^2 w of one transit at tc[kk * mstep[j]]
@@ -74,12 +90,13 @@ def single_events_white(t, r, w, tc, durs, nsubs, table, texp, mstep, off):
                     j += 1
                 tcm = tc[(row - off[j]) * mstep[j]]
                 D = durs[j]
+                invD = 1.0 / D
                 half = 0.5 * D + 0.5 * texp
                 i = numpy.searchsorted(t, tcm - half)
                 aa = 0.0
                 bb = 0.0
                 while i < n and t[i] < tcm + half:
-                    s = _template(t[i], tcm, D, table, texp, nsubs[j])
+                    s = _template_inv(t[i], tcm, invD, table, texp, nsubs[j])
                     aa += s * r[i] * w[i]
                     bb += s * s * w[i]
                     i += 1
