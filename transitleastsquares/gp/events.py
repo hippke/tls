@@ -414,7 +414,7 @@ def fold_groups(periods, delta, budget=FOLD_ACC_BYTES, gmax=FOLD_GROUP_MAX):
 
 
 @numba.njit(cache=True, parallel=True)
-def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk):
+def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk, depth_min=0.0):
     """multiple_events_strided without Bayes factors, identical results, ~5x
     faster on long light curves (a Kepler star: 1200 s -> ~250 s on one core).
 
@@ -429,7 +429,9 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
     become the best of its period. Per epoch the transits are added in the
     same order as in multiple_events_strided, so the sums are bit-identical.
     Groups go round-robin to FOLD_TASKS tasks (balanced). The trial count
-    (ntrials) is not computed (zeros); it is needed only for Bayes factors."""
+    (ntrials) is not computed (zeros); it is needed only for Bayes factors.
+    depth_min: only depths (sum a / sum b) >= depth_min (the fold of the TLS
+    backend "events"; 0 for the GP search)."""
     NP = len(periods)
     NG = len(gstart) - 1
     dchi2 = np.zeros(NP)
@@ -491,7 +493,7 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                     for kk0 in range(nph[q]):
                         A = sA[q, kk0]
                         B = sB[q, kk0]
-                        if B <= 0 or A <= 0:
+                        if B <= 0 or A <= 0 or A < depth_min * B:
                             continue
                         d2 = A * A / B
                         if d2 <= dchi2[p]:

@@ -39,3 +39,19 @@ def test_blocked_equals_strided(seed, ntr_min, chunk, budget):
     new = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk)
     for i in range(5):  # dchi2, best T0 index, best duration, sums A and B
         np.testing.assert_array_equal(new[i], ref[i])
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+@pytest.mark.parametrize("depth_min", [0.0, 0.05, 0.5])
+def test_blocked_equals_events_fold(seed, depth_min):
+    from transitleastsquares.backends.events import fold_events
+
+    ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(seed)
+    gain, jb, A, B = fold_events(ab, off, M, periods, delta, mstep, jlo, jhi, 3, depth_min)
+    new = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, 3,
+                                  fold_groups(periods, delta), 97, depth_min)
+    fit = gain > 0
+    np.testing.assert_array_equal(new[0], gain)
+    np.testing.assert_array_equal(new[2][fit], jb[fit])
+    np.testing.assert_array_equal(new[3][fit], A[fit])
+    np.testing.assert_array_equal(new[4][fit], B[fit])

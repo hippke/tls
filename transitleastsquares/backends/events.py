@@ -90,7 +90,8 @@ def single_events_white(t, r, w, tc, durs, nsubs, table, texp, mstep, off):
 
 @numba.njit(cache=True, parallel=True)
 def fold_events(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min):
-    """Best periodic signal per period: chi2 gain (sum a)^2 / sum b over the
+    """(Reference implementation; the backend uses the identical, faster
+    gp.events.multiple_events_blocked.) Best periodic signal per period: chi2 gain (sum a)^2 / sum b over the
     transits T0 + n P, for depths (sum a / sum b) >= depth_min and >=
     ntr_min transits with data; duration j uses every mstep[j]-th epoch
     (gp.events.multiple_events_strided without the Bayes factor). Returns
@@ -147,7 +148,13 @@ class EventsBackend(SearchBackend):
     same_statistic = False  # least-squares depth on its own grids, not TLS's statistic
 
     def search(self, problem, periods, use_threads=1, progress=None):
-        from transitleastsquares.gp.events import compact_offsets, template_table
+        from transitleastsquares.gp.events import (
+            FOLD_CHUNK,
+            compact_offsets,
+            fold_groups,
+            multiple_events_blocked,
+            template_table,
+        )
 
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
@@ -178,9 +185,11 @@ class EventsBackend(SearchBackend):
         numba.set_num_threads(max(1, min(int(use_threads), numba.config.NUMBA_NUM_THREADS)))
         try:
             ab = single_events_white(t, r, w, tc, durs, nsubs, template_table(), texp, mstep, off)
-            dchi2, jb, bA, bB = fold_events(
+            # cache-blocked fold, identical to fold_events (gp.events.multiple_events_blocked)
+            dchi2, _, jb, bA, bB, _ = multiple_events_blocked(
                 ab, off, len(tc), periods, delta, mstep, jlo, jhi,
-                tls_constants.N_TRANSITS_MIN, max(float(p.transit_depth_min), 0.0),
+                tls_constants.N_TRANSITS_MIN, fold_groups(periods, delta), FOLD_CHUNK,
+                max(float(p.transit_depth_min), 0.0),
             )
         finally:
             numba.set_num_threads(old)
