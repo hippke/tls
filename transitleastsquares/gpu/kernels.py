@@ -14,13 +14,13 @@ FOLD_THREADS = 128
 
 
 @cuda.jit(device=True, inline=True)
-def _template(dt, D, table, texp, nsub):
-    """gp.events._template in FP32 with dt = t - tc (FP32)."""
+def _template(dt, invD, table, texp, nsub):
+    """gp.events._template_inv in FP32 with dt = t - tc (FP32), invD = 1 / D."""
     L = table.shape[0]
     acc = F0
     for k in range(nsub):
         off = (float32(k) + HALF) / float32(nsub) - HALF
-        u = (dt + off * texp) / D
+        u = (dt + off * texp) * invD
         if u > -HALF and u < HALF:
             x = (u + HALF) * float32(L - 1)
             i = min(int32(x), L - 2)
@@ -54,13 +54,14 @@ def single_white(t, rw, w, t0, delta, durs, nsubs, table, texp, mstep, off, row_
     j = row_j[i]
     tcm = t0 + float64(i - off[j]) * float64(mstep[j]) * delta
     D = durs[j]
+    invD = F1 / D
     half = 0.5 * float64(D) + 0.5 * float64(texp)
     n = t.shape[0]
     s = _first(t, tcm - half)
     aa = F0
     bb = F0
     while s < n and t[s] < tcm + half:
-        v = _template(float32(t[s] - tcm), D, table, texp, nsubs[j])
+        v = _template(float32(t[s] - tcm), invD, table, texp, nsubs[j])
         aa += v * rw[s]
         bb += v * v * w[s]
         s += 1
@@ -69,18 +70,23 @@ def single_white(t, rw, w, t0, delta, durs, nsubs, table, texp, mstep, off, row_
 
 
 @cuda.jit
-def single_gp(t, z, eyd, A, K, isS, H, W, t0, delta, durs, nsubs, table, texp, mstep, off, row_j, ab):
+def single_gp(t, z, eyd, Ap, starts, sizes, hidx, K, isS, H, W, t0, delta, durs, nsubs, table, texp, mstep, off,
+              row_j, ab):
     """gp.events.single_events_split in FP32 (one thread per row): a = sum s z
     minus the diffuse-start terms, b = |L^-1 s|^2 by the filter with the
-    precomputed gains and the tail x' W x."""
+    precomputed gains, the diagonal blocks of the transitions (Ap: blocks of
+    1 or 2, gp.events.pack_blocks) and the tail x' W x."""
     i = cuda.grid(1)
     if i >= ab.shape[0]:
         return
-    d = A.shape[1]
+    d = K.shape[1]
     nd = eyd.shape[0]
+    nb = starts.shape[0]
+    nh = hidx.shape[0]
     j = row_j[i]
     tcm = t0 + float64(i - off[j]) * float64(mstep[j]) * delta
     D = durs[j]
+    invD = F1 / D
     half = 0.5 * float64(D) + 0.5 * float64(texp)
     n = t.shape[0]
     x = cuda.local.array(MAX_DIM, float32)
@@ -92,14 +98,19 @@ def single_gp(t, z, eyd, A, K, isS, H, W, t0, delta, durs, nsubs, table, texp, m
     bb = F0
     last = -1
     while s < n and t[s] < tcm + half:
+        for k in range(nb):  # predict, block-diagonal
+            s0 = starts[k]
+            if sizes[k] == 2:
+                x0 = x[s0]
+                x1 = x[s0 + 1]
+                xp[s0] = Ap[s, k, 0, 0] * x0 + Ap[s, k, 0, 1] * x1
+                xp[s0 + 1] = Ap[s, k, 1, 0] * x0 + Ap[s, k, 1, 1] * x1
+            else:
+                xp[s0] = Ap[s, k, 0, 0] * x[s0]
         hx = F0
-        for r in range(d):
-            acc = F0
-            for c in range(d):
-                acc += A[s, r, c] * x[c]
-            xp[r] = acc
-            hx += H[r] * acc
-        v = _template(float32(t[s] - tcm), D, table, texp, nsubs[j])
+        for q in range(nh):
+            hx += H[hidx[q]] * xp[hidx[q]]
+        v = _template(float32(t[s] - tcm), invD, table, texp, nsubs[j])
         aa += v * z[s]
         innov = v - hx
         e = innov * isS[s]
@@ -163,55 +174,6 @@ def _better(g, k, bg, bk):
     """(g, k) beats (bg, bk): larger gain, ties to the smaller epoch (the CPU
     kernels keep the first maximum in ascending epoch order)."""
     return g > bg or (g == bg and g > F0 and k < bk)
-
-
-@cuda.jit
-def fold_brute(ab, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_min, out_g, out_A, out_B, out_k):
-    """Brute-force fold of (period, duration) pairs, one CUDA block per pair:
-    the best epoch over all epochs (as multiple_events_blocked)."""
-    pr = cuda.blockIdx.x
-    if pr >= pair_q.shape[0]:
-        return
-    tid = cuda.threadIdx.x
-    nt = cuda.blockDim.x
-    q = pair_q[pr]
-    j = pair_j[pr]
-    P = periods[q]
-    dj = float64(mstep[j]) * delta
-    o = off[j]
-    Mj = off[j + 1] - o
-    nph = max(1, int32(P / dj))
-    ntr = int32(float64(Mj) * dj / P) + 2
-    toff = cuda.shared.array(TOFF, int32)
-    nsh = min(ntr, TOFF)
-    for nn in range(tid, nsh, nt):
-        toff[nn] = _offset(nn, P, dj)
-    cuda.syncthreads()
-    bg = F0
-    bA = F0
-    bB = F0
-    bk = int32(-1)
-    for kk0 in range(tid, nph, nt):
-        A = F0
-        B = F0
-        cnt = 0
-        nn = 0
-        while True:
-            kk = kk0 + (toff[nn] if nn < nsh else _offset(nn, P, dj))
-            if kk >= Mj:
-                break
-            b = ab[o + kk, 1]
-            A += ab[o + kk, 0]
-            B += b
-            if b > F0:
-                cnt += 1
-            nn += 1
-        if cnt < ntr_min or B <= F0 or A <= F0 or A < depth_min * B:
-            continue
-        g = A * A / B
-        if _better(g, kk0, bg, bk):
-            bg, bA, bB, bk = g, A, B, kk0
-    _reduce_write(bg, bA, bB, bk, pr, out_g, out_A, out_B, out_k)
 
 
 @cuda.jit(device=True)
@@ -390,3 +352,82 @@ def _reduce_polish(g, A, B, k, d, slot, out_g, out_A, out_B, out_k):
         out_A[slot] = sA[0]
         out_B[slot] = sB[0]
         out_k[slot] = sk[0]
+
+
+@cuda.jit
+def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_min, out_g, out_A, out_B, out_k):
+    """Brute-force fold of (period, duration) pairs, one CUDA block per pair:
+    the best epoch over all epochs (as multiple_events_blocked). The single
+    events as complex64 (a + i b: one 8-byte load per cell), two epochs per
+    thread (two independent sums in flight)."""
+    pr = cuda.blockIdx.x
+    if pr >= pair_q.shape[0]:
+        return
+    tid = cuda.threadIdx.x
+    nt = cuda.blockDim.x
+    q = pair_q[pr]
+    j = pair_j[pr]
+    P = periods[q]
+    dj = float64(mstep[j]) * delta
+    o = off[j]
+    Mj = off[j + 1] - o
+    nph = max(1, int32(P / dj))
+    ntr = int32(float64(Mj) * dj / P) + 2
+    toff = cuda.shared.array(TOFF, int32)
+    nsh = min(ntr, TOFF)
+    for nn in range(tid, nsh, nt):
+        toff[nn] = _offset(nn, P, dj)
+    cuda.syncthreads()
+    bg = F0
+    bA = F0
+    bB = F0
+    bk = int32(-1)
+    for k1 in range(tid, nph, 2 * nt):
+        k2 = k1 + nt
+        two = k2 < nph
+        A1 = F0
+        B1 = F0
+        c1 = 0
+        A2 = F0
+        B2 = F0
+        c2 = 0
+        nn = 0
+        while True:
+            base = toff[nn] if nn < nsh else _offset(nn, P, dj)
+            kk = k1 + base
+            if kk >= Mj:
+                break
+            v = abc[o + kk]
+            A1 += v.real
+            B1 += v.imag
+            if v.imag > F0:
+                c1 += 1
+            kk = k2 + base
+            if two and kk < Mj:
+                v = abc[o + kk]
+                A2 += v.real
+                B2 += v.imag
+                if v.imag > F0:
+                    c2 += 1
+            nn += 1
+        if two:  # epoch k2 may have transits beyond the last of k1 (k2 > k1)
+            while True:
+                base = toff[nn] if nn < nsh else _offset(nn, P, dj)
+                kk = k2 + base
+                if kk >= Mj:
+                    break
+                v = abc[o + kk]
+                A2 += v.real
+                B2 += v.imag
+                if v.imag > F0:
+                    c2 += 1
+                nn += 1
+        if not (c1 < ntr_min or B1 <= F0 or A1 <= F0 or A1 < depth_min * B1):
+            g = A1 * A1 / B1
+            if _better(g, k1, bg, bk):
+                bg, bA, bB, bk = g, A1, B1, k1
+        if two and not (c2 < ntr_min or B2 <= F0 or A2 <= F0 or A2 < depth_min * B2):
+            g = A2 * A2 / B2
+            if _better(g, k2, bg, bk):
+                bg, bA, bB, bk = g, A2, B2, k2
+    _reduce_write(bg, bA, bB, bk, pr, out_g, out_A, out_B, out_k)

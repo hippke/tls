@@ -38,17 +38,25 @@ def single_events_white(t, r, w, t0, delta, durs, nsubs, table, texp, mstep, off
 
 def single_events_gp(t, z, eyd, A, Kg, S, H, W, t0, delta, durs, nsub, table, texp, mstep, off):
     """gp.events.single_events_split on the GPU (FP32; the gains, transitions
-    and tail operator come from the FP64 CPU passes): device array (rows, 2)."""
+    and tail operator come from the FP64 CPU passes; the transitions as their
+    diagonal blocks): device array (rows, 2)."""
+    from transitleastsquares.gp.events import pack_blocks, transition_blocks
+
     total = int(off[-1])
     d_ab = cuda.device_array((total, 2), np.float32)
     nsubs = np.full(len(durs), nsub, np.int32)
+    starts, sizes = transition_blocks(A)
+    if sizes.max() > 2:
+        raise ValueError("GPU single events: transition blocks of more than 2 states")
+    Ap = pack_blocks(A, starts, sizes)
+    hidx = np.nonzero(H)[0].astype(np.int64)
     K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
         cuda.to_device(np.ascontiguousarray(t, float)), cuda.to_device(_f32(z)), cuda.to_device(_f32(eyd)),
-        cuda.to_device(_f32(A)), cuda.to_device(_f32(Kg)), cuda.to_device(_f32(1.0 / np.sqrt(S))),
-        cuda.to_device(_f32(H)), cuda.to_device(_f32(W)), float(t0), float(delta), cuda.to_device(_f32(durs)),
-        cuda.to_device(nsubs), cuda.to_device(_f32(table)), np.float32(texp),
-        cuda.to_device(np.asarray(mstep, np.int64)), cuda.to_device(np.asarray(off, np.int64)),
-        cuda.to_device(_row_j(off)), d_ab)
+        cuda.to_device(_f32(Ap)), cuda.to_device(starts), cuda.to_device(sizes), cuda.to_device(hidx),
+        cuda.to_device(_f32(Kg)), cuda.to_device(_f32(1.0 / np.sqrt(S))), cuda.to_device(_f32(H)),
+        cuda.to_device(_f32(W)), float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs),
+        cuda.to_device(_f32(table)), np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)),
+        cuda.to_device(np.asarray(off, np.int64)), cuda.to_device(_row_j(off)), d_ab)
     return d_ab
 
 
@@ -102,15 +110,16 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
     d_periods = cuda.to_device(periods)
     cand = []  # (q, g, j, k, A, B) in the CPU's order: brute (j ascending), then FFA blocks
 
-    # brute force: pairs (q, j), j = jlo .. jb_hi
+    # brute force: pairs (q, j), j = jlo .. jb_hi, duration-major: the CUDA
+    # blocks of one duration run together, so its single events stay in L2
     n_pair = np.maximum(jb_hi - jlo + 1, 0)
     if n_pair.sum() > 0:
-        pq = np.repeat(np.arange(NP), n_pair)
-        start = np.concatenate([[0], np.cumsum(n_pair)[:-1]])
-        pj = jlo[pq] + np.arange(len(pq)) - start[pq]
+        jj = np.arange(len(Mj))[:, None]
+        pj, pq = np.nonzero((jj >= jlo[None, :]) & (jj <= jb_hi[None, :]))
         n = len(pq)
         out = [cuda.device_array(n, np.float32) for _ in range(3)] + [cuda.device_array(n, np.int32)]
-        K.fold_brute[n, THREADS](d_ab, d_off, d_mstep, float(delta), d_periods, cuda.to_device(pq.astype(np.int32)),
+        K.fold_brute[n, THREADS](d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta), d_periods,
+                                 cuda.to_device(pq.astype(np.int32)),
                                  cuda.to_device(pj.astype(np.int32)), int(ntr_min), np.float32(depth_min), *out)
         g, A, B, k = (x.copy_to_host() for x in out)
         cand.append((pq, g, pj, k, A, B))
@@ -133,21 +142,32 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
     if stats is not None:
         stats.update(pairs_brute=int(n_pair.sum()), blocks=len(blocks))
 
-    q, g, j, k, A, B = (np.concatenate(x) for x in zip(*cand))
-    g = g.astype(float)
-    keep = g > 0
+    # per period the first maximum over its candidates in the CPU's order
+    # (durations ascending; brute-force before FFA): one dense table per
+    # candidate source, argmax over durations (first maximum)
+    J = len(Mj)
     dchi2 = np.zeros(NP)
     best_k0 = np.zeros(NP, np.int64)
     best_j = np.zeros(NP, np.int64)
     best_A = np.zeros(NP)
     best_B = np.zeros(NP)
-    if keep.any():
-        qs, (gs, js, ks, As, Bs) = _first_max(q[keep], g[keep], [g[keep], j[keep], k[keep], A[keep], B[keep]])
-        dchi2[qs] = gs
-        best_j[qs] = js
-        best_k0[qs] = ks.astype(np.int64) * mstep[js]
-        best_A[qs] = As
-        best_B[qs] = Bs
+    for q, g, j, k, A, B in cand:
+        G = np.zeros((J, NP), np.float32)
+        G[j, q] = g
+        jb = np.argmax(G, axis=0)
+        gb = G[jb, np.arange(NP)].astype(float)
+        better = gb > dchi2  # strictly: earlier sources win ties
+        if not better.any():
+            continue
+        idx = np.full((J, NP), -1, np.int64)
+        idx[j, q] = np.arange(len(q))
+        sel = idx[jb[better], np.nonzero(better)[0]]
+        qs = q[sel]
+        dchi2[qs] = g[sel]
+        best_j[qs] = j[sel]
+        best_k0[qs] = k[sel].astype(np.int64) * mstep[j[sel]]
+        best_A[qs] = A[sel]
+        best_B[qs] = B[sel]
     return dchi2, best_k0, best_j, best_A, best_B, np.zeros(NP)
 
 
