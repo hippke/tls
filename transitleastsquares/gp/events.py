@@ -244,6 +244,82 @@ def single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, 
     return ab
 
 
+@numba.njit(cache=True)
+def _single_split(t, z, eyd, A, K, H, S, W, tcm, D, table, texp, nsub, x, xp):
+    """_single through C^-1 y = N^-1 (y - f) (f: the GP posterior mean):
+    a = s' C^-1 y = sum s z over the template support, z = (y - f) / sigma^2,
+    without the filter; b = |L^-1 s|^2 as in _single (same operations, so
+    bit-identical), which needs no data at all. The search zeroes the first
+    n_diffuse normalised innovations (diffuse start); their terms
+    (L^-1 s)_i (L^-1 y)_i, i < n_diffuse, are removed here with eyd (those
+    innovations before zeroing), so a equals _single's up to rounding
+    (spline GP: up to a few % for events that touch the first n_diffuse
+    samples, where its three diffuse states are ill-conditioned)."""
+    n, d = len(t), A.shape[1]
+    t_start = tcm - 0.5 * D - 0.5 * texp
+    t_end = tcm + 0.5 * D + 0.5 * texp
+    i = np.searchsorted(t, t_start)
+    x[:] = 0.0
+    aa = 0.0
+    bb = 0.0
+    last = -1
+    while i < n and t[i] < t_end:
+        hx = 0.0
+        for r in range(d):  # predict
+            acc = 0.0
+            for c in range(d):
+                acc += A[i, r, c] * x[c]
+            xp[r] = acc
+            hx += H[r] * acc
+        s = _template(t[i], tcm, D, table, texp, nsub)
+        aa += s * z[i]
+        innov = s - hx
+        e = innov / math.sqrt(S[i])
+        if i < len(eyd):
+            aa -= e * eyd[i]
+        bb += e * e
+        for r in range(d):  # update
+            x[r] = xp[r] + K[i, r] * innov
+        last = i
+        i += 1
+    if last >= 0:
+        for r in range(d):
+            acc = 0.0
+            for c in range(d):
+                acc += W[last, r, c] * x[c]
+            bb += x[r] * acc
+    return aa, bb
+
+
+@numba.njit(cache=True, parallel=True)
+def single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, mstep, off):
+    """single_events_compact through the identity of _single_split: z =
+    (y - f) / sigma^2 from the smoother (gp.statespace.smoothed_mean), eyd the
+    first n_diffuse normalised innovations (before the search zeroes them), W
+    from tail_operators (data-independent). b is bit-identical to
+    single_events_compact, a equal up to rounding; b depends only on the
+    times, errors and hyperparameters (reusable when only the flux changes),
+    and the numerator is a white-noise correlation (the GPU path)."""
+    J, d = len(durs), A.shape[1]
+    total = off[J]
+    ab = np.zeros((total, 2))
+    nblocks = (total + SE_ROWS - 1) // SE_ROWS
+    for task in numba.prange(SE_TASKS):
+        x = np.zeros(d)
+        xp = np.empty(d)
+        for blk in range(task, nblocks, SE_TASKS):
+            i0 = blk * SE_ROWS
+            j = np.searchsorted(off, i0, side="right") - 1
+            for i in range(i0, min(i0 + SE_ROWS, total)):
+                while i >= off[j + 1]:
+                    j += 1
+                m = (i - off[j]) * mstep[j]
+                aa, bb = _single_split(t, z, eyd, A, K, H, S, W, tc[m], durs[j], table, texp, nsub, x, xp)
+                ab[i, 0] = aa
+                ab[i, 1] = bb
+    return ab
+
+
 def single_event_sums(t, ey, A, K, S, H, tc, durs, table, texp, nsub=7):
     """Convenience wrapper: tail operators + single events."""
     W, w = tail_operators(A, K, S, H, ey)

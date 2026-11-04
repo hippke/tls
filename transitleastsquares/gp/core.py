@@ -16,11 +16,12 @@ from transitleastsquares.gp.events import (
     multiple_events_strided,
     single_events,
     single_events_compact,
+    single_events_split,
     tail_operators,
     template_table,
 )
 from transitleastsquares.gp.fold_ffa import fold_ffa
-from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
+from transitleastsquares.gp.statespace import kalman_whiten, n_segments, smoothed_mean, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
@@ -57,6 +58,7 @@ def _search(
     n_transits_min=2,
     bayes_factor=False,
     fold="blocked",
+    single="kalman",
     timings=None,
 ):
     """Periodic transit search with the GP baseline marginalised.
@@ -71,9 +73,15 @@ def _search(
     test); None for the uniform grid.
     fold: "blocked", "ffa" or "ffa-screen" (gp.fold_ffa; not with Bayes
     factors or the uniform T0 grid, which use the full fold).
-    timings: optional dict, filled with the wall time of each stage."""
+    timings: optional dict, filled with the wall time of each stage.
+    single: single events by the Kalman filter over each template ("kalman")
+    or through C^-1 y = N^-1 (y - f) ("split": the numerator from the
+    smoother residuals, the denominator from a data-free filter; equal up to
+    rounding, only with the strided T0 grid; gp.events.single_events_split)."""
     if fold not in FOLDS:
         raise ValueError(f"fold must be one of {FOLDS}")
+    if single not in ("kalman", "split"):
+        raise ValueError('single must be "kalman" or "split"')
     clock = _Clock(timings)
     t = np.asarray(t, float)
     y = (np.asarray(flux, float) - 1.0) * 1e3
@@ -89,6 +97,7 @@ def _search(
     clock("matrices")
     K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
     nd = model.n_diffuse
+    eyd = ey[:nd].copy()  # (single="split" removes their terms itself)
     ey[:nd] = 0.0  # diffuse start: no information
     chi2_0 = float(np.sum(ey**2))
     clock("kalman")
@@ -120,7 +129,11 @@ def _search(
         mstep = np.ones(len(durs), np.int64)
     if strided:  # compact layout: per duration only the epochs it uses
         off = compact_offsets(len(tc), mstep)
-        ab = single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
+        if single == "split":
+            z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
+            ab = single_events_split(t, z, eyd, A, K, S, model.H, W, tc, durs, table, texp, nsub, mstep, off)
+        else:
+            ab = single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
     else:
         ab = single_events(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub)
     clock("single_events")
