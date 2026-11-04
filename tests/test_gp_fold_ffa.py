@@ -23,17 +23,30 @@ def test_plan_error(m):
 
 
 @pytest.mark.parametrize("m,p", [(2, 5), (7, 3), (33, 17), (100, 41)])
-def test_ffa_executes_its_plan(m, p):
+@pytest.mark.parametrize("dtype", [np.float64, np.float32])
+def test_ffa_executes_its_plan(m, p, dtype):
+    """The FFA of rows of single events (the last row partly beyond Mj)
+    equals the explicit sums along its effective shifts."""
     rng = np.random.default_rng(m)
-    x = rng.normal(size=(m, p, 3))
-    plan = ff.flat_plan([m])
-    out, tmp = np.empty_like(x), np.empty_like(x)
-    ff._ffa(x.copy(), out, tmp, *plan)
+    Mj = m * p - p // 2
+    ab = np.column_stack([rng.normal(size=Mj), rng.uniform(0, 2, Mj) * (rng.uniform(size=Mj) > 0.2)])
+    x = np.zeros((m * p, 3))
+    x[:Mj, :2] = ab
+    x[:Mj, 2] = ab[:, 1] > 0
+    x = x.reshape(m, p, 3)
+    plan, tree = ff.flat_plan([m]), ff.flat_tree([m])
+    out, tmp = np.empty((m, 3 * p), dtype), np.empty((m, 3 * p), dtype)
+    ff._ffa(ab, 0, Mj, m, p, out, tmp, np.arange(m), *tree, *plan)
     eff = ff.effective_shifts(m).astype(int)
     i = np.arange(p)
+    tol = 1e-12 if dtype == np.float64 else 1e-4
     for s in range(m):
         ref = sum(x[n, (i + eff[s, n]) % p] for n in range(m))
-        np.testing.assert_allclose(out[s], ref, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(out[s].reshape(p, 3), ref, rtol=tol, atol=tol)
+    need = np.unique([0, m // 3, m - 1])  # the root merge only for these drifts
+    out2 = np.full_like(out, np.nan)
+    ff._ffa(ab, 0, Mj, m, p, out2, np.empty_like(out), need, *tree, *plan)
+    np.testing.assert_array_equal(out2[need], out[need])
 
 
 def _inputs(seed, M=20000, J=10, NP=None, signal=None):

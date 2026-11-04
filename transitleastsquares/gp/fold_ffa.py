@@ -27,6 +27,7 @@ evaluated locally (+- REFINE_R epochs around the best transit time).
 """
 
 import math
+import time
 
 import numba
 import numpy as np
@@ -136,30 +137,91 @@ def effective_shifts(m):
 
 # ---------------------------------------------------------------- kernels
 @numba.njit(cache=True, nogil=True)
-def _ffa(x, out, tmp, poff, psh, pst, pk):
-    """FFA of the rows x (m, p, 3) into out (m, p, 3): out[s] is the sum of the
-    rows, row n shifted forward (circularly) by its effective shift for s."""
-    m, p = x.shape[0], x.shape[1]
-    if m == 1:
-        out[0] = x[0]
-        return
-    h = m // 2
-    _ffa(x[:h], tmp[:h], out[:h], poff, psh, pst, pk)  # out / tmp swap as scratch
-    _ffa(x[h:], tmp[h:], out[h:], poff, psh, pst, pk)
-    o0 = poff[m]
-    for s in range(m):
-        H = tmp[psh[o0 + s]]
-        T = tmp[h + pst[o0 + s]]
-        k = pk[o0 + s] % p
-        o = out[s]
-        for i in range(p - k):
-            o[i, 0] = H[i, 0] + T[i + k, 0]
-            o[i, 1] = H[i, 1] + T[i + k, 1]
-            o[i, 2] = H[i, 2] + T[i + k, 2]
-        for i in range(p - k, p):
-            o[i, 0] = H[i, 0] + T[i + k - p, 0]
-            o[i, 1] = H[i, 1] + T[i + k - p, 1]
-            o[i, 2] = H[i, 2] + T[i + k - p, 2]
+def _merge_row(o, H, T, k, p):
+    """o = H + T shifted forward by k phases (circularly); rows of p phases
+    x 3 channels (a, b, has data), flat: two contiguous additions."""
+    n1 = 3 * (p - k)
+    k3 = 3 * k
+    for e in range(n1):
+        o[e] = H[e] + T[e + k3]
+    for e in range(n1, 3 * p):
+        o[e] = H[e] + T[e - n1]
+
+
+_TREE = {}  # m -> operations (start row, size, depth) in depth-first order
+
+
+def _tree(m):
+    """The operations of an m-row FFA (head m // 2 rows, tail the rest) in the
+    order of the recursive algorithm: a leaf (size 1) loads its row, a node
+    merges its two sub-transforms after both were computed (post-order, so
+    small subtrees are finished while they are in cache)."""
+    if m not in _TREE:
+        ops = []
+
+        def rec(start, size, depth):
+            if size > 1:
+                h = size // 2
+                rec(start, h, depth + 1)
+                rec(start + h, size - h, depth + 1)
+            ops.append((start, size, depth))
+
+        rec(0, m, 0)
+        _TREE[m] = np.array(ops, np.int64)
+    return _TREE[m]
+
+
+def flat_tree(ms):
+    """Operations of the given row counts as flat arrays: (offset by m, count
+    by m, operations)."""
+    ms = sorted(int(m) for m in set(ms))
+    off = np.zeros(ms[-1] + 1, np.int64)
+    cnt = np.zeros(ms[-1] + 1, np.int64)
+    parts, n = [], 0
+    for m in ms:
+        t = _tree(m)
+        off[m], cnt[m] = n, len(t)
+        parts.append(t)
+        n += len(t)
+    return off, cnt, np.concatenate(parts)
+
+
+@numba.njit(cache=True, nogil=True)
+def _ffa(ab, o, Mj, m, p, buf0, buf1, need, toff, tcnt, ops, poff, psh, pst, pk):
+    """FFA of the m rows of p epochs of the single events ab[o:o + Mj] (zero
+    beyond Mj): afterwards buf0[s] (rows of 3 p: a, b, has data per phase)
+    is the sum of the rows, row n shifted forward (circularly) by its
+    effective shift for drift s, for the drifts in need (the root merge is
+    restricted to them). The operations of the recursive algorithm run from a
+    flat list (numba's cache does not reload recursive functions reliably):
+    an operation at depth d writes buf[d % 2], a merge reads its two
+    sub-transforms from buf[(d + 1) % 2]. buf0/buf1 may be FP32 (the FFA only
+    locates epochs)."""
+    for e in range(toff[m], toff[m] + tcnt[m]):
+        r0, size, d = ops[e, 0], ops[e, 1], ops[e, 2]
+        dst = buf0 if d % 2 == 0 else buf1
+        if size == 1:  # leaf: load the row
+            q0 = r0 * p
+            for i in range(p):
+                q = q0 + i
+                a = 0.0
+                b = 0.0
+                if q < Mj:
+                    a = ab[o + q, 0]
+                    b = ab[o + q, 1]
+                dst[r0, 3 * i] = a
+                dst[r0, 3 * i + 1] = b
+                dst[r0, 3 * i + 2] = 1.0 if b > 0 else 0.0
+            continue
+        src = buf1 if d % 2 == 0 else buf0
+        h = size // 2
+        o0 = poff[size]
+        if d == 0:
+            for s in need:
+                _merge_row(dst[r0 + s], src[r0 + psh[o0 + s]], src[r0 + h + pst[o0 + s]], pk[o0 + s] % p, p)
+        else:
+            for s in range(size):
+                _merge_row(dst[r0 + s], src[r0 + psh[o0 + s]], src[r0 + h + pst[o0 + s]], pk[o0 + s] % p, p)
 
 
 @numba.njit(cache=True, nogil=True)
@@ -200,12 +262,19 @@ def _local(ab, o, Mj, P, dj, center, r, ntr_min, depth_min):
 
 @numba.njit(cache=True, parallel=True)
 def _ffa_tasks(ab, off, mstep, delta, periods, t_j, t_p, t_start, t_count, targets, order,
-               ntr_min, depth_min, polish_r, poff, psh, pst, pk, g, gA, gB, gk):
+               ntr_min, depth_min, polish_r, toff, tcnt, ops, poff, psh, pst, pk, g, gA, gB, gk):
     """All FFA blocks (duration t_j, base period t_p, periods
     targets[t_start:t_start + t_count]), polished: writes the exact gain, sums
-    and epoch (duration grid) per target."""
+    and epoch (duration grid) per target. Work buffers in FP32, one pair per
+    task, reused across its blocks."""
     NT = len(t_j)
+    size = 0
+    for b in range(NT):
+        Mj = off[t_j[b] + 1] - off[t_j[b]]
+        size = max(size, 3 * ((Mj + t_p[b] - 1) // t_p[b]) * t_p[b])
     for task in numba.prange(FFA_TASKS):
+        buf_out = np.empty(size, np.float32)
+        buf_tmp = np.empty(size, np.float32)
         for u in range(task, NT, FFA_TASKS):
             b = order[u]
             j = t_j[b]
@@ -214,26 +283,22 @@ def _ffa_tasks(ab, off, mstep, delta, periods, t_j, t_p, t_start, t_count, targe
             Mj = off[j + 1] - o
             dj = mstep[j] * delta
             m = (Mj + p - 1) // p
-            x = np.zeros((m, p, 3))
-            for q in range(Mj):
-                n = q // p
-                i = q - n * p
-                x[n, i, 0] = ab[o + q, 0]
-                x[n, i, 1] = ab[o + q, 1]
-                x[n, i, 2] = 1.0 if ab[o + q, 1] > 0 else 0.0
-            out = np.empty((m, p, 3))
-            tmp = np.empty((m, p, 3))
-            _ffa(x, out, tmp, poff, psh, pst, pk)
-            for c in range(t_count[b]):
+            out = buf_out[:3 * m * p].reshape((m, 3 * p))
+            tmp = buf_tmp[:3 * m * p].reshape((m, 3 * p))
+            nt = t_count[b]
+            drift = np.empty(nt, np.int64)
+            for c in range(nt):
+                Pb = periods[targets[t_start[b] + c]] / dj
+                drift[c] = min(max(int(round((Pb - p) * (m - 1))), 0), m - 1)
+            _ffa(ab, o, Mj, m, p, out, tmp, np.unique(drift), toff, tcnt, ops, poff, psh, pst, pk)
+            for c in range(nt):
                 w = t_start[b] + c
-                Pb = periods[targets[w]] / dj
-                s = int(round((Pb - p) * (m - 1)))
-                s = min(max(s, 0), m - 1)
+                row = out[drift[c]]
                 best, bi = 0.0, -1
                 for i in range(p):
-                    A = out[s, i, 0]
-                    B = out[s, i, 1]
-                    if B <= 0 or A <= 0 or A < depth_min * B or out[s, i, 2] < ntr_min - 0.5:
+                    A = np.float64(row[3 * i])
+                    B = np.float64(row[3 * i + 1])
+                    if B <= 0 or A <= 0 or A < depth_min * B or row[3 * i + 2] < ntr_min - 0.5:
                         continue
                     if A * A / B > best:
                         best, bi = A * A / B, i
@@ -313,16 +378,27 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
     """Drop-in for multiple_events_blocked (same arguments and outputs:
     dchi2, best epoch on the full grid, best duration, sums A and B, zeros);
     approximate, every value an exact brute-force fold value (module doc).
-    stats: optional dict, filled with the cell counts (brute, FFA, polish)."""
+    stats: optional dict, filled with the cell counts (brute, FFA, polish) and
+    the wall time per stage (t_plan, t_brute, t_ffa, t_screen)."""
+    clock = [time.perf_counter()]
+
+    def lap(key):
+        now = time.perf_counter()
+        if stats is not None:
+            stats[key] = stats.get(key, 0.0) + now - clock[0]
+        clock[0] = now
+
     periods = np.ascontiguousarray(periods, float)
     jlo = np.asarray(jlo, np.int64)
     jhi = np.asarray(jhi, np.int64)
     Mj = np.diff(off)
     dj = mstep * delta
     jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, screen)
+    lap("t_plan")
     dchi2, best_k0, best_j, best_A, best_B, ntrials = multiple_events_blocked(
         ab, off, M, periods, delta, mstep, jlo, jb_hi, ntr_min, gstart, chunk, depth_min,
         jhi if screen else None)
+    lap("t_brute")
     if blocks:
         t_j = np.array([b[0] for b in blocks], np.int64)
         t_p = np.array([b[1] for b in blocks], np.int64)
@@ -332,16 +408,19 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
         t_jt = np.repeat(t_j, t_count)
         m = -(-Mj[t_j] // t_p)
         plan = flat_plan(np.unique(m))
+        tree = flat_tree(np.unique(m))
         order = np.argsort(-(Mj[t_j] * np.ceil(np.log2(m))), kind="stable").astype(np.int64)
         W = len(targets)
         g, gA, gB = np.zeros(W), np.zeros(W), np.zeros(W)
         gk = np.zeros(W, np.int64)
         _ffa_tasks(ab, off, mstep, delta, periods, t_j, t_p, t_start, t_count, targets, order,
-                   ntr_min, depth_min, polish_r, *plan, g, gA, gB, gk)
+                   ntr_min, depth_min, polish_r, *tree, *plan, g, gA, gB, gk)
         _merge(targets, g, gA, gB, gk, t_jt, mstep, dchi2, best_k0, best_j, best_A, best_B)
+    lap("t_ffa")
     if screen:
         _refine_neighbours(ab, off, mstep, delta, periods, jlo, jhi, dchi2, best_k0, best_j, best_A, best_B,
                            ntr_min, depth_min, refine_r)
+    lap("t_screen")
     if stats is not None:
         ntr = Mj[None, :] * dj[None, :] / periods[:, None]
         jj = np.arange(len(Mj))[None, :]
