@@ -169,7 +169,8 @@ def _search(
     tc = t.min() + delta * np.arange(int(span / delta) + 1)
     table = template_table()
     clock("grids")
-    W, w = tail_operators(A, K, S, model.H, ey, nseg)
+    if device != "gpu":  # (the GPU path computes them on the device)
+        W, w = tail_operators(A, K, S, model.H, ey, nseg)
     clock("tail_operators")
     strided = t0_step_duration is not None
     if strided:
@@ -180,9 +181,9 @@ def _search(
         from transitleastsquares.gpu import driver
 
         off = compact_offsets(len(tc), mstep)
-        z = numerator_weights(ey, S, K, w)
-        d_ab = driver.single_events_gp(t, z, np.zeros(0), A, K, S, model.H, W, tc[0], delta, durs, nsub, table,
-                                       texp, mstep, off)
+        W_d, _, z_d, dev = driver.tail_operators_gpu(A, K, S, model.H, ey)  # FP32, on the device
+        clock("tail_operators")
+        d_ab = driver.single_events_gp_dev(t, z_d, dev, W_d, tc[0], delta, durs, nsub, table, texp, mstep, off)
     elif strided:  # compact layout: per duration only the epochs it uses
         off = compact_offsets(len(tc), mstep)
         kbin = np.ones(len(durs), np.int64)

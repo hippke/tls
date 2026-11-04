@@ -524,3 +524,130 @@ def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius
         g, A, B = _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min)
         k = kk0
     _reduce_write(g, A, B, k, w, out_g, out_A, out_B, out_k)
+
+
+@cuda.jit(device=True, inline=True)
+def _tail_step(Ap, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tmp):
+    """gp.events._tail_step in FP32 with the transitions as blocks: from
+    W_{m+1} = Wn, w_{m+1} = wn to Wm, wm at m = i - 1; F_i in F."""
+    nb = starts.shape[0]
+    s = isS[i]
+    for k in range(d):
+        gv[k] = F0
+    for b in range(nb):  # gv = -(H A_i) / sqrt(S_i)
+        s0 = starts[b]
+        for cc in range(sizes[b]):
+            acc = F0
+            for ll in range(sizes[b]):
+                acc += H[s0 + ll] * Ap[i, b, ll, cc]
+            gv[s0 + cc] = -acc * s
+    for r in range(d):  # F = A - K (H A) = A + K gv / s
+        for c in range(d):
+            F[r, c] = K[i, r] * gv[c] / s
+    for b in range(nb):
+        s0 = starts[b]
+        for rr in range(sizes[b]):
+            for cc in range(sizes[b]):
+                F[s0 + rr, s0 + cc] += Ap[i, b, rr, cc]
+    for r in range(d):  # tmp = Wn F
+        for c in range(d):
+            acc = F0
+            for l in range(d):
+                acc += Wn[r, l] * F[l, c]
+            tmp[r, c] = acc
+    for r in range(d):  # Wm = g g' + F' tmp, wm = ey g + F' wn
+        for c in range(d):
+            acc = gv[r] * gv[c]
+            for l in range(d):
+                acc += F[l, r] * tmp[l, c]
+            Wm[r, c] = acc
+        acc = ey[i] * gv[r]
+        for l in range(d):
+            acc += F[l, r] * wn[l]
+        wm[r] = acc
+
+
+@cuda.jit
+def tail_maps(Ap, starts, sizes, K, isS, H, ey, edges, Phi, C, cc):
+    """Phase 1 of gp.events.tail_operators (one thread per segment k >= 1):
+    the segment's affine map W_lo = Phi' W_b Phi + C, w_lo = Phi' w_b + cc,
+    composed backwards from its boundary edges[k + 1]."""
+    k = cuda.grid(1) + 1
+    if k >= Phi.shape[0]:
+        return
+    d = K.shape[1]
+    Wn = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    Wm = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    F = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    tmp = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    Ph = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    Pn = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    wn = cuda.local.array(MAX_DIM, float32)
+    wm = cuda.local.array(MAX_DIM, float32)
+    gv = cuda.local.array(MAX_DIM, float32)
+    for r in range(d):
+        wn[r] = F0
+        for c in range(d):
+            Wn[r, c] = F0
+            Ph[r, c] = F1 if r == c else F0
+    for m in range(edges[k + 1] - 1, edges[k] - 1, -1):
+        _tail_step(Ap, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
+        for r in range(d):
+            wn[r] = wm[r]
+            for c in range(d):
+                Wn[r, c] = Wm[r, c]
+        for r in range(d):  # Ph = Ph F
+            for c in range(d):
+                acc = F0
+                for l in range(d):
+                    acc += Ph[r, l] * F[l, c]
+                Pn[r, c] = acc
+        for r in range(d):
+            for c in range(d):
+                Ph[r, c] = Pn[r, c]
+    for r in range(d):
+        cc[k, r] = wn[r]
+        for c in range(d):
+            C[k, r, c] = Wn[r, c]
+            Phi[k, r, c] = Ph[r, c]
+
+
+@cuda.jit
+def tail_fill(Ap, starts, sizes, K, isS, H, ey, edges, Wb, wb, W, w):
+    """Phase 3 of gp.events.tail_operators (one thread per segment): W, w of
+    every point of the segment from the known boundary Wb[k], wb[k]."""
+    k = cuda.grid(1)
+    if k >= Wb.shape[0]:
+        return
+    d = K.shape[1]
+    Wn = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    Wm = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    F = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    tmp = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    wn = cuda.local.array(MAX_DIM, float32)
+    wm = cuda.local.array(MAX_DIM, float32)
+    gv = cuda.local.array(MAX_DIM, float32)
+    for r in range(d):
+        wn[r] = wb[k, r]
+        for c in range(d):
+            Wn[r, c] = Wb[k, r, c]
+    for m in range(edges[k + 1] - 1, edges[k] - 1, -1):
+        _tail_step(Ap, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
+        for r in range(d):
+            wn[r] = wm[r]
+            w[m, r] = wm[r]
+            for c in range(d):
+                Wn[r, c] = Wm[r, c]
+                W[m, r, c] = Wm[r, c]
+
+
+@cuda.jit
+def numerator(ey, isS, K, w, z):
+    """z_i = ey_i / sqrt(S_i) + K_i . w_i (gp.events.numerator_weights)."""
+    i = cuda.grid(1)
+    if i >= z.shape[0]:
+        return
+    acc = ey[i] * isS[i]
+    for r in range(K.shape[1]):
+        acc += K[i, r] * w[i, r]
+    z[i] = acc

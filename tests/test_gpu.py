@@ -148,3 +148,47 @@ def test_gp_search_gpu(fold):
     assert new.period == ref.period and new.T0 == ref.T0 and new.duration == ref.duration
     assert abs(new.SDE / ref.SDE - 1) < 1e-3
     np.testing.assert_allclose(new.delta_chi2, ref.delta_chi2, rtol=1e-3, atol=1e-3)
+
+
+@pytest.mark.parametrize("name", ["k2_rot", "k2_spline", "syn_rot"])
+def test_tail_operators_gpu(name):
+    """The FP32 segment-parallel tail recursion and numerator weights on the
+    GPU equal the CPU's (FP64)."""
+    from gp_cases import CASES
+    from transitleastsquares.gp.events import numerator_weights, tail_operators
+    from transitleastsquares.gp.statespace import kalman_whiten, transition_matrices
+    from transitleastsquares.gpu import driver
+
+    load, baseline = CASES[name]
+    t, f, e = load()
+    y, yerr = (f - 1) * 1e3, e * 1e3
+    model = baseline._model(t, e)
+    kinds, starts, pars, P0 = model.blocks()
+    A = transition_matrices(t, kinds, starts, pars, model.dim)
+    Kg, S, ey = kalman_whiten(t, y, yerr**2 + model.jitter**2, kinds, starts, pars, P0, 1)
+    ey[:model.n_diffuse] = 0.0
+    W, w = tail_operators(A, Kg, S, model.H, ey, 1)
+    Wd, wd, zd, _ = driver.tail_operators_gpu(A, Kg, S, model.H, ey)
+    Wg, wg, zg = Wd.copy_to_host(), wd.copy_to_host(), zd.copy_to_host()
+    scale = np.abs(W).max(axis=(1, 2))[:, None, None] + 1e-30
+    z = numerator_weights(ey, S, Kg, w)
+    print(name, "W rel", np.max(np.abs(Wg - W) / scale), "z rel", np.max(np.abs(zg - z)) / np.abs(z).max())
+    assert np.max(np.abs(Wg - W) / scale) < 1e-4
+    assert np.max(np.abs(zg - z)) < 1e-4 * np.abs(z).max()
+
+
+@pytest.mark.parametrize("name", ["k2_rot", "syn_rot"])
+def test_trend_gpu(name):
+    """Baseline.trend(device="gpu") (f = y - R C^-1 y, no smoother) equals the
+    smoother's trend."""
+    from gp_cases import CASES
+
+    load, baseline = CASES[name]
+    t, f, e = load()
+    use = np.ones(len(t), bool)
+    use[len(t) // 3: len(t) // 3 + 20] = False  # a masked stretch (as the transits of the best signal)
+    ref = baseline.trend(t, f, e, use)
+    new = baseline.trend(t, f, e, use, device="gpu")
+    amp = np.ptp(ref)
+    print(name, "max |trend_gpu - trend| / amplitude", np.max(np.abs(new - ref)) / amp)
+    assert np.max(np.abs(new - ref)) < 1e-5 * amp

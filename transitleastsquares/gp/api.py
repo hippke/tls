@@ -169,7 +169,7 @@ def search(
     P, T0, D = r["period"], r["T0"], r["duration"]
     transit_times = T0 + P * np.arange(int((t.max() - T0) / P) + 1)
     phase = (t - T0 + 0.5 * P) % P - 0.5 * P
-    trend = b.trend(t, y, dy, use & (np.abs(phase) > 0.75 * D)) if trend else None
+    trend = b.trend(t, y, dy, use & (np.abs(phase) > 0.75 * D), device=device) if trend else None
     return GPSearchResults(
         period=P,
         T0=T0,

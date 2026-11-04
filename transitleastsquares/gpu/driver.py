@@ -60,6 +60,65 @@ def single_events_gp(t, z, eyd, A, Kg, S, H, W, t0, delta, durs, nsub, table, te
     return d_ab
 
 
+def single_events_gp_dev(t, z, dev, W, t0, delta, durs, nsub, table, texp, mstep, off):
+    """single_events_gp with the inputs already on the device (from
+    tail_operators_gpu): z, W device arrays; dev the packed transitions and
+    gains."""
+    total = int(off[-1])
+    d_ab = cuda.device_array((total, 2), np.float32)
+    nsubs = np.full(len(durs), nsub, np.int32)
+    hidx = np.nonzero(dev["H"].copy_to_host())[0].astype(np.int64)
+    K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
+        cuda.to_device(np.ascontiguousarray(t, float)), z, cuda.to_device(np.zeros(0, np.float32)),
+        dev["Ap"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"], W,
+        float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs), cuda.to_device(_f32(table)),
+        np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)), cuda.to_device(np.asarray(off, np.int64)),
+        cuda.to_device(_row_j(off)), d_ab)
+    return d_ab
+
+
+TAIL_SEGMENT = 256  # points per GPU thread in the tail recursion
+
+
+def tail_operators_gpu(A, Kg, S, H, ey):
+    """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
+    segment on the device, joined backwards on the CPU in FP64, then W, w
+    per segment on the device) and the numerator weights z. Returns device
+    arrays (W, w, z) and the packed transition blocks (Ap, starts, sizes) on
+    the device, for single_events_gp."""
+    from transitleastsquares.gp.events import pack_blocks, transition_blocks
+
+    n, d = A.shape[0], A.shape[1]
+    starts, sizes = transition_blocks(A)
+    if sizes.max() > 2:
+        raise ValueError("GPU tail: transition blocks of more than 2 states")
+    dev = dict(Ap=cuda.to_device(_f32(pack_blocks(A, starts, sizes))), starts=cuda.to_device(starts),
+               sizes=cuda.to_device(sizes), K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))),
+               H=cuda.to_device(_f32(H)), ey=cuda.to_device(_f32(ey)))
+    nseg = max(1, (n - 1) // TAIL_SEGMENT)
+    edges = np.array([(k * (n - 1)) // nseg for k in range(nseg + 1)], np.int64)
+    d_edges = cuda.to_device(edges)
+    Phi = cuda.device_array((nseg, d, d), np.float32)
+    C = cuda.to_device(np.zeros((nseg, d, d), np.float32))
+    cc = cuda.to_device(np.zeros((nseg, d), np.float32))
+    args = (dev["Ap"], dev["starts"], dev["sizes"], dev["K"], dev["isS"], dev["H"], dev["ey"], d_edges)
+    if nseg > 1:
+        K.tail_maps[(nseg - 1 + 127) // 128, 128](*args, Phi, C, cc)
+    Ph, Ch, ch = (x.copy_to_host().astype(float) for x in (Phi, C, cc))
+    Wb = np.zeros((nseg, d, d))
+    wb = np.zeros((nseg, d))
+    for k in range(nseg - 2, -1, -1):  # W(edges[k+1]) = Phi' Wb Phi + C of segment k + 1 (FP64)
+        q = k + 1
+        Wb[k] = Ph[q].T @ Wb[q] @ Ph[q] + Ch[q]
+        wb[k] = Ph[q].T @ wb[q] + ch[q]
+    W = cuda.to_device(np.zeros((n, d, d), np.float32))
+    w = cuda.to_device(np.zeros((n, d), np.float32))
+    K.tail_fill[(nseg + 127) // 128, 128](*args, cuda.to_device(_f32(Wb)), cuda.to_device(_f32(wb)), W, w)
+    z = cuda.device_array(n, np.float32)
+    K.numerator[(n + 255) // 256, 256](dev["ey"], dev["isS"], dev["K"], w, z)
+    return W, w, z, dev
+
+
 @functools.lru_cache(maxsize=None)
 def tree_nodes(m):
     """The merge nodes of an m-row FFA (as gp.fold_ffa._ffa): (start row,
@@ -227,3 +286,19 @@ def _ffa_batch(d_ab, d_off, d_mstep, d_periods, delta, blocks, bj, bp, bm, sizes
                                   int(polish_r), *out)
     g, A, B, k = (x.copy_to_host() for x in out)
     return tq.astype(np.int64), g, bj[tb], k, A, B
+
+
+def trend_gpu(model, t, y, R, nseg=1):
+    """Posterior mean of the baseline (ppt) without a smoother: f = y - R z
+    with z = C^-1 y from the Kalman pass (CPU, FP64) and the tail recursion
+    and numerator weights on the GPU (FP32), as gp.events.numerator_weights.
+    Equals the RTS smoother up to rounding (spline GP: up to a few % at its
+    ill-conditioned diffuse start)."""
+    from transitleastsquares.gp.statespace import kalman_whiten, transition_matrices
+
+    kinds, starts, pars, P0 = model.blocks()
+    A = transition_matrices(t, kinds, starts, pars, model.dim)
+    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+    ey[:model.n_diffuse] = 0.0
+    _, _, z, _ = tail_operators_gpu(A, Kg, S, model.H, ey)
+    return y - R * z.copy_to_host().astype(float)

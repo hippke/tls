@@ -81,14 +81,22 @@ class Baseline:
         ll_ppt = log_likelihood(self._model(t, dy), t, (y - 1) * PPT, dy * PPT)
         return ll_ppt + (len(t) - self._model(t, dy).n_diffuse) * math.log(PPT)
 
-    def trend(self, t, y, dy, use=None, threads=None):
+    def trend(self, t, y, dy, use=None, threads=None, device="cpu"):
         """Posterior mean of the baseline at all t (relative flux),
         conditioned on the points with use=True (default: all); in up to
-        `threads` threads (default: numba's thread count)."""
+        `threads` threads (default: numba's thread count). device="gpu": as
+        f = y - R C^-1 y without the smoother (transitleastsquares.gpu)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         use = np.ones(len(t), bool) if use is None else np.asarray(use, bool)
         yerr = np.where(use, dy, 1e6) * PPT  # excluded points carry no information
         threads = numba.get_num_threads() if threads is None else int(threads)
+        if device == "gpu":
+            from transitleastsquares.gp.statespace import n_segments
+            from transitleastsquares.gpu import driver
+
+            model = self._model(t, dy)
+            yp = (y - 1) * PPT * use
+            return 1 + driver.trend_gpu(model, t, yp, yerr**2 + model.jitter**2, n_segments(len(t), threads)) / PPT
         return 1 + gp_mean(self._model(t, dy), t, (y - 1) * PPT * use, yerr, threads) / PPT
 
     def as_dict(self):
