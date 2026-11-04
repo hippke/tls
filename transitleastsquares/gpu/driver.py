@@ -83,16 +83,21 @@ TAIL_SEGMENT = 256  # points per GPU thread in the tail recursion
 def tail_operators_gpu(A, Kg, S, H, ey):
     """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
     segment on the device, joined backwards on the CPU in FP64, then W, w
-    per segment on the device) and the numerator weights z. Returns device
-    arrays (W, w, z) and the packed transition blocks (Ap, starts, sizes) on
-    the device, for single_events_gp."""
+    per segment on the device) and the numerator weights z. A: the dense
+    transitions, or their blocks (Ap, starts, sizes) from
+    statespace.transition_blocks_packed. Returns device arrays (W, w, z) and
+    the packed transition blocks and gains on the device (single_events_gp_dev)."""
     from transitleastsquares.gp.events import pack_blocks, transition_blocks
 
-    n, d = A.shape[0], A.shape[1]
-    starts, sizes = transition_blocks(A)
+    if isinstance(A, tuple):
+        Ap, starts, sizes = A
+    else:
+        starts, sizes = transition_blocks(A)
+        Ap = pack_blocks(A, starts, sizes)
+    n, d = Kg.shape[0], Kg.shape[1]
     if sizes.max() > 2:
         raise ValueError("GPU tail: transition blocks of more than 2 states")
-    dev = dict(Ap=cuda.to_device(_f32(pack_blocks(A, starts, sizes))), starts=cuda.to_device(starts),
+    dev = dict(Ap=cuda.to_device(_f32(Ap)), starts=cuda.to_device(starts),
                sizes=cuda.to_device(sizes), K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))),
                H=cuda.to_device(_f32(H)), ey=cuda.to_device(_f32(ey)))
     nseg = max(1, (n - 1) // TAIL_SEGMENT)
@@ -294,11 +299,10 @@ def trend_gpu(model, t, y, R, nseg=1):
     and numerator weights on the GPU (FP32), as gp.events.numerator_weights.
     Equals the RTS smoother up to rounding (spline GP: up to a few % at its
     ill-conditioned diffuse start)."""
-    from transitleastsquares.gp.statespace import kalman_whiten, transition_matrices
+    from transitleastsquares.gp.statespace import kalman_whiten, transition_blocks_packed
 
     kinds, starts, pars, P0 = model.blocks()
-    A = transition_matrices(t, kinds, starts, pars, model.dim)
     Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
     ey[:model.n_diffuse] = 0.0
-    _, _, z, _ = tail_operators_gpu(A, Kg, S, model.H, ey)
+    _, _, z, _ = tail_operators_gpu(transition_blocks_packed(t, kinds, starts, pars), Kg, S, model.H, ey)
     return y - R * z.copy_to_host().astype(float)

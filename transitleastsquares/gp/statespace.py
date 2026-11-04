@@ -850,6 +850,35 @@ def transition_matrices(t, kinds, starts, pars, d):
     return A
 
 
+@numba.njit(cache=True, parallel=True)
+def transition_blocks_packed(t, kinds, starts, pars):
+    """The per-point transitions as their diagonal blocks (as
+    gp.events.pack_blocks(transition_matrices(...))) without the dense
+    (n, d, d) array: (Ap, block starts, block sizes); A_0 = I."""
+    n, nb = len(t), len(kinds)
+    size = _block_sizes(kinds)
+    Ap = np.zeros((n, nb, 2, 2))
+    ntask = (n + TASK_POINTS - 1) // TASK_POINTS
+    for task in numba.prange(ntask):
+        Ab = np.zeros((nb, 2, 2))
+        Qb = np.zeros((nb, 2, 2))
+        dt_last = -1.0
+        for i in range(max(1, task * TASK_POINTS), min(n, (task + 1) * TASK_POINTS)):
+            dt = t[i] - t[i - 1]
+            if dt != dt_last:
+                for k in range(nb):
+                    _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+                dt_last = dt
+            for k in range(nb):
+                for r in range(size[k]):
+                    for c in range(size[k]):
+                        Ap[i, k, r, c] = Ab[k, r, c]
+    for k in range(nb):
+        for r in range(size[k]):
+            Ap[0, k, r, r] = 1.0
+    return Ap, starts.copy(), size
+
+
 @numba.njit(cache=True, nogil=True)
 def _gains_segment(t, y, R, kinds, starts, pars, x, P, i0, i1, K, S, ey):
     """_filter_segment, storing the gains K, innovation variances S and

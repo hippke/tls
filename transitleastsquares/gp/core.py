@@ -22,7 +22,7 @@ from transitleastsquares.gp.events import (
     template_table,
 )
 from transitleastsquares.gp.fold_ffa import FOLD_NAMES, fold_ffa, fold_options
-from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
+from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_blocks_packed, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
@@ -142,7 +142,10 @@ def _search(
     kinds, starts, pars, P0 = model.blocks()
     R = yerr**2 + model.jitter**2
     nseg = n_segments(len(t), numba.get_num_threads())
-    A = transition_matrices(t, kinds, starts, pars, model.dim)
+    if device == "gpu":  # only the diagonal blocks (no dense (n, d, d) array)
+        A = transition_blocks_packed(t, kinds, starts, pars)
+    else:
+        A = transition_matrices(t, kinds, starts, pars, model.dim)
     clock("matrices")
     K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
     nd = model.n_diffuse
