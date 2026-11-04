@@ -305,8 +305,16 @@ SE_ROWS = 64  # rows per block of the compact single events
 SE_TASKS = 256  # parallel tasks; each takes every SE_TASKS-th block
 
 
-@numba.njit(cache=True, parallel=True)
 def single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, off):
+    """Single events for the strided fold, compact (see
+    _single_events_compact); computed in lanes of neighbouring events
+    (_single_events_lanes, bit-identical)."""
+    return _single_events_lanes(t, ey, np.zeros(0), A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, off,
+                                False)
+
+
+@numba.njit(cache=True, parallel=True)
+def _single_events_compact(t, ey, A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, off):
     """Single events for the strided fold, compact: duration j only at the
     epochs tc[kk * mstep[j]], stored contiguously from row off[j]; a and b
     of one epoch side by side (row = (a, b)). Memory sum_j M / mstep[j]
@@ -384,8 +392,16 @@ def _single_split(t, z, eyd, Ap, starts, sizes, K, H, hidx, isS, W, tcm, D, tabl
     return aa, bb
 
 
-@numba.njit(cache=True, parallel=True)
 def single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, mstep, off):
+    """Split single events (see _single_events_split); computed in lanes of
+    neighbouring events (_single_events_lanes, bit-identical)."""
+    n, d = len(t), A.shape[1]
+    return _single_events_lanes(t, z, np.ascontiguousarray(eyd, dtype=np.float64), A, K, S, H, W,
+                                np.zeros((1, d)), tc, durs, table, texp, nsub, mstep, off, True)
+
+
+@numba.njit(cache=True, parallel=True)
+def _single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, mstep, off):
     """single_events_compact through the identity of _single_split: z =
     (y - f) / sigma^2 from the smoother (gp.statespace.smoothed_mean), eyd the
     first n_diffuse normalised innovations (before the search zeroes them), W
@@ -429,6 +445,135 @@ def numerator_weights(ey, S, K, w):
     z = ey / np.sqrt(S)
     z += np.einsum("ir,ir->i", K, w)
     return z
+
+
+LANES = 4  # neighbouring events filtered together (SIMD across events)
+
+
+@numba.njit(cache=True, nogil=True)
+def _single_lanes(t, data, eyd, Ap, starts, sizes, K, H, hidx, isS, W, w, tcs, nl, D, table, texp, nsub, split,
+                  x, xp, aa, bb, lo, hi, last, sl, act):
+    """_single (split=False: data = ey) or _single_split (split=True: data =
+    z) for the nl <= LANES events at tcs[:nl] of one duration D, in lanes:
+    one loop over the union of their windows, each lane masked to its own
+    window (before it the state stays 0, after it frozen), so every lane
+    equals its single-event result bit for bit (1 * v + 0 * x = v). The
+    independent lanes fill the vector units that one latency-bound recursion
+    leaves idle (1.7x for 4 lanes). Results in aa, bb."""
+    n, d = len(t), K.shape[1]
+    L = LANES  # compile-time constant: the lane loops unroll / vectorise
+    invD = 1.0 / D
+    half = 0.5 * D + 0.5 * texp
+    for l in range(L):
+        c = tcs[min(l, nl - 1)]
+        lo[l] = c - half
+        hi[l] = c + half if l < nl else c - half
+        last[l] = -1
+        aa[l] = 0.0
+        bb[l] = 0.0
+        for r in range(d):
+            x[r, l] = 0.0
+    i = np.searchsorted(t, lo[0])
+    tend = hi[nl - 1]
+    nd = len(eyd)
+    while i < n and t[i] < tend:
+        ti = t[i]
+        for l in range(L):
+            act[l] = 1.0 if (ti >= lo[l]) and (ti < hi[l]) else 0.0
+            sl[l] = _template_inv(ti, tcs[min(l, nl - 1)], invD, table, texp, nsub)
+        for b in range(len(starts)):  # predict, block-diagonal, all lanes
+            s0 = starts[b]
+            if sizes[b] == 2:
+                a00 = Ap[i, b, 0, 0]
+                a01 = Ap[i, b, 0, 1]
+                a10 = Ap[i, b, 1, 0]
+                a11 = Ap[i, b, 1, 1]
+                for l in range(L):
+                    x0 = x[s0, l]
+                    x1 = x[s0 + 1, l]
+                    xp[s0, l] = (0.0 + a00 * x0) + a01 * x1
+                    xp[s0 + 1, l] = (0.0 + a10 * x0) + a11 * x1
+            else:
+                a00 = Ap[i, b, 0, 0]
+                for l in range(L):
+                    xp[s0, l] = 0.0 + a00 * x[s0, l]
+        isi = isS[i]
+        di = data[i]
+        for l in range(L):
+            hx = 0.0
+            for q in hidx:
+                hx += H[q] * xp[q, l]
+            sv = sl[l]
+            innov = (sv - hx) * act[l]
+            e = innov * isi
+            if split:
+                aa[l] += (sv * act[l]) * di
+                if i < nd:
+                    aa[l] -= e * eyd[i]
+            else:
+                aa[l] += e * di
+            bb[l] += e * e
+            sl[l] = innov
+        for r in range(d):  # update; inactive lanes keep their state
+            kr = K[i, r]
+            for l in range(L):
+                x[r, l] = act[l] * (xp[r, l] + kr * sl[l]) + (1.0 - act[l]) * x[r, l]
+        for l in range(L):
+            if act[l] > 0.0:
+                last[l] = i
+        i += 1
+    for l in range(nl):
+        if last[l] >= 0:
+            for r in range(d):
+                if not split:
+                    aa[l] += w[last[l], r] * x[r, l]
+                acc = 0.0
+                for c in range(d):
+                    acc += W[last[l], r, c] * x[c, l]
+                bb[l] += x[r, l] * acc
+
+
+@numba.njit(cache=True, parallel=True)
+def _single_events_lanes(t, data, eyd, A, K, S, H, W, w, tc, durs, table, texp, nsub, mstep, off, split):
+    """single_events_compact (split=False) / single_events_split (split=True)
+    with _single_lanes: rows of one duration in groups of LANES."""
+    J, d = len(durs), A.shape[1]
+    starts, sizes = transition_blocks(A)
+    Ap = pack_blocks(A, starts, sizes)
+    isS = 1.0 / np.sqrt(S)
+    hidx = np.nonzero(H)[0]
+    total = off[J]
+    ab = np.zeros((total, 2))
+    nblocks = (total + SE_ROWS - 1) // SE_ROWS
+    for task in numba.prange(SE_TASKS):
+        x = np.zeros((d, LANES))
+        xp = np.zeros((d, LANES))
+        aa = np.zeros(LANES)
+        bb = np.zeros(LANES)
+        lo = np.zeros(LANES)
+        hi = np.zeros(LANES)
+        last = np.zeros(LANES, np.int64)
+        sl = np.zeros(LANES)
+        act = np.zeros(LANES)
+        tcs = np.zeros(LANES)
+        for blk in range(task, nblocks, SE_TASKS):
+            i0 = blk * SE_ROWS
+            i1 = min(i0 + SE_ROWS, total)
+            j = np.searchsorted(off, i0, side="right") - 1
+            i = i0
+            while i < i1:
+                while i >= off[j + 1]:
+                    j += 1
+                nl = min(LANES, i1 - i, off[j + 1] - i)  # consecutive rows of duration j
+                for l in range(nl):
+                    tcs[l] = tc[(i + l - off[j]) * mstep[j]]
+                _single_lanes(t, data, eyd, Ap, starts, sizes, K, H, hidx, isS, W, w, tcs, nl, durs[j], table,
+                              texp, nsub, split, x, xp, aa, bb, lo, hi, last, sl, act)
+                for l in range(nl):
+                    ab[i + l, 0] = aa[l]
+                    ab[i + l, 1] = bb[l]
+                i += nl
+    return ab
 
 
 def single_event_sums(t, ey, A, K, S, H, tc, durs, table, texp, nsub=7):
