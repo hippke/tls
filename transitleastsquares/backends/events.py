@@ -146,15 +146,10 @@ class EventsBackend(SearchBackend):
     name = "events"
     exact = False
     same_statistic = False  # least-squares depth on its own grids, not TLS's statistic
+    fold = "blocked"  # or "ffa", "ffa-screen" (gp.fold_ffa); environment override TLS_EVENTS_FOLD
 
     def search(self, problem, periods, use_threads=1, progress=None):
-        from transitleastsquares.gp.events import (
-            FOLD_CHUNK,
-            compact_offsets,
-            fold_groups,
-            multiple_events_blocked,
-            template_table,
-        )
+        from transitleastsquares.gp.events import compact_offsets
 
         p = problem
         periods = numpy.ascontiguousarray(periods, dtype=float)
@@ -181,18 +176,9 @@ class EventsBackend(SearchBackend):
         nsubs = numpy.where(texp * float(os.environ.get("TLS_EVENTS_NSUB_RATIO", 30)) > durs, 7, 1).astype(numpy.int64)
         tc = t[0] + delta * numpy.arange(int(span / delta) + 1)
         off = compact_offsets(len(tc), mstep)
-        old = numba.get_num_threads()
-        numba.set_num_threads(max(1, min(int(use_threads), numba.config.NUMBA_NUM_THREADS)))
-        try:
-            ab = single_events_white(t, r, w, tc, durs, nsubs, template_table(), texp, mstep, off)
-            # cache-blocked fold, identical to fold_events (gp.events.multiple_events_blocked)
-            dchi2, _, jb, bA, bB, _ = multiple_events_blocked(
-                ab, off, len(tc), periods, delta, mstep, jlo, jhi,
-                int(p.n_transits_min), fold_groups(periods, delta), FOLD_CHUNK,
-                max(float(p.transit_depth_min), 0.0),
-            )
-        finally:
-            numba.set_num_threads(old)
+        dchi2, jb, bA, bB = self._single_and_fold(
+            t, r, w, tc, durs, nsubs, texp, mstep, off, periods, delta, jlo, jhi,
+            int(p.n_transits_min), max(float(p.transit_depth_min), 0.0), use_threads)
         fit = dchi2 > 0
         depth = numpy.where(fit, bA / numpy.where(fit, bB, 1.0), 0.0)
         # nearest TLS template row (durations as fractions of the period)
@@ -206,3 +192,46 @@ class EventsBackend(SearchBackend):
         return SearchResult.from_unsorted(
             periods, chi2_0 - dchi2, rows.astype(numpy.int64), numpy.where(fit, 1.0 - depth, 0.0)
         )
+
+    def _single_and_fold(self, t, r, w, tc, durs, nsubs, texp, mstep, off, periods, delta, jlo, jhi,
+                         ntr_min, depth_min, use_threads):
+        """Single events and their fold: dchi2, best duration, sums A, B."""
+        from transitleastsquares.gp.events import (
+            FOLD_CHUNK,
+            fold_groups,
+            multiple_events_blocked,
+            template_table,
+        )
+
+        old = numba.get_num_threads()
+        numba.set_num_threads(max(1, min(int(use_threads), numba.config.NUMBA_NUM_THREADS)))
+        try:
+            ab = single_events_white(t, r, w, tc, durs, nsubs, template_table(), texp, mstep, off)
+            # cache-blocked fold, identical to fold_events (gp.events.multiple_events_blocked),
+            # or FFA + polish (gp.fold_ffa)
+            fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
+            if fold == "blocked":
+                fold_fn, kw = multiple_events_blocked, {}
+            elif fold in ("ffa", "ffa-screen"):
+                from transitleastsquares.gp.fold_ffa import fold_ffa as fold_fn
+
+                kw = dict(screen=fold == "ffa-screen")
+            else:
+                raise ValueError(f"unknown events fold {fold!r}")
+            dchi2, _, jb, bA, bB, _ = fold_fn(
+                ab, off, len(tc), periods, delta, mstep, jlo, jhi, ntr_min,
+                fold_groups(periods, delta), FOLD_CHUNK, depth_min, **kw,
+            )
+        finally:
+            numba.set_num_threads(old)
+        return dchi2, jb, bA, bB
+
+
+class EventsFFABackend(EventsBackend):
+    """The "events" backend with the FFA + polish fold (gp.fold_ffa):
+    faster on long light curves; every period's value is an exact value of
+    the "events" fold, never above it."""
+
+    name = "events-ffa"
+    fold = "ffa"
+

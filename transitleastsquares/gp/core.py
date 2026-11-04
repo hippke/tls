@@ -19,9 +19,13 @@ from transitleastsquares.gp.events import (
     tail_operators,
     template_table,
 )
+from transitleastsquares.gp.fold_ffa import fold_ffa
 from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
+
+FOLDS = ("blocked", "ffa", "ffa-screen")
+
 
 class _Clock:
     """Accumulates wall time per stage into a dict (no-op without one)."""
@@ -52,6 +56,7 @@ def _search(
     depth_prior=0.02,
     n_transits_min=2,
     bayes_factor=False,
+    fold="blocked",
     timings=None,
 ):
     """Periodic transit search with the GP baseline marginalised.
@@ -64,7 +69,11 @@ def _search(
     max(t0_step, t0_step_duration * D), rounded down to a multiple of t0_step
     (default 0.1: 2.2x faster, recovery unchanged in the K2-25 injection
     test); None for the uniform grid.
+    fold: "blocked", "ffa" or "ffa-screen" (gp.fold_ffa; not with Bayes
+    factors or the uniform T0 grid, which use the full fold).
     timings: optional dict, filled with the wall time of each stage."""
+    if fold not in FOLDS:
+        raise ValueError(f"fold must be one of {FOLDS}")
     clock = _Clock(timings)
     t = np.asarray(t, float)
     y = (np.asarray(flux, float) - 1.0) * 1e3
@@ -127,10 +136,12 @@ def _search(
             ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
             bayes_factor,
         )
-    else:  # identical results, cache-blocked (see multiple_events_blocked)
-        dchi2, k0, jb, bA, bB, ntrials = multiple_events_blocked(
+    else:  # identical results, cache-blocked (see multiple_events_blocked); or FFA + polish
+        fold_fn = multiple_events_blocked if fold == "blocked" else fold_ffa
+        kw = {} if fold == "blocked" else dict(screen=fold == "ffa-screen")
+        dchi2, k0, jb, bA, bB, ntrials = fold_fn(
             ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
-            fold_groups(periods, delta), FOLD_CHUNK,
+            fold_groups(periods, delta), FOLD_CHUNK, **kw,
         )
         lse = None
     clock("multiple_events")
