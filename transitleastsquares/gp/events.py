@@ -697,6 +697,143 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
     return dchi2, best_k0, best_j, best_A, best_B, np.zeros(NP)
 
 
+@numba.njit(cache=True, nogil=True)
+def exact_path(ab, o, Mj, P, dj, kk0, ntr_min, depth_min):
+    """Brute-force path of epoch kk0 (duration rows ab[o:o + Mj], epoch step
+    dj), as multiple_events_blocked (same rounding of n P / dj, same order of
+    the sums): (dchi2 or 0, A, B)."""
+    A = 0.0
+    B = 0.0
+    cnt = 0
+    nn = 0
+    while True:
+        kk = kk0 + int(round(nn * P / dj))
+        if kk >= Mj:
+            break
+        bb = ab[o + kk, 1]
+        A += ab[o + kk, 0]
+        B += bb
+        cnt += bb > 0
+        nn += 1
+    if cnt < ntr_min or B <= 0 or A <= 0 or A < depth_min * B:
+        return 0.0, A, B
+    return A * A / B, A, B
+
+
+@numba.njit(cache=True, parallel=True)
+def multiple_events_blocked_coarse(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk, depth_min,
+                                   screen_hi, coarse):
+    """multiple_events_blocked on every coarse-th epoch (PERF_PLAN item 12,
+    approximate): per period and duration the best coarse epoch (with
+    >= ntr_min transits), then its coarse - 1 neighbours on each side on the
+    exact path. Every value is an exact brute-force path value; ~coarse x
+    fewer cells. screen_hi: None or the duration screen (as
+    multiple_events_blocked)."""
+    NP = len(periods)
+    NG = len(gstart) - 1
+    dchi2 = np.zeros(NP)
+    best_k0 = np.zeros(NP, np.int64)
+    best_j = np.zeros(NP, np.int64)
+    best_A = np.zeros(NP)
+    best_B = np.zeros(NP)
+    c = coarse
+    for task in numba.prange(FOLD_TASKS):
+        for g in range(task, NG, FOLD_TASKS):
+            p0, p1 = gstart[g], gstart[g + 1]
+            G = p1 - p0
+            nmax = 0
+            jmin, jmax = jlo[p0], jhi[p0]
+            for p in range(p0, p1):
+                nmax = max(nmax, int(periods[p] / delta) // c + 2)
+                jmin = min(jmin, jlo[p])
+                jmax = max(jmax, jhi[p])
+            sA = np.empty((G, nmax))
+            sB = np.empty((G, nmax))
+            nph = np.empty(G, np.int64)
+            nu = np.empty(G, np.int64)
+            ncur = np.empty(G, np.int64)
+            for j in range(jmin, jmax + 1):
+                m = mstep[j]
+                dj = m * delta
+                Mj = off[j + 1] - off[j]
+                o = off[j]
+                for q in range(G):
+                    p = p0 + q
+                    nph[q] = max(1, int(periods[p] / dj)) if jlo[p] <= j <= jhi[p] else 0
+                    if screen_hi is not None:
+                        if j % 2 != 0 and j != jlo[p] and j != screen_hi[p]:
+                            nph[q] = 0
+                    nu[q] = (nph[q] + c - 1) // c
+                    ncur[q] = 0
+                    sA[q, : nu[q]] = 0.0
+                    sB[q, : nu[q]] = 0.0
+                for c0 in range(0, Mj, chunk):
+                    c1 = min(c0 + chunk, Mj)
+                    for q in range(G):
+                        npq = nph[q]
+                        if npq == 0:
+                            continue
+                        P = periods[p0 + q]
+                        qa = sA[q]
+                        qb = sB[q]
+                        nn = ncur[q]
+                        while True:  # transits whose epoch block overlaps the chunk
+                            base = int(round(nn * P / dj))
+                            if base >= c1:
+                                break
+                            end = min(base + npq, Mj)
+                            s = o + base
+                            lo = max(base, c0) - base
+                            u = (lo + c - 1) // c  # epochs 0, c, 2c, ... of the period
+                            for k in range(u * c, min(end, c1) - base, c):
+                                qa[u] += ab[s + k, 0]
+                                qb[u] += ab[s + k, 1]
+                                u += 1
+                            if end > c1:
+                                break
+                            nn += 1
+                        ncur[q] = nn
+                for q in range(G):
+                    p = p0 + q
+                    P = periods[p]
+                    bu, bd2 = -1, 0.0  # best coarse epoch of this period and duration
+                    for u in range(nu[q]):
+                        A = sA[q, u]
+                        B = sB[q, u]
+                        if B <= 0 or A <= 0 or A < depth_min * B:
+                            continue
+                        d2 = A * A / B
+                        if d2 <= bd2:
+                            continue
+                        cnt = 0
+                        nn = 0
+                        while True:
+                            kk = u * c + int(round(nn * P / dj))
+                            if kk >= Mj:
+                                break
+                            cnt += ab[o + kk, 1] > 0
+                            nn += 1
+                        if cnt < ntr_min:
+                            continue
+                        bu, bd2 = u, d2
+                    if bu < 0:
+                        continue
+                    kb, gA, gB = bu * c, sA[q, bu], sB[q, bu]
+                    for kk0 in range(max(0, bu * c - (c - 1)), min(nph[q], bu * c + c)):
+                        if kk0 == bu * c:
+                            continue
+                        d2, A, B = exact_path(ab, o, Mj, P, dj, kk0, ntr_min, depth_min)
+                        if d2 > bd2:
+                            bd2, kb, gA, gB = d2, kk0, A, B
+                    if bd2 > dchi2[p]:
+                        dchi2[p] = bd2
+                        best_k0[p] = kb * m
+                        best_j[p] = j
+                        best_A[p] = gA
+                        best_B[p] = gB
+    return dchi2, best_k0, best_j, best_A, best_B, np.zeros(NP)
+
+
 def template_table(samples=1024):
     """TLS default transit shape: 0 at the edges, 1 at the bottom."""
     return 1.0 - reference_transit(

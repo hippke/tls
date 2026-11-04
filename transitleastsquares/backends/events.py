@@ -163,7 +163,7 @@ class EventsBackend(SearchBackend):
     name = "events"
     exact = False
     same_statistic = False  # least-squares depth on its own grids, not TLS's statistic
-    fold = "blocked"  # or "ffa", "ffa-screen" (gp.fold_ffa); environment override TLS_EVENTS_FOLD
+    fold = "blocked"  # or "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse" (gp.fold_ffa); env TLS_EVENTS_FOLD
 
     def search(self, problem, periods, use_threads=1, progress=None):
         from transitleastsquares.gp.events import compact_offsets
@@ -229,10 +229,11 @@ class EventsBackend(SearchBackend):
             fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
             if fold == "blocked":
                 fold_fn, kw = multiple_events_blocked, {}
-            elif fold in ("ffa", "ffa-screen"):
+            elif fold.startswith("ffa"):
                 from transitleastsquares.gp.fold_ffa import fold_ffa as fold_fn
+                from transitleastsquares.gp.fold_ffa import fold_options
 
-                kw = dict(screen=fold == "ffa-screen")
+                kw = fold_options(fold)
             else:
                 raise ValueError(f"unknown events fold {fold!r}")
             dchi2, _, jb, bA, bB, _ = fold_fn(

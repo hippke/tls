@@ -32,7 +32,7 @@ import time
 import numba
 import numpy as np
 
-from transitleastsquares.gp.events import multiple_events_blocked
+from transitleastsquares.gp.events import exact_path, multiple_events_blocked, multiple_events_blocked_coarse
 
 POLISH_R = 2  # exact epochs on each side of the FFA's best epoch
 REFINE_R = 3  # screen: epochs on each side of the mapped best transit time
@@ -225,29 +225,6 @@ def _ffa(ab, o, Mj, m, p, buf0, buf1, need, toff, tcnt, ops, poff, psh, pst, pk)
 
 
 @numba.njit(cache=True, nogil=True)
-def exact_path(ab, o, Mj, P, dj, kk0, ntr_min, depth_min):
-    """Brute-force path of epoch kk0 (duration rows ab[o:o + Mj], epoch step
-    dj), as multiple_events_blocked (same rounding of n P / dj, same order of
-    the sums): (dchi2 or 0, A, B)."""
-    A = 0.0
-    B = 0.0
-    cnt = 0
-    nn = 0
-    while True:
-        kk = kk0 + int(round(nn * P / dj))
-        if kk >= Mj:
-            break
-        bb = ab[o + kk, 1]
-        A += ab[o + kk, 0]
-        B += bb
-        cnt += bb > 0
-        nn += 1
-    if cnt < ntr_min or B <= 0 or A <= 0 or A < depth_min * B:
-        return 0.0, A, B
-    return A * A / B, A, B
-
-
-@numba.njit(cache=True, nogil=True)
 def _local(ab, o, Mj, P, dj, center, r, ntr_min, depth_min):
     """Best exact path within +- r epochs of center (wrapped into the period)."""
     nph = max(1, int(P / dj))
@@ -374,10 +351,13 @@ def plan_blocks(Mj, dj, periods, jlo, jhi, screen):
 
 
 def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk, depth_min=0.0,
-             polish_r=POLISH_R, screen=False, refine_r=REFINE_R, stats=None):
+             polish_r=POLISH_R, screen=False, refine_r=REFINE_R, coarse=1, stats=None):
     """Drop-in for multiple_events_blocked (same arguments and outputs:
     dchi2, best epoch on the full grid, best duration, sums A and B, zeros);
     approximate, every value an exact brute-force fold value (module doc).
+    coarse: > 1 folds the brute-force part on every coarse-th epoch with
+    exact refinement around the best (PERF_PLAN item 12,
+    multiple_events_blocked_coarse).
     stats: optional dict, filled with the cell counts (brute, FFA, polish) and
     the wall time per stage (t_plan, t_brute, t_ffa, t_screen)."""
     clock = [time.perf_counter()]
@@ -395,9 +375,14 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
     dj = mstep * delta
     jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, screen)
     lap("t_plan")
-    dchi2, best_k0, best_j, best_A, best_B, ntrials = multiple_events_blocked(
-        ab, off, M, periods, delta, mstep, jlo, jb_hi, ntr_min, gstart, chunk, depth_min,
-        jhi if screen else None)
+    if coarse > 1:
+        dchi2, best_k0, best_j, best_A, best_B, ntrials = multiple_events_blocked_coarse(
+            ab, off, M, periods, delta, mstep, jlo, jb_hi, ntr_min, gstart, chunk, depth_min,
+            jhi if screen else None, int(coarse))
+    else:
+        dchi2, best_k0, best_j, best_A, best_B, ntrials = multiple_events_blocked(
+            ab, off, M, periods, delta, mstep, jlo, jb_hi, ntr_min, gstart, chunk, depth_min,
+            jhi if screen else None)
     lap("t_brute")
     if blocks:
         t_j = np.array([b[0] for b in blocks], np.int64)
@@ -424,10 +409,21 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
     if stats is not None:
         ntr = Mj[None, :] * dj[None, :] / periods[:, None]
         jj = np.arange(len(Mj))[None, :]
-        brute_cells = float(np.sum(np.where((jj >= jlo[:, None]) & (jj <= jb_hi[:, None]), Mj[None, :], 0)))
+        brute_cells = float(np.sum(np.where((jj >= jlo[:, None]) & (jj <= jb_hi[:, None]), Mj[None, :], 0))) / coarse
         ffa_cells = float(sum(Mj[j] * math.ceil(math.log2(max(-(-Mj[j] // p), 2))) for j, p, _ in blocks))
         polish_cells = float(sum((2 * polish_r + 1) * ntr[q, j].sum() for j, _, q in blocks))
         full = float(np.sum(np.where((jj >= jlo[:, None]) & (jj <= jhi[:, None]), Mj[None, :], 0)))
         stats.update(cells_full_brute=full, cells_brute=brute_cells, cells_ffa=ffa_cells,
                      cells_polish=polish_cells, blocks=len(blocks))
     return dchi2, best_k0, best_j, best_A, best_B, ntrials
+
+
+def fold_options(fold):
+    """keyword arguments of fold_ffa for a fold name ("ffa", "ffa-screen",
+    "ffa-coarse", "ffa-screen-coarse")."""
+    if fold not in FOLD_NAMES:
+        raise ValueError(f"unknown fold {fold!r}; one of {FOLD_NAMES}")
+    return dict(screen="screen" in fold, coarse=2 if "coarse" in fold else 1)
+
+
+FOLD_NAMES = ("ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse")

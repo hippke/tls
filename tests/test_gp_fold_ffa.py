@@ -92,36 +92,49 @@ def _check_exact(ab, off, periods, delta, mstep, res, ntr_min, depth_min):
         assert (g, a, b) == (dchi2[q], A[q], B[q])
 
 
-@pytest.mark.parametrize("screen", [False, True])
+@pytest.mark.parametrize("screen,coarse", [(False, 1), (True, 1), (False, 2), (True, 2)])
 @pytest.mark.parametrize("ntr_min,depth_min", [(2, 0.0), (3, 0.05)])
-def test_fold_ffa_bounded_and_exact(screen, ntr_min, depth_min):
+def test_fold_ffa_bounded_and_exact(screen, coarse, ntr_min, depth_min):
     ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(0)
     gstart = fold_groups(periods, delta)
     ref = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, 997, depth_min)
     stats = {}
     new = ff.fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, 997, depth_min,
-                      screen=screen, stats=stats)
+                      screen=screen, coarse=coarse, stats=stats)
     assert stats["blocks"] > 50  # the FFA is used
     assert stats["cells_ffa"] + stats["cells_brute"] + stats["cells_polish"] < 0.6 * stats["cells_full_brute"]  # ~2x
     assert np.all(new[0] <= ref[0])
     _check_exact(ab, off, periods, delta, mstep, new, ntr_min, depth_min)
-    if not screen:  # the screen assumes correlated neighbouring durations (real data), not this noise
+    if not screen and coarse == 1:  # screen/coarse assume correlated neighbours (real data), not this noise
         # on pure noise the FFA often finds the brute-force maximum, but not always
         assert np.mean(new[0] == ref[0]) > 0.3
         assert np.median(new[0] / np.where(ref[0] > 0, ref[0], 1)) > 0.97
 
 
-@pytest.mark.parametrize("screen", [False, True])
+@pytest.mark.parametrize("screen,coarse", [(False, 1), (True, 1), (True, 2)])
 @pytest.mark.parametrize("P", [0.9137, 2.3456, 7.01])
-def test_fold_ffa_finds_signal(screen, P):
+def test_fold_ffa_finds_signal(screen, coarse, P):
     ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(1, signal=(P, 0.37, 3.0, 3))
     gstart = fold_groups(periods, delta)
     ref = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997)
-    new = ff.fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, screen=screen)
+    new = ff.fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, screen=screen, coarse=coarse)
     i = np.argmax(ref[0])
     assert abs(periods[i] / P - 1) < 0.01
     assert np.argmax(new[0]) == i
     assert new[0][i] == ref[0][i]  # at the signal's period the brute-force maximum
+
+
+@pytest.mark.parametrize("screen", [False, True])
+def test_coarse_kernel_with_step_1_is_the_blocked_kernel(screen):
+    from transitleastsquares.gp.events import multiple_events_blocked_coarse
+
+    ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(3, NP=800)
+    gstart = fold_groups(periods, delta)
+    sh = jhi if screen else None
+    ref = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05, sh)
+    new = multiple_events_blocked_coarse(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05, sh, 1)
+    for i in range(5):
+        np.testing.assert_array_equal(new[i], ref[i])
 
 
 def test_fold_ffa_without_blocks_is_the_brute_force(monkeypatch):
@@ -143,7 +156,7 @@ def test_gp_search_fold_ffa():
     t, f, e = synthetic(days=120.0, seed=5)
     kw = dict(baseline=ROT_SYN, period_min=0.5, period_max=20.0)
     ref = gp.search(t, f, e, **kw)
-    for fold in ("ffa", "ffa-screen"):
+    for fold in ("ffa", "ffa-screen", "ffa-screen-coarse"):
         new = gp.search(t, f, e, fold=fold, **kw)
         assert new.period == ref.period
         assert new.T0 == ref.T0 and new.duration == ref.duration
@@ -166,3 +179,19 @@ def test_events_ffa_backend():
     assert abs(ref.period / 1.7321 - 1) < 1e-3
     assert new.period == ref.period and new.SDE > 0.97 * ref.SDE
     assert np.all(np.asarray(new.chi2) >= np.asarray(ref.chi2))
+
+
+def test_gp_search_bin_fraction():
+    """bin_fraction (approximate, opt-in): weighted bins keep the signal at a
+    short cadence; same best period, values close to the unbinned search."""
+    from gp_cases import ROT_SYN, synthetic
+    from transitleastsquares.gp.core import _search
+
+    t, f, e = synthetic(days=20.0, seed=7, cadence=25 / 86400)
+    model = ROT_SYN._model(t, e)
+    ref = _search(t, f, e, model, period_min=1.0, period_max=8.0)
+    new = _search(t, f, e, model, period_min=1.0, period_max=8.0, bin_fraction=1 / 30)
+    assert new["period"] == ref["period"]
+    assert abs(new["snr"] / ref["snr"] - 1) < 0.02
+    ok = ref["dchi2"] > 0
+    assert np.median(np.sqrt(new["dchi2"][ok] / ref["dchi2"][ok])) > 0.99

@@ -88,6 +88,7 @@ def search(
     depth_prior=0.02,
     fold="blocked",
     device="cpu",
+    bin_fraction=None,
     use_threads=None,
     timings=None,
 ):
@@ -115,10 +116,15 @@ def search(
     fold: the period fold of the single events: "blocked" (default, every
         epoch of every period), "ffa" (FFA + polish, approximate: faster on
         long light curves, every value an exact "blocked" value, never above
-        it; see gp.fold_ffa) or "ffa-screen" (also the duration screen).
+        it; see gp.fold_ffa), "ffa-screen" (also the duration screen),
+        "ffa-coarse" (coarse epochs in the brute-force part) or
+        "ffa-screen-coarse" (both).
         Bayes factors always use the full fold.
     device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold;
         needs numba-cuda; see transitleastsquares.gpu).
+    bin_fraction: None (default) or e.g. 1/30: the single events of a
+        duration D use data binned to <= bin_fraction D (approximate;
+        faster for short cadences).
     use_threads: numba threads for the fit and the search (default: numba's
         current setting).
     timings: optional dict, filled with the wall time per stage.
@@ -150,7 +156,7 @@ def search(
             period_min=period_min, period_max=period_max, oversampling_factor=oversampling_factor,
             duration_grid_step=duration_grid_step, t0_step=t0_step, t0_step_duration=t0_step_duration,
             depth_prior=depth_prior, n_transits_min=n_transits_min, bayes_factor=bayes_factor,
-            fold=fold, device=device, timings=timings,
+            fold=fold, device=device, bin_fraction=bin_fraction, timings=timings,
         )
     finally:
         numba.set_num_threads(old)

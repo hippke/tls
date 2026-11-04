@@ -20,12 +20,43 @@ from transitleastsquares.gp.events import (
     tail_operators,
     template_table,
 )
-from transitleastsquares.gp.fold_ffa import fold_ffa
+from transitleastsquares.gp.fold_ffa import fold_ffa, fold_options
 from transitleastsquares.gp.statespace import kalman_whiten, n_segments, smoothed_mean, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
-FOLDS = ("blocked", "ffa", "ffa-screen")
+FOLDS = ("blocked", "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse")
+
+
+def _single_strided(single, t, y, R, ey, eyd, A, K, S, W, w, model, nseg, tc, durs, table, texp, nsub, mstep, off):
+    """Compact single events of the durations durs on the series t (Kalman or split)."""
+    if single == "split":
+        kinds, starts, pars, P0 = model.blocks()
+        z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
+        return single_events_split(t, z, eyd, A, K, S, model.H, W, tc, durs, table, texp, nsub, mstep, off)
+    return single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
+
+
+def _binned_passes(t, y, yerr, model, width, nseg):
+    """The light curve in bins of width (days) and its search passes: (t, y,
+    R, ey, eyd, A, K, S, W, w) as in _search. Inverse-variance weighted means
+    (weights 1 / (yerr^2 + jitter^2)), bin variance 1 / sum of the weights:
+    no information is lost for white noise and a template constant within
+    the bin (an unweighted mean loses several % for unequal errors)."""
+    wt = 1.0 / (yerr**2 + model.jitter**2)
+    k = np.floor((t - t[0]) / width).astype(np.int64)
+    _, idx = np.unique(k, return_index=True)
+    sw = np.add.reduceat(wt, idx)
+    tb = np.add.reduceat(wt * t, idx) / sw
+    yb = np.add.reduceat(wt * y, idx) / sw
+    Rb = 1.0 / sw
+    kinds, starts, pars, P0 = model.blocks()
+    Ab = transition_matrices(tb, kinds, starts, pars, model.dim)
+    Kb, Sb, eyb = kalman_whiten(tb, yb, Rb, kinds, starts, pars, P0, nseg)
+    eydb = eyb[:model.n_diffuse].copy()
+    eyb[:model.n_diffuse] = 0.0
+    Wb, wb = tail_operators(Ab, Kb, Sb, model.H, eyb, nseg)
+    return tb, yb, Rb, eyb, eydb, Ab, Kb, Sb, Wb, wb
 
 
 class _Clock:
@@ -60,6 +91,7 @@ def _search(
     fold="blocked",
     single="kalman",
     device="cpu",
+    bin_fraction=None,
     timings=None,
 ):
     """Periodic transit search with the GP baseline marginalised.
@@ -72,8 +104,10 @@ def _search(
     max(t0_step, t0_step_duration * D), rounded down to a multiple of t0_step
     (default 0.1: 2.2x faster, recovery unchanged in the K2-25 injection
     test); None for the uniform grid.
-    fold: "blocked", "ffa" or "ffa-screen" (gp.fold_ffa; not with Bayes
-    factors or the uniform T0 grid, which use the full fold).
+    fold: "blocked", or FFA + polish "ffa", with the duration screen
+    "ffa-screen", with coarse epochs in the brute-force part "ffa-coarse",
+    or both "ffa-screen-coarse" (gp.fold_ffa; not with Bayes factors or the
+    uniform T0 grid, which use the full fold).
     timings: optional dict, filled with the wall time of each stage.
     single: single events by the Kalman filter over each template ("kalman")
     or through C^-1 y = N^-1 (y - f) ("split": the numerator from the
@@ -82,14 +116,18 @@ def _search(
     device: "cpu", or "gpu" (transitleastsquares.gpu: the split single
     events and the fold ("blocked" or "ffa") in FP32 on a CUDA device; the
     Kalman passes and the smoother stay on the CPU in FP64; not with Bayes
-    factors or the uniform T0 grid)."""
+    factors or the uniform T0 grid).
+    bin_fraction: None (default), or the single events of duration D use the
+    data binned to the largest power-of-two multiple k of the cadence with
+    k cadence <= bin_fraction D (approximate: the GP on bin means, the
+    template averaged over the bin; e.g. 1/30). Strided T0 grid, CPU only."""
     if fold not in FOLDS:
         raise ValueError(f"fold must be one of {FOLDS}")
     if single not in ("kalman", "split"):
         raise ValueError('single must be "kalman" or "split"')
     if device not in ("cpu", "gpu"):
         raise ValueError('device must be "cpu" or "gpu"')
-    if device == "gpu" and (bayes_factor or t0_step_duration is None or fold == "ffa-screen"):
+    if device == "gpu" and (bayes_factor or t0_step_duration is None or fold not in ("blocked", "ffa")):
         raise ValueError('device="gpu" needs the strided T0 grid, no Bayes factors, fold "blocked" or "ffa"')
     clock = _Clock(timings)
     t = np.asarray(t, float)
@@ -145,11 +183,27 @@ def _search(
                                        mstep, off)
     elif strided:  # compact layout: per duration only the epochs it uses
         off = compact_offsets(len(tc), mstep)
-        if single == "split":
-            z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
-            ab = single_events_split(t, z, eyd, A, K, S, model.H, W, tc, durs, table, texp, nsub, mstep, off)
+        kbin = np.ones(len(durs), np.int64)
+        if bin_fraction is not None:
+            kmax = np.floor(bin_fraction * durs / cad)
+            kbin = np.where(kmax >= 2, 2 ** np.floor(np.log2(np.maximum(kmax, 1))), 1).astype(np.int64)
+        if np.all(kbin == 1):
+            ab = _single_strided(single, t, y, R, ey, eyd, A, K, S, W, w, model, nseg, tc, durs, table, texp, nsub,
+                                 mstep, off)
         else:
-            ab = single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
+            ab = np.zeros((off[-1], 2))
+            for k in np.unique(kbin):
+                js = np.nonzero(kbin == k)[0]
+                if k == 1:
+                    args = (t, y, R, ey, eyd, A, K, S, W, w, texp)
+                else:
+                    args = _binned_passes(t, y, yerr, model, k * cad, nseg) + (k * cad,)
+                sub_off = compact_offsets(len(tc), mstep[js])
+                tb, yb, Rb, eyb, eydb, Ab, Kb, Sb, Wb, wb, texpb = args
+                sub = _single_strided(single, tb, yb, Rb, eyb, eydb, Ab, Kb, Sb, Wb, wb, model, nseg, tc, durs[js],
+                                      table, texpb, nsub, mstep[js], sub_off)
+                for q, j in enumerate(js):
+                    ab[off[j]:off[j + 1]] = sub[sub_off[q]:sub_off[q + 1]]
     else:
         ab = single_events(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub)
     clock("single_events")
@@ -172,7 +226,7 @@ def _search(
         )
     else:  # identical results, cache-blocked (see multiple_events_blocked); or FFA + polish
         fold_fn = multiple_events_blocked if fold == "blocked" else fold_ffa
-        kw = {} if fold == "blocked" else dict(screen=fold == "ffa-screen")
+        kw = {} if fold == "blocked" else fold_options(fold)
         dchi2, k0, jb, bA, bB, ntrials = fold_fn(
             ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
             fold_groups(periods, delta), FOLD_CHUNK, **kw,
