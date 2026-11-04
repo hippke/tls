@@ -122,6 +122,7 @@ class transitleastsquares:
             M_star_min=m_short,
             M_star_max=m_long,
             T0_search_margin=self.T0_search_margin,
+            n_transits_min=self.n_transits_min,
         )
 
     def _search_plan(self, backend, periods, lc_cache_overview, lc_arr):

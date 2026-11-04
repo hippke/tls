@@ -40,6 +40,9 @@ class SearchProblem:
                         R_star_max (longest); from grid.duration_limit_masses,
                         *not* the user's mass interval (BUGS.md F1)
     T0_search_margin    phase-shift margin during the search (fraction of width)
+    n_transits_min      the user's minimum number of transits with data (used by
+                        the "events" backend; the default backends apply it
+                        after the search, as before)
     """
 
     t: numpy.ndarray
@@ -53,6 +56,7 @@ class SearchProblem:
     M_star_min: float
     M_star_max: float
     T0_search_margin: float
+    n_transits_min: int = tls_constants.N_TRANSITS_MIN
 
 
 @dataclass

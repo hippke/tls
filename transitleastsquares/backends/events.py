@@ -17,7 +17,7 @@ Differences to the TLS statistic (approximate backend):
 * trial durations are a log grid in days (step duration_grid_step = 1.1)
   within the same stellar limits, mapped to the nearest TLS template row for
   the result; T0 on the grid above (TLS: every folded point, coarsened);
-* a period needs >= N_TRANSITS_MIN transits with data;
+* a period needs >= n_transits_min transits with data (the user's value);
 * depths below transit_depth_min are not fit (as in TLS).
 The final T0 fit and all statistics are TLS's own, on the unbinned data.
 """
@@ -188,7 +188,7 @@ class EventsBackend(SearchBackend):
             # cache-blocked fold, identical to fold_events (gp.events.multiple_events_blocked)
             dchi2, _, jb, bA, bB, _ = multiple_events_blocked(
                 ab, off, len(tc), periods, delta, mstep, jlo, jhi,
-                tls_constants.N_TRANSITS_MIN, fold_groups(periods, delta), FOLD_CHUNK,
+                int(p.n_transits_min), fold_groups(periods, delta), FOLD_CHUNK,
                 max(float(p.transit_depth_min), 0.0),
             )
         finally:

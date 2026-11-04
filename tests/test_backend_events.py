@@ -92,3 +92,18 @@ def test_no_fit_below_depth_minimum():
         r = transitleastsquares(t, numpy.ones(len(t)) + 1e-9 * numpy.sin(t), dy, verbose=False).power(
             backend="events", use_threads=1, show_progress_bar=False, verbose=False, transit_depth_min=1e-3)
     assert numpy.isnan(r.period)
+
+
+def test_events_uses_user_n_transits_min():
+    """The events backend applies the user's n_transits_min (a single transit
+    is found with n_transits_min=1)."""
+    rng = numpy.random.default_rng(3)
+    t = numpy.arange(0, 40, 0.01)
+    y = 1 + rng.normal(0, 2e-4, len(t))
+    y[numpy.abs(t - 23.0) < 0.1] -= 3e-3  # one transit
+    from transitleastsquares import transitleastsquares
+
+    r = transitleastsquares(t, y, numpy.full(len(t), 2e-4)).power(
+        backend="events", n_transits_min=1, use_threads=1, show_progress_bar=False, verbose=False,
+        period_min=5, period_max=39)
+    assert numpy.min(numpy.abs(numpy.asarray(r.transit_times) - 23.0)) < 0.1
