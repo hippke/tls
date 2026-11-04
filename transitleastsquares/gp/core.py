@@ -8,7 +8,10 @@ import numpy as np
 
 from transitleastsquares import tls_constants
 from transitleastsquares.gp.events import (
+    FOLD_CHUNK,
     compact_offsets,
+    fold_groups,
+    multiple_events_blocked,
     multiple_events,
     multiple_events_strided,
     single_events,
@@ -119,11 +122,17 @@ def _search(
             ab, periods, delta, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
             bayes_factor,
         )
-    else:
+    elif bayes_factor:
         dchi2, k0, jb, bA, bB, lse, ntrials = multiple_events_strided(
             ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
             bayes_factor,
         )
+    else:  # identical results, cache-blocked (see multiple_events_blocked)
+        dchi2, k0, jb, bA, bB, ntrials = multiple_events_blocked(
+            ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
+            fold_groups(periods, delta), FOLD_CHUNK,
+        )
+        lse = None
     clock("multiple_events")
     chi2 = chi2_0 - dchi2
     SR, power_raw, power, SDE_raw, SDE = spectra(chi2, oversampling_factor, periods=periods)
