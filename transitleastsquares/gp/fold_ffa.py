@@ -351,10 +351,12 @@ def plan_blocks(Mj, dj, periods, jlo, jhi, screen):
 
 
 def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk, depth_min=0.0,
-             polish_r=POLISH_R, screen=False, refine_r=REFINE_R, coarse=1, stats=None):
+             polish_r=POLISH_R, screen=False, refine_r=REFINE_R, coarse=1, ffa=True, stats=None):
     """Drop-in for multiple_events_blocked (same arguments and outputs:
     dchi2, best epoch on the full grid, best duration, sums A and B, zeros);
     approximate, every value an exact brute-force fold value (module doc).
+    ffa: False folds everything brute-force (with screen / coarse: the
+    "blocked-..." folds).
     coarse: > 1 folds the brute-force part on every coarse-th epoch with
     exact refinement around the best (PERF_PLAN item 12,
     multiple_events_blocked_coarse).
@@ -373,7 +375,10 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
     jhi = np.asarray(jhi, np.int64)
     Mj = np.diff(off)
     dj = mstep * delta
-    jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, screen)
+    if ffa:
+        jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, screen)
+    else:
+        jb_hi, blocks = jhi, []
     lap("t_plan")
     if coarse > 1:
         dchi2, best_k0, best_j, best_A, best_B, ntrials = multiple_events_blocked_coarse(
@@ -419,11 +424,14 @@ def fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk
 
 
 def fold_options(fold):
-    """keyword arguments of fold_ffa for a fold name ("ffa", "ffa-screen",
-    "ffa-coarse", "ffa-screen-coarse")."""
-    if fold not in FOLD_NAMES:
-        raise ValueError(f"unknown fold {fold!r}; one of {FOLD_NAMES}")
-    return dict(screen="screen" in fold, coarse=2 if "coarse" in fold else 1)
+    """Keyword arguments of fold_ffa (and gpu.driver.fold) for a fold name:
+    "ffa" or "blocked", optionally with "-screen" (duration screen) and/or
+    "-coarse" (coarse epochs in the brute-force part); "blocked" alone is
+    multiple_events_blocked itself."""
+    if fold not in FOLD_NAMES and fold != "blocked":
+        raise ValueError(f"unknown fold {fold!r}; one of {('blocked',) + FOLD_NAMES}")
+    return dict(ffa=fold.startswith("ffa"), screen="screen" in fold, coarse=2 if "coarse" in fold else 1)
 
 
-FOLD_NAMES = ("ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse")
+FOLD_NAMES = ("ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse",
+              "blocked-screen", "blocked-coarse", "blocked-screen-coarse")

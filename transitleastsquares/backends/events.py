@@ -229,7 +229,7 @@ class EventsBackend(SearchBackend):
             fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
             if fold == "blocked":
                 fold_fn, kw = multiple_events_blocked, {}
-            elif fold.startswith("ffa"):
+            elif fold.startswith("ffa") or fold.startswith("blocked-"):
                 from transitleastsquares.gp.fold_ffa import fold_ffa as fold_fn
                 from transitleastsquares.gp.fold_ffa import fold_options
 
@@ -268,10 +268,10 @@ class EventsGPUBackend(EventsBackend):
         from transitleastsquares.gp.events import template_table
         from transitleastsquares.gpu import driver
 
+        from transitleastsquares.gp.fold_ffa import fold_options
+
         fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
-        if fold not in ("blocked", "ffa"):
-            raise ValueError(f"events-gpu: fold must be 'blocked' or 'ffa', not {fold!r}")
         d_ab = driver.single_events_white(t, r, w, tc[0], delta, durs, nsubs, template_table(), texp, mstep, off)
         dchi2, _, jb, bA, bB, _ = driver.fold(d_ab, off, len(tc), periods, delta, mstep, jlo, jhi, ntr_min,
-                                              depth_min, ffa=fold == "ffa")
+                                              depth_min, **fold_options(fold))
         return dchi2, jb, bA, bB

@@ -7,7 +7,7 @@ import functools
 import numpy as np
 from numba import cuda
 
-from transitleastsquares.gp.fold_ffa import POLISH_R, flat_plan, plan_blocks
+from transitleastsquares.gp.fold_ffa import POLISH_R, REFINE_R, flat_plan, plan_blocks
 from transitleastsquares.gpu import kernels as K
 
 THREADS = 128  # = kernels.FOLD_THREADS
@@ -90,9 +90,10 @@ def _first_max(q, g, cols):
 
 
 def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, ffa=True, polish_r=POLISH_R,
-         stats=None):
-    """multiple_events_blocked (ffa=False) or gp.fold_ffa.fold_ffa (ffa=True,
-    without the duration screen) on the GPU. d_ab: device array of the single
+         screen=False, coarse=1, refine_r=REFINE_R, stats=None):
+    """multiple_events_blocked (ffa=False) or gp.fold_ffa.fold_ffa (ffa=True)
+    on the GPU, with the same options (screen: duration screen; coarse:
+    coarse epochs in the brute-force part). d_ab: device array of the single
     events (FP32). Returns dchi2, best epoch (full grid), best duration, sums
     A and B, zeros (host arrays)."""
     periods = np.ascontiguousarray(periods, float)
@@ -102,7 +103,7 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
     Mj = np.diff(off)
     dj = mstep * delta
     if ffa:
-        jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, False)
+        jb_hi, blocks = plan_blocks(Mj, dj, periods, jlo, jhi, screen)
     else:
         jb_hi, blocks = jhi, []
     d_off = cuda.to_device(np.asarray(off, np.int64))
@@ -115,12 +116,15 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
     n_pair = np.maximum(jb_hi - jlo + 1, 0)
     if n_pair.sum() > 0:
         jj = np.arange(len(Mj))[:, None]
-        pj, pq = np.nonzero((jj >= jlo[None, :]) & (jj <= jb_hi[None, :]))
+        sel = (jj >= jlo[None, :]) & (jj <= jb_hi[None, :])
+        if screen:  # even durations and each period's shortest and longest
+            sel &= (jj % 2 == 0) | (jj == jlo[None, :]) | (jj == jhi[None, :])
+        pj, pq = np.nonzero(sel)
         n = len(pq)
         out = [cuda.device_array(n, np.float32) for _ in range(3)] + [cuda.device_array(n, np.int32)]
         K.fold_brute[n, THREADS](d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta), d_periods,
-                                 cuda.to_device(pq.astype(np.int32)),
-                                 cuda.to_device(pj.astype(np.int32)), int(ntr_min), np.float32(depth_min), *out)
+                                 cuda.to_device(pq.astype(np.int32)), cuda.to_device(pj.astype(np.int32)),
+                                 int(ntr_min), np.float32(depth_min), int(coarse), *out)
         g, A, B, k = (x.copy_to_host() for x in out)
         cand.append((pq, g, pj, k, A, B))
 
@@ -168,6 +172,28 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
         best_k0[qs] = k[sel].astype(np.int64) * mstep[j[sel]]
         best_A[qs] = A[sel]
         best_B[qs] = B[sel]
+    if screen:  # neighbours of the best duration, locally around its best epoch (as fold_ffa)
+        for dn in (-1, 1):
+            jn = best_j + dn
+            ok = (dchi2 > 0) & (jn >= jlo) & (jn <= jhi) & ~((jn % 2 == 0) | (jn == jlo) | (jn == jhi))
+            tq = np.nonzero(ok)[0]
+            if len(tq) == 0:
+                continue
+            tj = jn[tq]
+            center = np.round(best_k0[tq] / mstep[tj]).astype(np.int64)
+            out = [cuda.device_array(len(tq), np.float32) for _ in range(3)] + [cuda.device_array(len(tq), np.int32)]
+            K.refine_local[len(tq), THREADS](d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta),
+                                             d_periods, cuda.to_device(tq.astype(np.int32)),
+                                             cuda.to_device(tj.astype(np.int32)), cuda.to_device(center),
+                                             int(refine_r), int(ntr_min), np.float32(depth_min), *out)
+            g, A, B, k = (x.copy_to_host() for x in out)
+            better = g.astype(float) > dchi2[tq]
+            q = tq[better]
+            dchi2[q] = g[better]
+            best_j[q] = tj[better]
+            best_k0[q] = k[better].astype(np.int64) * mstep[tj[better]]
+            best_A[q] = A[better]
+            best_B[q] = B[better]
     return dchi2, best_k0, best_j, best_A, best_B, np.zeros(NP)
 
 

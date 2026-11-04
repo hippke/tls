@@ -85,27 +85,32 @@ def _fold_inputs():
     return ab.astype(np.float32).astype(float), off, M, periods, delta, mstep, jlo, jhi
 
 
-@pytest.mark.parametrize("ffa", [False, True])
-def test_fold_gpu(ffa):
+@pytest.mark.parametrize("fold", ["blocked", "ffa", "blocked-screen-coarse", "ffa-screen-coarse", "blocked-coarse"])
+def test_fold_gpu(fold):
     from numba import cuda
     from transitleastsquares.gp.events import fold_groups, multiple_events_blocked
-    from transitleastsquares.gp.fold_ffa import fold_ffa
+    from transitleastsquares.gp.fold_ffa import fold_ffa, fold_options
     from transitleastsquares.gpu import driver
 
     ab, off, M, periods, delta, mstep, jlo, jhi = _fold_inputs()
     gstart = fold_groups(periods, delta)
-    if ffa:
-        ref = fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05)
+    opt = fold_options(fold)
+    if fold != "blocked":
+        ref = fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05, **opt)
     else:
         ref = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05)
     d_ab = cuda.to_device(ab.astype(np.float32))
-    new = driver.fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, 2, 0.05, ffa=ffa)
-    np.testing.assert_allclose(new[0], ref[0], rtol=1e-4, atol=1e-4)
+    new = driver.fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, 2, 0.05, **opt)
+    close = np.isclose(new[0], ref[0], rtol=1e-4, atol=1e-4)
+    if opt["screen"]:  # FP32 vs FP64 may pick another scout in a near-tie, then refine another neighbour
+        assert close.mean() > 0.995
+    else:
+        assert close.all()
     same = (new[1] == ref[1]) & (new[2] == ref[2])
-    print("ffa" if ffa else "brute", "same best epoch and duration:", same.mean())
+    print(fold, "same best epoch and duration:", same.mean(), "values within 1e-4:", close.mean())
     assert same.mean() > 0.99
     assert np.argmax(new[0]) == np.argmax(ref[0])
-    if ffa:  # every value an exact (FP32) brute-force value: never above the brute fold
+    if fold != "blocked":  # every value an exact (FP32) brute-force value: never above the brute fold
         brute = driver.fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, 2, 0.05, ffa=False)
         assert np.all(new[0] <= brute[0] * (1 + 1e-6) + 1e-6)
 

@@ -118,9 +118,10 @@ def search(
     fold: the period fold of the single events: "blocked" (default, every
         epoch of every period), "ffa" (FFA + polish, approximate: faster on
         long light curves, every value an exact "blocked" value, never above
-        it; see gp.fold_ffa), "ffa-screen" (also the duration screen),
-        "ffa-coarse" (coarse epochs in the brute-force part) or
-        "ffa-screen-coarse" (both).
+        it; see gp.fold_ffa), with "-screen" (duration screen) and/or
+        "-coarse" (coarse epochs): e.g. "ffa-screen-coarse", or the same
+        options without the FFA: "blocked-screen-coarse" (the fast choice
+        on the GPU, where the FFA does not pay).
         Bayes factors always use the full fold.
     device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold;
         needs numba-cuda; see transitleastsquares.gpu).

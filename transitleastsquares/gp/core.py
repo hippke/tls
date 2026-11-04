@@ -21,12 +21,12 @@ from transitleastsquares.gp.events import (
     tail_operators,
     template_table,
 )
-from transitleastsquares.gp.fold_ffa import fold_ffa, fold_options
+from transitleastsquares.gp.fold_ffa import FOLD_NAMES, fold_ffa, fold_options
 from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
-FOLDS = ("blocked", "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse")
+FOLDS = ("blocked",) + FOLD_NAMES
 
 
 def _single_strided(single, t, y, R, ey, eyd, A, K, S, W, w, model, nseg, tc, durs, table, texp, nsub, mstep, off):
@@ -104,10 +104,11 @@ def _search(
     max(t0_step, t0_step_duration * D), rounded down to a multiple of t0_step
     (default 0.1: 2.2x faster, recovery unchanged in the K2-25 injection
     test); None for the uniform grid.
-    fold: "blocked", or FFA + polish "ffa", with the duration screen
-    "ffa-screen", with coarse epochs in the brute-force part "ffa-coarse",
-    or both "ffa-screen-coarse" (gp.fold_ffa; not with Bayes factors or the
-    uniform T0 grid, which use the full fold).
+    fold: "blocked" (full fold), or a name of gp.fold_ffa.FOLD_NAMES: "ffa"
+    (FFA + polish) or "blocked" with "-screen" (duration screen) and/or
+    "-coarse" (coarse epochs in the brute-force part), e.g.
+    "ffa-screen-coarse" (not with Bayes factors or the uniform T0 grid,
+    which use the full fold).
     timings: optional dict, filled with the wall time of each stage.
     single: single events by the Kalman filter over each template ("kalman")
     or split ("split": the numerator as sum s z with z = C^-1 y from the
@@ -128,8 +129,8 @@ def _search(
         raise ValueError('single must be "kalman" or "split"')
     if device not in ("cpu", "gpu"):
         raise ValueError('device must be "cpu" or "gpu"')
-    if device == "gpu" and (bayes_factor or t0_step_duration is None or fold not in ("blocked", "ffa")):
-        raise ValueError('device="gpu" needs the strided T0 grid, no Bayes factors, fold "blocked" or "ffa"')
+    if device == "gpu" and (bayes_factor or t0_step_duration is None):
+        raise ValueError('device="gpu" needs the strided T0 grid and no Bayes factors')
     clock = _Clock(timings)
     t = np.asarray(t, float)
     y = (np.asarray(flux, float) - 1.0) * 1e3
@@ -213,7 +214,7 @@ def _search(
     if device == "gpu":
         dchi2, k0, jb, bA, bB, ntrials = driver.fold(
             d_ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
-            0.0, ffa=fold == "ffa")
+            0.0, **fold_options(fold))
         lse = None
     elif not strided:
         dchi2, k0, jb, bA, bB, lse, ntrials = multiple_events(

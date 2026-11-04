@@ -92,20 +92,21 @@ def _check_exact(ab, off, periods, delta, mstep, res, ntr_min, depth_min):
         assert (g, a, b) == (dchi2[q], A[q], B[q])
 
 
-@pytest.mark.parametrize("screen,coarse", [(False, 1), (True, 1), (False, 2), (True, 2)])
+@pytest.mark.parametrize("screen,coarse,ffa", [(False, 1, True), (True, 1, True), (False, 2, True), (True, 2, True),
+                                               (True, 2, False)])
 @pytest.mark.parametrize("ntr_min,depth_min", [(2, 0.0), (3, 0.05)])
-def test_fold_ffa_bounded_and_exact(screen, coarse, ntr_min, depth_min):
+def test_fold_ffa_bounded_and_exact(screen, coarse, ffa, ntr_min, depth_min):
     ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(0)
     gstart = fold_groups(periods, delta)
     ref = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, 997, depth_min)
     stats = {}
     new = ff.fold_ffa(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, 997, depth_min,
-                      screen=screen, coarse=coarse, stats=stats)
-    assert stats["blocks"] > 50  # the FFA is used
-    assert stats["cells_ffa"] + stats["cells_brute"] + stats["cells_polish"] < 0.6 * stats["cells_full_brute"]  # ~2x
+                      screen=screen, coarse=coarse, ffa=ffa, stats=stats)
+    assert (stats["blocks"] > 50) == ffa  # the FFA is used
+    assert stats["cells_ffa"] + stats["cells_brute"] + stats["cells_polish"] < 0.6 * stats["cells_full_brute"]
     assert np.all(new[0] <= ref[0])
     _check_exact(ab, off, periods, delta, mstep, new, ntr_min, depth_min)
-    if not screen and coarse == 1:  # screen/coarse assume correlated neighbours (real data), not this noise
+    if not screen and coarse == 1 and ffa:  # screen/coarse assume correlated neighbours (real data), not this noise
         # on pure noise the FFA often finds the brute-force maximum, but not always
         assert np.mean(new[0] == ref[0]) > 0.3
         assert np.median(new[0] / np.where(ref[0] > 0, ref[0], 1)) > 0.97
@@ -156,7 +157,7 @@ def test_gp_search_fold_ffa():
     t, f, e = synthetic(days=120.0, seed=5)
     kw = dict(baseline=ROT_SYN, period_min=0.5, period_max=20.0)
     ref = gp.search(t, f, e, **kw)
-    for fold in ("ffa", "ffa-screen", "ffa-screen-coarse"):
+    for fold in ("ffa", "ffa-screen", "ffa-screen-coarse", "blocked-screen-coarse"):
         new = gp.search(t, f, e, fold=fold, **kw)
         assert new.period == ref.period
         assert new.T0 == ref.T0 and new.duration == ref.duration

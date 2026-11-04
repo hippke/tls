@@ -354,12 +354,36 @@ def _reduce_polish(g, A, B, k, d, slot, out_g, out_A, out_B, out_k):
         out_k[slot] = sk[0]
 
 
+@cuda.jit(device=True)
+def _block_best(g, k, sg, sk):
+    """Block-wide best (gain, epoch; ties to the smaller epoch) of the
+    threads' (g, k); every thread returns it."""
+    tid = cuda.threadIdx.x
+    sg[tid] = g
+    sk[tid] = k
+    cuda.syncthreads()
+    step = cuda.blockDim.x // 2
+    while step > 0:
+        if tid < step and _better(sg[tid + step], sk[tid + step], sg[tid], sk[tid]):
+            sg[tid] = sg[tid + step]
+            sk[tid] = sk[tid + step]
+        cuda.syncthreads()
+        step //= 2
+    bg = sg[0]
+    bk = sk[0]
+    cuda.syncthreads()
+    return bg, bk
+
+
 @cuda.jit
-def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_min, out_g, out_A, out_B, out_k):
+def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_min, coarse, out_g, out_A, out_B,
+               out_k):
     """Brute-force fold of (period, duration) pairs, one CUDA block per pair:
     the best epoch over all epochs (as multiple_events_blocked). The single
     events as complex64 (a + i b: one 8-byte load per cell), two epochs per
-    thread (two independent sums in flight)."""
+    thread (two independent sums in flight). coarse > 1: only every
+    coarse-th epoch, then its coarse - 1 neighbours on each side on the
+    exact path (as multiple_events_blocked_coarse)."""
     pr = cuda.blockIdx.x
     if pr >= pair_q.shape[0]:
         return
@@ -372,6 +396,7 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     o = off[j]
     Mj = off[j + 1] - o
     nph = max(1, int32(P / dj))
+    nu = (nph + coarse - 1) // coarse
     ntr = int32(float64(Mj) * dj / P) + 2
     toff = cuda.shared.array(TOFF, int32)
     nsh = min(ntr, TOFF)
@@ -382,9 +407,10 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     bA = F0
     bB = F0
     bk = int32(-1)
-    for k1 in range(tid, nph, 2 * nt):
-        k2 = k1 + nt
-        two = k2 < nph
+    for u1 in range(tid, nu, 2 * nt):
+        k1 = u1 * coarse
+        k2 = (u1 + nt) * coarse
+        two = u1 + nt < nu
         A1 = F0
         B1 = F0
         c1 = 0
@@ -430,4 +456,71 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
             g = A2 * A2 / B2
             if _better(g, k2, bg, bk):
                 bg, bA, bB, bk = g, A2, B2, k2
+    if coarse > 1:  # refine around the best coarse epoch
+        sg = cuda.shared.array(FOLD_THREADS, float32)
+        sk = cuda.shared.array(FOLD_THREADS, int32)
+        cg, ck = _block_best(bg, bk, sg, sk)
+        if ck >= 0 and tid < 2 * (coarse - 1):
+            d = tid - (coarse - 1)
+            if d >= 0:
+                d += 1  # offsets -(c-1) .. -1, 1 .. c-1
+            kk0 = ck + d
+            if 0 <= kk0 < nph:
+                g, A, B = _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min)
+                if _better(g, kk0, bg, bk):
+                    bg, bA, bB, bk = g, A, B, kk0
     _reduce_write(bg, bA, bB, bk, pr, out_g, out_A, out_B, out_k)
+
+
+@cuda.jit(device=True, inline=True)
+def _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min):
+    """Exact path of epoch kk0 on complex64 single events (offsets from the
+    shared table where available)."""
+    A = F0
+    B = F0
+    cnt = 0
+    nn = 0
+    while True:
+        kk = kk0 + (toff[nn] if nn < nsh else _offset(nn, P, dj))
+        if kk >= Mj:
+            break
+        v = abc[o + kk]
+        A += v.real
+        B += v.imag
+        if v.imag > F0:
+            cnt += 1
+        nn += 1
+    if cnt < ntr_min or B <= F0 or A <= F0 or A < depth_min * B:
+        return F0, A, B
+    return A * A / B, A, B
+
+
+@cuda.jit
+def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius, ntr_min, depth_min,
+                 out_g, out_A, out_B, out_k):
+    """Duration screen: exact paths of duration task_j around epoch center
+    (+- radius, wrapped into the period), one CUDA block per task."""
+    w = cuda.blockIdx.x
+    tid = cuda.threadIdx.x
+    q = task_q[w]
+    j = task_j[w]
+    P = periods[q]
+    dj = float64(mstep[j]) * delta
+    o = off[j]
+    Mj = off[j + 1] - o
+    nph = max(1, int32(P / dj))
+    toff = cuda.shared.array(TOFF, int32)
+    ntr = int32(float64(Mj) * dj / P) + 2
+    nsh = min(ntr, TOFF)
+    for nn in range(tid, nsh, cuda.blockDim.x):
+        toff[nn] = _offset(nn, P, dj)
+    cuda.syncthreads()
+    g = F0
+    A = F0
+    B = F0
+    k = int32(-1)
+    if tid < 2 * radius + 1:
+        kk0 = (center[w] + tid - radius) % nph
+        g, A, B = _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min)
+        k = kk0
+    _reduce_write(g, A, B, k, w, out_g, out_A, out_B, out_k)
