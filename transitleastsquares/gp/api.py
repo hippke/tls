@@ -87,6 +87,7 @@ def search(
     bayes_factor=False,
     depth_prior=0.02,
     fold="blocked",
+    device="cpu",
     use_threads=None,
     timings=None,
 ):
@@ -116,6 +117,8 @@ def search(
         long light curves, every value an exact "blocked" value, never above
         it; see gp.fold_ffa) or "ffa-screen" (also the duration screen).
         Bayes factors always use the full fold.
+    device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold;
+        needs numba-cuda; see transitleastsquares.gpu).
     use_threads: numba threads for the fit and the search (default: numba's
         current setting).
     timings: optional dict, filled with the wall time per stage.
@@ -147,7 +150,7 @@ def search(
             period_min=period_min, period_max=period_max, oversampling_factor=oversampling_factor,
             duration_grid_step=duration_grid_step, t0_step=t0_step, t0_step_duration=t0_step_duration,
             depth_prior=depth_prior, n_transits_min=n_transits_min, bayes_factor=bayes_factor,
-            fold=fold, timings=timings,
+            fold=fold, device=device, timings=timings,
         )
     finally:
         numba.set_num_threads(old)

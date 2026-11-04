@@ -59,6 +59,7 @@ def _search(
     bayes_factor=False,
     fold="blocked",
     single="kalman",
+    device="cpu",
     timings=None,
 ):
     """Periodic transit search with the GP baseline marginalised.
@@ -77,11 +78,19 @@ def _search(
     single: single events by the Kalman filter over each template ("kalman")
     or through C^-1 y = N^-1 (y - f) ("split": the numerator from the
     smoother residuals, the denominator from a data-free filter; equal up to
-    rounding, only with the strided T0 grid; gp.events.single_events_split)."""
+    rounding, only with the strided T0 grid; gp.events.single_events_split).
+    device: "cpu", or "gpu" (transitleastsquares.gpu: the split single
+    events and the fold ("blocked" or "ffa") in FP32 on a CUDA device; the
+    Kalman passes and the smoother stay on the CPU in FP64; not with Bayes
+    factors or the uniform T0 grid)."""
     if fold not in FOLDS:
         raise ValueError(f"fold must be one of {FOLDS}")
     if single not in ("kalman", "split"):
         raise ValueError('single must be "kalman" or "split"')
+    if device not in ("cpu", "gpu"):
+        raise ValueError('device must be "cpu" or "gpu"')
+    if device == "gpu" and (bayes_factor or t0_step_duration is None or fold == "ffa-screen"):
+        raise ValueError('device="gpu" needs the strided T0 grid, no Bayes factors, fold "blocked" or "ffa"')
     clock = _Clock(timings)
     t = np.asarray(t, float)
     y = (np.asarray(flux, float) - 1.0) * 1e3
@@ -127,7 +136,14 @@ def _search(
         mstep = np.maximum(1, np.floor(t0_step_duration * durs / delta)).astype(np.int64)
     else:
         mstep = np.ones(len(durs), np.int64)
-    if strided:  # compact layout: per duration only the epochs it uses
+    if device == "gpu":  # split single events and the fold on the device (FP32)
+        from transitleastsquares.gpu import driver
+
+        off = compact_offsets(len(tc), mstep)
+        z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
+        d_ab = driver.single_events_gp(t, z, eyd, A, K, S, model.H, W, tc[0], delta, durs, nsub, table, texp,
+                                       mstep, off)
+    elif strided:  # compact layout: per duration only the epochs it uses
         off = compact_offsets(len(tc), mstep)
         if single == "split":
             z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
@@ -139,7 +155,12 @@ def _search(
     clock("single_events")
 
     s2 = (depth_prior * 1e3) ** 2
-    if not strided:
+    if device == "gpu":
+        dchi2, k0, jb, bA, bB, ntrials = driver.fold(
+            d_ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
+            0.0, ffa=fold == "ffa")
+        lse = None
+    elif not strided:
         dchi2, k0, jb, bA, bB, lse, ntrials = multiple_events(
             ab, periods, delta, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min, s2,
             bayes_factor,

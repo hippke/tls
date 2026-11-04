@@ -235,3 +235,25 @@ class EventsFFABackend(EventsBackend):
     name = "events-ffa"
     fold = "ffa"
 
+
+class EventsGPUBackend(EventsBackend):
+    """The "events" backend on a CUDA GPU (transitleastsquares.gpu, FP32):
+    single events and the full fold (equal to "events" up to FP32 rounding).
+    On the GPU the full fold is faster than the FFA (host2, RTX 5060: ~50 G
+    cells/s); fold = "ffa" (TLS_EVENTS_FOLD) gives "events-ffa"."""
+
+    name = "events-gpu"
+    fold = "blocked"
+
+    def _single_and_fold(self, t, r, w, tc, durs, nsubs, texp, mstep, off, periods, delta, jlo, jhi,
+                         ntr_min, depth_min, use_threads):
+        from transitleastsquares.gp.events import template_table
+        from transitleastsquares.gpu import driver
+
+        fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
+        if fold not in ("blocked", "ffa"):
+            raise ValueError(f"events-gpu: fold must be 'blocked' or 'ffa', not {fold!r}")
+        d_ab = driver.single_events_white(t, r, w, tc[0], delta, durs, nsubs, template_table(), texp, mstep, off)
+        dchi2, _, jb, bA, bB, _ = driver.fold(d_ab, off, len(tc), periods, delta, mstep, jlo, jhi, ntr_min,
+                                              depth_min, ffa=fold == "ffa")
+        return dchi2, jb, bA, bB
