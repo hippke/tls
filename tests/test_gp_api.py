@@ -168,3 +168,13 @@ def test_flare_clipping_guards(monkeypatch):
     monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None: y - np.arange(len(y)))
     b, ll, use = baselines.fit_with_flare_clipping("rotation", t, f, e, period_guess=2.3, n_starts=1)
     assert use.sum() >= 0.8 * len(t)
+
+
+def test_search_without_trend():
+    from gp_cases import ROT_SYN, synthetic
+
+    t, f, e = synthetic()
+    r = gp.search(t, f, e, baseline=ROT_SYN, period_min=1.0, period_max=8.0, trend=False)
+    ref = gp.search(t, f, e, baseline=ROT_SYN, period_min=1.0, period_max=8.0)
+    assert r.trend is None and ref.trend is not None
+    assert r.period == ref.period and r.SDE == ref.SDE

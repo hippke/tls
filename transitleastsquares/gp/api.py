@@ -33,7 +33,8 @@ class GPSearchResults(dict):
     over T0 and durations) and log_bf_global (over the whole grid).
     Baseline: baseline (the fitted or given Baseline), baseline_log_likelihood
     (None for a given baseline), trend (posterior mean of the baseline,
-    conditioned on the used points outside the best signal's transits).
+    conditioned on the used points outside the best signal's transits; None
+    with trend=False).
     Data (cleaned, sorted by time, aligned with trend): time, flux,
     flux_err, use (False: flares removed by clip_flares); n_points (used).
     """
@@ -89,6 +90,7 @@ def search(
     fold="blocked",
     device="cpu",
     bin_fraction=None,
+    trend=True,
     use_threads=None,
     timings=None,
 ):
@@ -125,6 +127,9 @@ def search(
     bin_fraction: None (default) or e.g. 1/30: the single events of a
         duration D use data binned to <= bin_fraction D (approximate;
         faster for short cadences).
+    trend: compute the trend of the result (posterior mean of the baseline
+        outside the best signal's transits: one smoother pass, the largest
+        CPU cost of a GPU search); False: trend = None.
     use_threads: numba threads for the fit and the search (default: numba's
         current setting).
     timings: optional dict, filled with the wall time per stage.
@@ -163,7 +168,7 @@ def search(
     P, T0, D = r["period"], r["T0"], r["duration"]
     transit_times = T0 + P * np.arange(int((t.max() - T0) / P) + 1)
     phase = (t - T0 + 0.5 * P) % P - 0.5 * P
-    trend = b.trend(t, y, dy, use & (np.abs(phase) > 0.75 * D))
+    trend = b.trend(t, y, dy, use & (np.abs(phase) > 0.75 * D)) if trend else None
     return GPSearchResults(
         period=P,
         T0=T0,

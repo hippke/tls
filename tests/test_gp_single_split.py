@@ -8,6 +8,7 @@ from gp_cases import CASES, SEARCH
 from transitleastsquares.gp.core import _search
 from transitleastsquares.gp.events import (
     compact_offsets,
+    numerator_weights,
     single_events_compact,
     single_events_split,
     tail_operators,
@@ -42,13 +43,19 @@ def test_single_events_split(name):
     np.testing.assert_array_equal(new[:, 1], ref[:, 1])
     # events whose template touches the diffuse start (the first n_diffuse
     # samples): the spline's 3 diffuse states are ill-conditioned there, a
-    # differs by up to a few % (rotation: exact); elsewhere up to rounding
+    # through the smoother differs by up to a few % (rotation: exact)
     j = np.searchsorted(off, np.arange(off[-1]), side="right") - 1
     tcm = tc[(np.arange(off[-1]) - off[j]) * mstep[j]]
     edge = tcm - 0.5 * durs[j] - 0.5 * cad < t[model.n_diffuse]
     ok = (ref[:, 1] > 0) & (~edge if "spline" in name else True)
     err = np.abs(new[ok, 0] - ref[ok, 0]) / np.sqrt(ref[ok, 1])
     assert err.max() < (5e-6 if "spline" in name else 1e-9)  # spline: ill-conditioned (diffuse prior)
+    # z from the filter and the tail recursion (numerator_weights): exact everywhere
+    zt = numerator_weights(ey, S, K, w)
+    new2 = single_events_split(t, zt, np.zeros(0), A, K, S, model.H, W, tc, durs, table, cad, 7, mstep, off)
+    np.testing.assert_array_equal(new2[:, 1], ref[:, 1])
+    ok = ref[:, 1] > 0
+    assert np.max(np.abs(new2[ok, 0] - ref[ok, 0]) / np.sqrt(ref[ok, 1])) < 1e-12
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -59,9 +66,4 @@ def test_search_single_split(name):
     ref = _search(t, f, e, model, **SEARCH)
     new = _search(t, f, e, model, single="split", **SEARCH)
     assert new["period"] == ref["period"] and new["duration"] == ref["duration"]
-    close = np.isclose(new["dchi2"], ref["dchi2"], rtol=1e-6, atol=1e-6)
-    if "spline" in name:  # periods whose best fold includes an event at the diffuse start
-        assert close.mean() > 0.99
-        np.testing.assert_allclose(new["dchi2"], ref["dchi2"], rtol=1e-2)
-    else:
-        assert close.all()
+    np.testing.assert_allclose(new["dchi2"], ref["dchi2"], rtol=1e-9, atol=1e-9)

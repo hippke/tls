@@ -418,6 +418,19 @@ def single_events_split(t, z, eyd, A, K, S, H, W, tc, durs, table, texp, nsub, m
     return ab
 
 
+def numerator_weights(ey, S, K, w):
+    """z = C^-1 y from the filter and the tail recursion, without a smoother:
+    a single event's numerator a = sum_i s_i z_i, with z_i = da / ds_i =
+    ey_i / sqrt(S_i) + K_i . w_i (s_i enters e_i directly and the filtered
+    state through the gain K_i; w_i gives the rest of the sum after it).
+    Uses the search's ey (first n_diffuse zeroed), so the split single events
+    equal the Kalman ones up to rounding (single_events_split with an empty
+    eyd)."""
+    z = ey / np.sqrt(S)
+    z += np.einsum("ir,ir->i", K, w)
+    return z
+
+
 def single_event_sums(t, ey, A, K, S, H, tc, durs, table, texp, nsub=7):
     """Convenience wrapper: tail operators + single events."""
     W, w = tail_operators(A, K, S, H, ey)

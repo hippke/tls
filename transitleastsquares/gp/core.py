@@ -17,11 +17,12 @@ from transitleastsquares.gp.events import (
     single_events,
     single_events_compact,
     single_events_split,
+    numerator_weights,
     tail_operators,
     template_table,
 )
 from transitleastsquares.gp.fold_ffa import fold_ffa, fold_options
-from transitleastsquares.gp.statespace import kalman_whiten, n_segments, smoothed_mean, transition_matrices
+from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
 from transitleastsquares.grid import T14, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
@@ -31,9 +32,8 @@ FOLDS = ("blocked", "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse")
 def _single_strided(single, t, y, R, ey, eyd, A, K, S, W, w, model, nseg, tc, durs, table, texp, nsub, mstep, off):
     """Compact single events of the durations durs on the series t (Kalman or split)."""
     if single == "split":
-        kinds, starts, pars, P0 = model.blocks()
-        z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
-        return single_events_split(t, z, eyd, A, K, S, model.H, W, tc, durs, table, texp, nsub, mstep, off)
+        z = numerator_weights(ey, S, K, w)
+        return single_events_split(t, z, np.zeros(0), A, K, S, model.H, W, tc, durs, table, texp, nsub, mstep, off)
     return single_events_compact(t, ey, A, K, S, model.H, W, w, tc, durs, table, texp, nsub, mstep, off)
 
 
@@ -110,9 +110,10 @@ def _search(
     uniform T0 grid, which use the full fold).
     timings: optional dict, filled with the wall time of each stage.
     single: single events by the Kalman filter over each template ("kalman")
-    or through C^-1 y = N^-1 (y - f) ("split": the numerator from the
-    smoother residuals, the denominator from a data-free filter; equal up to
-    rounding, only with the strided T0 grid; gp.events.single_events_split).
+    or split ("split": the numerator as sum s z with z = C^-1 y from the
+    filter and the tail recursion (gp.events.numerator_weights), the
+    denominator from a data-free filter; equal up to rounding, only with the
+    strided T0 grid; gp.events.single_events_split).
     device: "cpu", or "gpu" (transitleastsquares.gpu: the split single
     events and the fold ("blocked" or "ffa") in FP32 on a CUDA device; the
     Kalman passes and the smoother stay on the CPU in FP64; not with Bayes
@@ -178,9 +179,9 @@ def _search(
         from transitleastsquares.gpu import driver
 
         off = compact_offsets(len(tc), mstep)
-        z = (y - smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)) / R
-        d_ab = driver.single_events_gp(t, z, eyd, A, K, S, model.H, W, tc[0], delta, durs, nsub, table, texp,
-                                       mstep, off)
+        z = numerator_weights(ey, S, K, w)
+        d_ab = driver.single_events_gp(t, z, np.zeros(0), A, K, S, model.H, W, tc[0], delta, durs, nsub, table,
+                                       texp, mstep, off)
     elif strided:  # compact layout: per duration only the epochs it uses
         off = compact_offsets(len(tc), mstep)
         kbin = np.ones(len(durs), np.int64)
