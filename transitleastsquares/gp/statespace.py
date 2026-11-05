@@ -965,6 +965,151 @@ def kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg):
     return K, S, ey
 
 
+DT_TOL = 1e-5  # time steps within this (relative) share their transition (transition_table)
+
+
+@numba.njit(cache=True)
+def transition_table(t, kinds, pars, tol=DT_TOL):
+    """The transitions per distinct time step: (index per point, blocks A and
+    Q per entry, shape (entries, blocks, 2, 2)). Entry 0 is the first point
+    (A = I, Q = 0). Steps that differ by the rounding of stored times share an
+    entry, so an even cadence costs a few transitions instead of one per point;
+    A - I changes by tol * w0 dt (far below FP32 on the short cadences)."""
+    n, nb = len(t), len(kinds)
+    size = _block_sizes(kinds)
+    idx = np.zeros(n, np.int32)
+    cap = 1024
+    At = np.zeros((cap, nb, 2, 2))
+    Qt = np.zeros((cap, nb, 2, 2))
+    for k in range(nb):
+        for r in range(size[k]):
+            At[0, k, r, r] = 1.0
+    u, ref = 0, -1.0
+    for i in range(1, n):
+        dt = t[i] - t[i - 1]
+        if u == 0 or abs(dt - ref) > tol * ref:
+            u += 1
+            if u == cap:
+                cap *= 2
+                At2, Qt2 = np.zeros((cap, nb, 2, 2)), np.zeros((cap, nb, 2, 2))
+                At2[:u] = At[:u]
+                Qt2[:u] = Qt[:u]
+                At, Qt = At2, Qt2
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], dt, At[u, k], Qt[u, k])
+            ref = dt
+        idx[i] = u
+    return idx, At[: u + 1], Qt[: u + 1]
+
+
+@numba.njit(cache=True)
+def riccati_head(t, y, R, kinds, starts, pars, P0, n0, K, isS, ey):
+    """The exact filter (FP64) over the first n0 points, which hold the
+    diffuse start: K, 1 / sqrt(S), ey stored; returns the filtered x, P."""
+    d = P0.shape[0]
+    x = np.zeros(d)
+    P = P0.copy()
+    K0, S0 = np.empty((n0, d)), np.empty(n0)
+    _gains_segment(t, y, R, kinds, starts, pars, x, P, 0, n0, K0, S0, ey)
+    for i in range(n0):
+        isS[i] = 1.0 / math.sqrt(S0[i])
+        for r in range(d):
+            K[i, r] = K0[i, r]
+    return x, P
+
+
+@numba.njit(cache=True)
+def riccati_keys(t, R, kinds, starts, pars, P, n0, edges, kbin, gap):
+    """Filtered covariance at each t[edges[s] - 1] from P at t[n0 - 1]: the
+    Riccati recursion (FP64) over bins of up to kbin points with their summed
+    information (R_b = 1 / sum(1 / R), at their weighted mean time, no bin
+    across a gap >= `gap`), which needs no state and costs 1 / kbin."""
+    nb, d = len(kinds), P.shape[0]
+    size = _block_sizes(kinds)
+    Ab, Qb = np.zeros((nb, 2, 2)), np.zeros((nb, 2, 2))
+    M, PH, x, xp = np.empty((d, d)), np.empty(d), np.zeros(d), np.zeros(d)
+    P = P.copy()
+    out = np.empty((len(edges), d, d))
+    tprev, i = t[n0 - 1], n0
+    for s in range(len(edges)):
+        hi = edges[s]
+        while i < hi:
+            j, iw, wt = i, 0.0, 0.0
+            while j < hi and j - i < kbin and (j == i or t[j] - t[j - 1] < gap):
+                iw += 1.0 / R[j]
+                wt += t[j] / R[j]
+                j += 1
+            tb = wt / iw
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], tb - tprev, Ab[k], Qb[k])
+            _predict(kinds, starts, size, Ab, Qb, P, M, x, xp)
+            sv = 1.0 / iw
+            for r in range(d):
+                acc = 0.0
+                for k in range(nb):
+                    acc += P[r, starts[k]]
+                PH[r] = acc
+            for k in range(nb):
+                sv += PH[starts[k]]
+            for r in range(d):
+                for c in range(r, d):
+                    v = P[r, c] - PH[r] * PH[c] / sv
+                    P[r, c] = v
+                    P[c, r] = v
+            tprev = tb
+            i = j
+        out[s] = P  # (filtered at the last bin's time)
+        dt = t[hi - 1] - tprev
+        if dt > 0:
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+            _predict(kinds, starts, size, Ab, Qb, out[s], M, x, xp)
+    return out
+
+
+@numba.njit(cache=True)
+def key_innovation_variance(At, Qt, idx, R, kinds, starts, Pk, keys):
+    """S at each point keys[s] from the key covariance Pk[s] (one prediction)."""
+    nb, d = len(kinds), Pk.shape[1]
+    size = _block_sizes(kinds)
+    M, x, xp = np.empty((d, d)), np.zeros(d), np.zeros(d)
+    out = np.empty(len(keys))
+    for s in range(len(keys)):
+        i = keys[s]
+        P = Pk[s].copy()
+        _predict(kinds, starts, size, At[idx[i]], Qt[idx[i]], P, M, x, xp)
+        acc = R[i]
+        for a in range(nb):
+            for b in range(nb):
+                acc += P[starts[a], starts[b]]
+        out[s] = acc
+    return out
+
+
+@numba.njit(cache=True)
+def mean_recursion(At, idx, y, starts, sizes, K, isS, x, n0, ey):
+    """The state recursion (FP64, K and 1 / sqrt(S) as given) from x at point
+    n0 - 1: ey of the points n0... ."""
+    nb, d = starts.shape[0], K.shape[1]
+    for i in range(n0, len(y)):
+        u = idx[i]
+        for k in range(nb):
+            s0 = starts[k]
+            if sizes[k] == 1:
+                x[s0] = At[u, k, 0, 0] * x[s0]
+            else:
+                a, b = x[s0], x[s0 + 1]
+                x[s0] = At[u, k, 0, 0] * a + At[u, k, 0, 1] * b
+                x[s0 + 1] = At[u, k, 1, 0] * a + At[u, k, 1, 1] * b
+        hx = 0.0
+        for k in range(nb):
+            hx += x[starts[k]]
+        innov = y[i] - hx
+        ey[i] = innov * isS[i]
+        for r in range(d):
+            x[r] += K[i, r] * innov
+
+
 SEGMENT_MIN = 1024  # points per segment of the parallel passes, at least
 
 

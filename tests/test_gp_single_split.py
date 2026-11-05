@@ -69,6 +69,46 @@ def test_search_single_split(name):
     np.testing.assert_allclose(new["dchi2"], ref["dchi2"], rtol=1e-9, atol=1e-9)
 
 
+def test_riccati_pieces():
+    """transition_table, riccati_head, riccati_keys (bins of 1 point: exact)
+    and mean_recursion reproduce kalman_whiten."""
+    from gp_cases import CASES
+    from transitleastsquares.gp.statespace import (
+        _block_sizes, _gains_segment, kalman_whiten, mean_recursion, riccati_head, riccati_keys, transition_table,
+    )
+
+    load, baseline = CASES["k2_rot"]
+    t, f, e = load()
+    y, yerr = (f - 1) * 1e3, e * 1e3
+    model = baseline._model(t, e)
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)
+    idx, At, Qt = transition_table(t, kinds, pars)
+    print("table entries", len(At), "of", len(t))
+    assert len(At) < len(t) / 2  # steps within the tolerance share an entry
+    Atx = transition_table(t, kinds, pars, 0.0)
+    n, d, n0 = len(t), P0.shape[0], 100
+    K2, iS2, ey2 = np.empty((n, d)), np.empty(n), np.empty(n)
+    x, P = riccati_head(t, y, R, kinds, starts, pars, P0, n0, K2, iS2, ey2)
+    np.testing.assert_allclose(K2[:n0], Kg[:n0], rtol=1e-12)
+    np.testing.assert_allclose(ey2[:n0], ey[:n0], rtol=1e-12)
+    edges = np.array([n0 + 50, n0 + 400, n // 2], np.int64)
+    gap = 2.0 * np.median(np.diff(t))
+    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, edges, 1, gap)
+    Kx, Sx, ex = np.empty((n, d)), np.empty(n), np.empty(n)
+    for s, e_ in enumerate(edges):
+        xs, Ps = np.zeros(d), P0.copy()
+        _gains_segment(t, y, R, kinds, starts, pars, xs, Ps, 0, int(e_), Kx, Sx, ex)
+        np.testing.assert_allclose(Pk[s], Ps, rtol=1e-6, atol=1e-9 * np.abs(Ps).max())
+    iS = 1.0 / np.sqrt(S)
+    mean_recursion(Atx[1], Atx[0], y, starts, _block_sizes(kinds), Kg, iS, x.copy(), n0, ey2)
+    np.testing.assert_allclose(ey2, ey, rtol=1e-6, atol=1e-8)
+    mean_recursion(At, idx, y, starts, _block_sizes(kinds), Kg, iS, x.copy(), n0, ey2)
+    print("ey with the shared steps", np.abs(ey2 - ey).max())
+    assert np.abs(ey2 - ey).max() < 1e-3
+
+
 def test_t14_durations():
     """One call for all periods gives T14(...) * P per period."""
     from transitleastsquares.grid import T14, T14_durations
