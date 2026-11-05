@@ -73,6 +73,27 @@ def test_pink_noise_bit_identical():
         assert _pink_noise(x, w) == pink_reference(x, w)
 
 
+def test_pink_noise_rolling():
+    """Long light curves: running sums, equal to the exact sum up to rounding;
+    short ones keep their exact bits (above)."""
+    from transitleastsquares import stats
+
+    rng = numpy.random.default_rng(5)
+    for n, w in [(1, 1), (50, 7), (20000, 1), (20000, 300), (20000, 20000), (100000, 5000)]:
+        x = 1 + rng.normal(0, 1e-3, n) + 1e-3 * numpy.sin(numpy.arange(n) / 500)
+        exact = _pink_noise(x, w)
+        new = stats._pink_noise_rolling(x, w)
+        print(n, w, abs(new / exact - 1) if exact else new)
+        assert abs(new - exact) <= 1e-11 * max(exact, 1e-30) or (w == 1 and new < 1e-10)
+    assert stats.pink_noise(x[:1000], 40) == _pink_noise(x[:1000], 40)
+    old = stats.PINK_ROLLING_CELLS
+    stats.PINK_ROLLING_CELLS = 0
+    try:
+        assert stats.pink_noise(x[:1000], 40) == stats._pink_noise_rolling(x[:1000], 40)
+    finally:
+        stats.PINK_ROLLING_CELLS = old
+
+
 def test_between_matches_mask():
     rng = numpy.random.default_rng(4)
     t = numpy.sort(numpy.round(rng.uniform(0, 10, 500), 2))

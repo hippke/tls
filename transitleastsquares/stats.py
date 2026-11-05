@@ -125,11 +125,46 @@ def _pink_noise(data, width):
     return total / datapoints
 
 
+PINK_ROLLING_CELLS = 1e8  # points x window above which pink_noise uses running sums (> 0.1 s)
+
+
+@numba.njit(cache=True, nogil=True)
+def _pink_noise_rolling(data, width):
+    """_pink_noise in O(n) with running sums of the centred data, recomputed
+    now and then against drift: equal up to rounding (about 1e-13), not bit by bit."""
+    n = len(data)
+    datapoints = n - width + 1
+    center = numpy.mean(data)
+    s1 = 0.0
+    s2 = 0.0
+    total = 0.0
+    root = width**0.5
+    for i in range(datapoints):
+        if i % 4096 == 0:
+            s1 = 0.0
+            s2 = 0.0
+            for j in range(i, i + width):
+                v = data[j] - center
+                s1 += v
+                s2 += v * v
+        else:
+            old = data[i - 1] - center
+            new = data[i + width - 1] - center
+            s1 += new - old
+            s2 += new * new - old * old
+        var = (s2 - s1 * s1 / width) / width
+        total += numpy.sqrt(max(var, 0.0)) / root
+    return total / datapoints
+
+
 def pink_noise(data, width):
     """Mean standard deviation of the mean in sliding windows of `width` points"""
     if width < 1 or len(data) - width + 1 < 1:
         raise ValueError("pink_noise: invalid window")
-    return _pink_noise(numpy.ascontiguousarray(data, dtype=float), int(width))
+    data = numpy.ascontiguousarray(data, dtype=float)
+    if (len(data) - width + 1) * float(width) > PINK_ROLLING_CELLS:
+        return _pink_noise_rolling(data, int(width))
+    return _pink_noise(data, int(width))
 
 
 def period_uncertainty(periods, power):
