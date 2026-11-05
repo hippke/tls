@@ -644,74 +644,88 @@ def tail_fill(At, idx, starts, sizes, K, isS, H, ey, edges, Wb, wb, W, w):
 
 
 @cuda.jit
-def riccati_segments(At, Qt, idx, R, starts, sizes, Pk, keys, edges, K, isS):
-    """The covariance recursion (FP32), one thread per segment: from Pk[q]
-    (filtered at the point before keys[q], which is before the segment: the
-    filter forgets the key's error) the gains and 1 / sqrt(S) of the points
-    edges[q]..edges[q + 1] - 1."""
+def riccati_segments(Gt, Qt, idx, R, starts, sizes, Pk, PkH, SkH, keys, edges, K, isS, overlap):
+    """The covariance recursion, one thread per segment: from Pk[q] (filtered at
+    the point before keys[q], which is before the segment: the filter forgets
+    the key's error) the gains and 1 / sqrt(S) of the points edges[q]..edges[q + 1]
+    - 1. Only D = P - Pk is in FP32: the terms of the key that cancel (PkH = Pk H,
+    SkH = H Pk H') come from FP64, and the prediction uses G = A - I, so that its
+    rounding scales with |G| instead of |P|. overlap[q]: 1 / sqrt(S) at the last
+    point before the segment, which the previous segment also computed."""
     q = cuda.grid(1)
     if q >= Pk.shape[0]:
         return
     d = K.shape[1]
     nb = starts.shape[0]
-    P = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    P0 = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    D = cuda.local.array((MAX_DIM, MAX_DIM), float32)
     M = cuda.local.array((MAX_DIM, MAX_DIM), float32)
-    PH = cuda.local.array(MAX_DIM, float32)
+    dH = cuda.local.array(MAX_DIM, float32)
     for r in range(d):
         for c in range(d):
-            P[r, c] = Pk[q, r, c]
+            P0[r, c] = Pk[q, r, c]
+            D[r, c] = F0
     lo = edges[q]
     for i in range(keys[q], edges[q + 1]):
         u = idx[i]
-        for b in range(nb):  # M = A P
+        for b in range(nb):  # M = G (Pk + D)
             s0 = starts[b]
             if sizes[b] == 2:
-                a00, a01, a10, a11 = At[u, b, 0, 0], At[u, b, 0, 1], At[u, b, 1, 0], At[u, b, 1, 1]
+                g00, g01, g10, g11 = Gt[u, b, 0, 0], Gt[u, b, 0, 1], Gt[u, b, 1, 0], Gt[u, b, 1, 1]
                 for c in range(d):
-                    p0 = P[s0, c]
-                    p1 = P[s0 + 1, c]
-                    M[s0, c] = a00 * p0 + a01 * p1
-                    M[s0 + 1, c] = a10 * p0 + a11 * p1
+                    p0 = P0[s0, c] + D[s0, c]
+                    p1 = P0[s0 + 1, c] + D[s0 + 1, c]
+                    M[s0, c] = g00 * p0 + g01 * p1
+                    M[s0 + 1, c] = g10 * p0 + g11 * p1
             else:
-                a00 = At[u, b, 0, 0]
+                g00 = Gt[u, b, 0, 0]
                 for c in range(d):
-                    M[s0, c] = a00 * P[s0, c]
-        for b in range(nb):  # P = M A' + Q
+                    M[s0, c] = g00 * (P0[s0, c] + D[s0, c])
+        for r in range(d):  # D += M + M'
+            for c in range(r, d):
+                v = D[r, c] + M[r, c] + M[c, r]
+                D[r, c] = v
+                D[c, r] = v
+        for b in range(nb):  # D += M G' + Q
             s0 = starts[b]
             if sizes[b] == 2:
-                a00, a01, a10, a11 = At[u, b, 0, 0], At[u, b, 0, 1], At[u, b, 1, 0], At[u, b, 1, 1]
+                g00, g01, g10, g11 = Gt[u, b, 0, 0], Gt[u, b, 0, 1], Gt[u, b, 1, 0], Gt[u, b, 1, 1]
                 for r in range(d):
                     m0 = M[r, s0]
                     m1 = M[r, s0 + 1]
-                    P[r, s0] = m0 * a00 + m1 * a01
-                    P[r, s0 + 1] = m0 * a10 + m1 * a11
-                P[s0, s0] += Qt[u, b, 0, 0]
-                P[s0, s0 + 1] += Qt[u, b, 0, 1]
-                P[s0 + 1, s0] += Qt[u, b, 1, 0]
-                P[s0 + 1, s0 + 1] += Qt[u, b, 1, 1]
+                    D[r, s0] += m0 * g00 + m1 * g01
+                    D[r, s0 + 1] += m0 * g10 + m1 * g11
+                D[s0, s0] += Qt[u, b, 0, 0]
+                D[s0, s0 + 1] += Qt[u, b, 0, 1]
+                D[s0 + 1, s0] += Qt[u, b, 1, 0]
+                D[s0 + 1, s0 + 1] += Qt[u, b, 1, 1]
             else:
-                a00 = At[u, b, 0, 0]
+                g00 = Gt[u, b, 0, 0]
                 for r in range(d):
-                    P[r, s0] = M[r, s0] * a00
-                P[s0, s0] += Qt[u, b, 0, 0]
-        s = R[i]
+                    D[r, s0] += M[r, s0] * g00
+                D[s0, s0] += Qt[u, b, 0, 0]
         for r in range(d):  # H = 1 on each block's first state
             acc = F0
             for b in range(nb):
-                acc += P[r, starts[b]]
-            PH[r] = acc
+                acc += D[r, starts[b]]
+            dH[r] = acc
+        s = R[i] + SkH[q]
         for b in range(nb):
-            s += PH[starts[b]]
+            s += dH[starts[b]]
         inv = F1 / s
+        for r in range(d):
+            dH[r] += PkH[q, r]
         if i >= lo:
             isS[i] = float32(math.sqrt(inv))
             for r in range(d):
-                K[i, r] = PH[r] * inv
+                K[i, r] = dH[r] * inv
+        elif i == lo - 1:
+            overlap[q] = float32(math.sqrt(inv))
         for r in range(d):
             for c in range(r, d):
-                v = P[r, c] - PH[r] * PH[c] * inv
-                P[r, c] = v
-                P[c, r] = v
+                v = D[r, c] - dH[r] * dH[c] * inv
+                D[r, c] = v
+                D[c, r] = v
 
 
 @cuda.jit

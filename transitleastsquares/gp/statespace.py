@@ -1039,25 +1039,6 @@ def riccati_keys(t, R, kinds, starts, pars, P, n0, edges, kbin, gap):
 
 
 @numba.njit(cache=True)
-def key_innovation_variance(At, Qt, idx, R, kinds, starts, Pk, keys):
-    """S at each point keys[s] from the key covariance Pk[s] (one prediction)."""
-    nb, d = len(kinds), Pk.shape[1]
-    size = _block_sizes(kinds)
-    M, x, xp = np.empty((d, d)), np.zeros(d), np.zeros(d)
-    out = np.empty(len(keys))
-    for s in range(len(keys)):
-        i = keys[s]
-        P = Pk[s].copy()
-        _predict(kinds, starts, size, At[idx[i]], Qt[idx[i]], P, M, x, xp)
-        acc = R[i]
-        for a in range(nb):
-            for b in range(nb):
-                acc += P[starts[a], starts[b]]
-        out[s] = acc
-    return out
-
-
-@numba.njit(cache=True)
 def mean_recursion(At, idx, y, starts, sizes, K, isS, x, n0, ey):
     """The state recursion (FP64, K and 1 / sqrt(S) as given) from x at point
     n0 - 1: ey of the points n0... ."""

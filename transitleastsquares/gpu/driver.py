@@ -91,28 +91,34 @@ GPU_KALMAN_MIN = 50000  # points; below, the FP64 filter on the CPU is as fast a
 RICCATI_SEGMENT = 256  # points per GPU thread of the covariance recursion
 RICCATI_BURN = 256  # points before each segment, from its key covariance
 RICCATI_BIN = 16  # points per bin of the key pass, at most
-RICCATI_BIN_W0 = 0.1  # bin width, at most, in units of the fastest oscillator's 1 / w0
+RICCATI_BIN_W = 0.1  # bin width, at most, in units of the model's shortest time scale
 RICCATI_CHECKS = 32  # segments recomputed in FP64 after the kernel
 RICCATI_CHECK_TOL = 1e-3  # largest relative difference of S in them
-RICCATI_KEY_TOL = 0.2  # ... of S against every segment's key covariance (coarse)
+RICCATI_MASKED = 1e6  # R / median(R) above which a point counts as masked
 
 
-def _key_bin(pars, cad):
-    return int(np.clip(RICCATI_BIN_W0 / (pars[:, 1].max() * cad), 1, RICCATI_BIN))
+def _key_bin(kinds, pars, cad, R):
+    """Points per bin of the key pass, for the model's shortest time scale: an
+    oscillator's 1 / w0; a spline's (R cad / q)^(1/4), its steady-state filter."""
+    w = 0.0
+    for k in range(len(kinds)):
+        if kinds[k] == 2:
+            w = max(w, pars[k, 1])
+        elif kinds[k] == 1:
+            w = max(w, (pars[k, 0] / (np.median(R) * cad)) ** 0.25)
+    return RICCATI_BIN if w == 0.0 else int(np.clip(RICCATI_BIN_W / (w * cad), 1, RICCATI_BIN))
 
 
-def _riccati_ok(t, R, kinds, starts, pars, At, Qt, idx, Pk, keys, edges, Kh, iSh):
-    """Self-check of the FP32 recursion (large slow terms with the mean can
-    break it: their covariance cancels in S). All values finite; every segment
-    near its key's S; a sample of the segments, recomputed in FP64 from the
-    same key covariances, the same S (well below the tolerance on the hardest
-    models it is accepted for)."""
-    from transitleastsquares.gp.statespace import _gains_segment, key_innovation_variance
+def _riccati_ok(t, R, kinds, starts, pars, Pk, keys, edges, Kh, iSh, overlap):
+    """Self-check of the FP32 recursion. All values finite; at the point where
+    two segments overlap, both the same S; a sample of the segments, recomputed
+    in FP64 from the same key covariances, the same S."""
+    from transitleastsquares.gp.statespace import _gains_segment
 
     if not (np.isfinite(iSh).all() and np.isfinite(Kh).all()):
         return False
-    Sk = key_innovation_variance(At, Qt, idx, R, kinds, starts, Pk, keys)
-    if not np.max(np.abs(iSh[keys] * np.sqrt(np.maximum(Sk, 0.0)) - 1)) <= 0.5 * RICCATI_KEY_TOL:
+    both = keys < edges[:-1]
+    if not np.max(np.abs(overlap[both] / iSh[edges[:-1][both] - 1] - 1), initial=0.0) <= 0.5 * RICCATI_CHECK_TOL:
         return False
     d = Pk.shape[1]
     for q in np.unique(np.linspace(0, len(keys) - 1, RICCATI_CHECKS).astype(np.int64)):
@@ -126,17 +132,19 @@ def _riccati_ok(t, R, kinds, starts, pars, At, Qt, idx, Pk, keys, edges, Kh, iSh
     return True
 
 
-def kalman_gpu(t, y, R, model, nseg=1):
+def kalman_gpu(t, y, R, model, nseg=1, on_device=True):
     """The Kalman pass of a GPU search: (dev, ey) with the gains, 1 / sqrt(S)
     and transitions on the device (FP32, as gains_on_device) and ey (FP64) on
     the host. Long light curves: the covariance recursion runs on the device,
-    per segment from a covariance of the coarse pass (riccati_keys, FP64), so
-    that FP32 rounding cannot accumulate; then the state recursion in FP64 on
-    the host. Each segment starts RICCATI_BURN points early: the coarse pass is
+    per segment from a covariance of the coarse pass (riccati_keys, FP64), with
+    only its change in FP32 (kernels.riccati_segments), so that rounding neither
+    accumulates nor meets the covariances that cancel in S (large slow terms);
+    then the state recursion in FP64 on the host. Each segment starts RICCATI_BURN points early: the coarse pass is
     least accurate where the filter's memory is short (low noise), which is
-    where the burn-in removes its error. Short light curves, splines (FP32
-    breaks down on their ill-conditioned covariance) and any failed self-check
-    (_riccati_ok): statespace.kalman_whiten on the host."""
+    where the burn-in removes its error. The exact filter runs until a segment's
+    worth of unmasked points has resolved the diffuse start (masked points at the
+    start of the trend's pass leave it unresolved). Short light curves and any
+    failed self-check (_riccati_ok): statespace.kalman_whiten on the host."""
     from transitleastsquares.gp.statespace import (
         _block_sizes, kalman_whiten, mean_recursion, riccati_head, riccati_keys, transition_table,
     )
@@ -153,29 +161,42 @@ def kalman_gpu(t, y, R, model, nseg=1):
         dev.update(K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))), kalman=why)
         return dev, ey
 
-    if n < GPU_KALMAN_MIN or n < 2 * RICCATI_SEGMENT:
+    if not on_device or n < GPU_KALMAN_MIN or n < 2 * RICCATI_SEGMENT:
         return on_host("short")
-    if np.any(kinds == 1):
-        return on_host("spline")
     ns = n // RICCATI_SEGMENT
     edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
-    n0 = int(edges[1])
+    seen = np.cumsum(R < RICCATI_MASKED * np.median(R))
+    q0 = int(np.searchsorted(edges, np.searchsorted(seen, RICCATI_SEGMENT) + 1))  # segments from q0 on the device
+    if q0 >= ns:
+        return on_host("short")
+    q0 = max(q0, 1)
+    edges = edges[q0:]
+    n0 = int(edges[0])
     ey = np.empty(n)
     Kh, iSh = np.empty((n, d), np.float32), np.empty(n, np.float32)
     x, P = riccati_head(t, y, R, kinds, starts, pars, P0, n0, Kh, iSh, ey)
     cad = float(np.median(np.diff(t)))
-    keys = np.maximum(edges[1:-1] - RICCATI_BURN, n0)
-    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, keys, _key_bin(pars, cad), 2.0 * cad)
+    keys = np.maximum(edges[:-1] - RICCATI_BURN, n0)
+    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, keys, _key_bin(kinds, pars, cad, R), 2.0 * cad)
     d_K, d_iS = cuda.device_array((n, d), np.float32), cuda.device_array(n, np.float32)
     d_K[:n0].copy_to_device(Kh[:n0])
     d_iS[:n0].copy_to_device(iSh[:n0])
-    K.riccati_segments[(ns - 1 + 127) // 128, 128](dev["At"], cuda.to_device(_f32(Qt)), dev["idx"],
-                                                   cuda.to_device(_f32(R)), dev["starts"], dev["sizes"],
-                                                   cuda.to_device(_f32(Pk)), cuda.to_device(keys),
-                                                   cuda.to_device(edges[1:]), d_K, d_iS)
+    Gt = At.copy()  # G = A - I
+    for b in range(len(kinds)):
+        for r in range(sizes[b]):
+            Gt[:, b, r, r] -= 1.0
+    h = np.zeros(d)
+    h[starts] = 1.0
+    PkH = Pk @ h
+    overlap = cuda.device_array(len(keys), np.float32)
+    K.riccati_segments[(len(keys) + 127) // 128, 128](cuda.to_device(_f32(Gt)), cuda.to_device(_f32(Qt)), dev["idx"],
+                                                      cuda.to_device(_f32(R)), dev["starts"], dev["sizes"],
+                                                      cuda.to_device(_f32(Pk)), cuda.to_device(_f32(PkH)),
+                                                      cuda.to_device(_f32(PkH @ h)), cuda.to_device(keys),
+                                                      cuda.to_device(edges), d_K, d_iS, overlap)
     d_K.copy_to_host(Kh)
     d_iS.copy_to_host(iSh)
-    if not _riccati_ok(t, R, kinds, starts, pars, At, Qt, idx, Pk, keys, edges[1:], Kh, iSh):
+    if not _riccati_ok(t, R, kinds, starts, pars, Pk, keys, edges, Kh, iSh, overlap.copy_to_host()):
         return on_host("check failed")
     mean_recursion(At, idx, y, starts, sizes, Kh, iSh, x, n0, ey)
     dev.update(K=d_K, isS=d_iS, kalman="gpu")
@@ -389,7 +410,8 @@ def trend_gpu(model, t, y, R, nseg=1):
     and numerator weights on the GPU (FP32), as gp.events.numerator_weights.
     Equals the RTS smoother up to rounding (spline GP: up to a few % at its
     ill-conditioned diffuse start)."""
-    dev, ey = kalman_gpu(t, y, R, model, nseg)
+    # (a spline's extrapolation across masked points at the start amplifies FP32 gains: FP64 filter)
+    dev, ey = kalman_gpu(t, y, R, model, nseg, on_device=not np.any(model.blocks()[0] == 1))
     ey[:model.n_diffuse] = 0.0
     _, _, z = tail_operators_gpu(dev, ey)
     return y - R * z.copy_to_host().astype(float)

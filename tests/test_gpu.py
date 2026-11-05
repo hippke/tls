@@ -207,22 +207,21 @@ def _long_case(name):
     if name == "rot":
         return t, f, e, gp.RotationBaseline(sigma=3e-3, period=2.3, Q0=3.0, dQ=20.0, f=0.6, sigma_slow=1e-3, rho_slow=8.0,
                                             jitter=3e-4)
-    if name == "stiff":  # as fitted to K2-25: a large slow term (FP32 breaks down)
+    if name == "stiff":  # as fitted to K2-25: a large slow term, whose covariances cancel in S
         return t, f, e, gp.RotationBaseline(sigma=3e-3, period=2.3, Q0=7.446, dQ=612.0, f=1.377, sigma_slow=35e-3,
                                             rho_slow=100.0, jitter=3e-4)
     return t, f, e, gp.SplineBaseline(h=0.2, jitter=3e-4, sigma_ref=1e-3, cadence=25 / 86400)
 
 
-@pytest.mark.parametrize("name,where,rk_max,rs_max,re_max", [("rot", "gpu", 1e-3, 1e-4, 1e-3), ("spline", "spline", 1e-5, 1e-5, 1e-5),
-                                                             ("stiff", "check failed", 1e-5, 1e-5, 1e-5),
+@pytest.mark.parametrize("name,where,rk_max,rs_max,re_max", [("rot", "gpu", 1e-3, 1e-4, 1e-3), ("spline", "gpu", 1e-3, 1e-3, 2e-3),
+                                                             ("stiff", "gpu", 1e-3, 1e-3, 2e-3),
                                                              ("k2_rot", "gpu", 1e-3, 1e-3, 2e-3),
-                                                             ("k2_spline", "spline", 1e-5, 1e-5, 1e-5)])
+                                                             ("k2_spline", "gpu", 1e-3, 1e-3, 2e-3)])
 def test_kalman_gpu(name, where, rk_max, rs_max, re_max, monkeypatch):
     """The covariance recursion on the device (FP32, restarted per segment from
     the coarse FP64 pass) gives the FP64 filter's gains and innovations. The
     K2 cases (30 min cadence: below GPU_KALMAN_MIN, the host filter runs in
-    practice) only check that it holds for real time stamps. Splines stay on
-    the host."""
+    practice) only check that it holds for real time stamps."""
     from gp_cases import CASES
     from transitleastsquares.gp.statespace import kalman_whiten
     from transitleastsquares.gpu import driver
@@ -266,3 +265,64 @@ def test_kalman_gpu_check_fails(monkeypatch):
     dev, ey2 = driver.kalman_gpu(t, y, R, model)
     assert dev["kalman"] == "check failed"
     np.testing.assert_array_equal(ey2, kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)[2])
+
+
+@pytest.mark.parametrize("name", ["rot", "stiff", "spline"])
+def test_kalman_gpu_masked_start(name, monkeypatch):
+    """Masked points at the start (the trend's pass, with a transit at the first
+    points): the diffuse start is resolved exactly before the kernel takes over."""
+    from transitleastsquares.gp.statespace import kalman_whiten
+    from transitleastsquares.gpu import driver
+
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
+    t, f, e, baseline = _long_case(name)
+    use = np.ones(len(t), bool)
+    use[:900] = False
+    use[5000:5600] = False
+    y, yerr = (f - 1) * 1e3 * use, np.where(use, e, 1e6) * 1e3
+    model = baseline._model(t, e)
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)
+    dev, ey2 = driver.kalman_gpu(t, y, R, model)
+    assert dev["kalman"] == "gpu"
+    iS2 = dev["isS"].copy_to_host()
+    rs = np.max(np.abs(iS2 * np.sqrt(S) - 1))
+    re = np.max(np.abs(ey2[use] - ey[use]))
+    print(name, "S max", rs, "ey max", re)
+    assert rs < 1e-3
+    assert re < 2e-3
+
+
+def test_kalman_gpu_overlap_detects(monkeypatch):
+    """A wrong key covariance in one segment fails the overlap check."""
+    from transitleastsquares.gp import statespace
+    from transitleastsquares.gpu import driver
+
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
+    t, f, e, baseline = _long_case("rot")
+    y, yerr = (f - 1) * 1e3, e * 1e3
+    model = baseline._model(t, e)
+    keys_orig = statespace.riccati_keys
+
+    def wrong(*a):
+        Pk = keys_orig(*a)
+        Pk[len(Pk) // 2] *= 3.0
+        return Pk
+
+    monkeypatch.setattr(statespace, "riccati_keys", wrong)
+    dev, _ = driver.kalman_gpu(t, y, yerr**2 + model.jitter**2, model)
+    assert dev["kalman"] == "check failed"
+
+
+def test_trend_gpu_spline_uses_host_filter(monkeypatch):
+    """A spline's trend does not use the kernel: same result with and without it."""
+    from transitleastsquares.gpu import driver
+
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
+    t, f, e, baseline = _long_case("spline")
+    use = np.ones(len(t), bool)
+    use[:900] = False
+    new = baseline.trend(t, f, e, use, device="gpu")
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 1 << 40)
+    np.testing.assert_array_equal(new, baseline.trend(t, f, e, use, device="gpu"))
