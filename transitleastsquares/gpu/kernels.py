@@ -3,7 +3,7 @@
 import math
 
 import numpy as np
-from numba import cuda, float32, float64, int32
+from numba import cuda, float32, float64, int32, uint32
 
 F0 = np.float32(0.0)
 F1 = np.float32(1.0)
@@ -384,7 +384,10 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     events as complex64 (a + i b: one 8-byte load per cell), two epochs per
     thread (two independent sums in flight). coarse > 1: only every
     coarse-th epoch, then its coarse - 1 neighbours on each side on the
-    exact path (as multiple_events_blocked_coarse)."""
+    exact path (as multiple_events_blocked_coarse). Memory loads limit this kernel
+    (about one per SM per clock, whatever their size): a thread's two epochs are
+    neighbours when coarse = 1, which shares loads. In the loops, 32-bit integers
+    and unsigned indices (no negative-index wraparound)."""
     pr = cuda.blockIdx.x
     if pr >= pair_q.shape[0]:
         return
@@ -394,13 +397,13 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     j = pair_j[pr]
     P = periods[q]
     dj = float64(mstep[j]) * delta
-    o = off[j]
-    Mj = off[j + 1] - o
+    o = int32(off[j])
+    Mj = int32(off[j + 1] - off[j])
     nph = max(1, int32(P / dj))
     nu = (nph + coarse - 1) // coarse
     ntr = int32(float64(Mj) * dj / P) + 2
     toff = cuda.shared.array(TOFF, int32)
-    nsh = min(ntr, TOFF)
+    nsh = int32(min(ntr, TOFF))
     for nn in range(tid, nsh, nt):
         toff[nn] = _offset(nn, P, dj)
     cuda.syncthreads()
@@ -408,47 +411,48 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     bA = F0
     bB = F0
     bk = int32(-1)
-    for u1 in range(tid, nu, 2 * nt):
-        k1 = u1 * coarse
-        k2 = (u1 + nt) * coarse
-        two = u1 + nt < nu
+    first, gap = (2 * tid, 1) if coarse == 1 else (tid, nt)
+    for u1 in range(first, nu, 2 * nt):
+        k1 = int32(u1 * coarse)
+        k2 = int32((u1 + gap) * coarse)
+        two = u1 + gap < nu
         A1 = F0
         B1 = F0
-        c1 = 0
+        c1 = int32(0)
         A2 = F0
         B2 = F0
-        c2 = 0
-        nn = 0
+        c2 = int32(0)
+        nn = int32(0)
         while True:
-            base = toff[nn] if nn < nsh else _offset(nn, P, dj)
-            kk = k1 + base
+            base = toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)
+            kk = int32(k1 + base)
             if kk >= Mj:
                 break
-            v = abc[o + kk]
+            v = abc[uint32(o + kk)]
             A1 += v.real
             B1 += v.imag
             if v.imag > F0:
-                c1 += 1
-            kk = k2 + base
+                c1 = int32(c1 + 1)
+            kk = int32(k2 + base)
             if two and kk < Mj:
-                v = abc[o + kk]
+                v = abc[uint32(o + kk)]
                 A2 += v.real
                 B2 += v.imag
                 if v.imag > F0:
-                    c2 += 1
-            nn += 1
+                    c2 = int32(c2 + 1)
+            nn = int32(nn + 1)
         if two:  # epoch k2 may have transits beyond the last of k1 (k2 > k1)
             while True:
-                base = toff[nn] if nn < nsh else _offset(nn, P, dj)
-                kk = k2 + base
+                base = toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)
+                kk = int32(k2 + base)
                 if kk >= Mj:
                     break
-                v = abc[o + kk]
+                v = abc[uint32(o + kk)]
                 A2 += v.real
                 B2 += v.imag
                 if v.imag > F0:
-                    c2 += 1
-                nn += 1
+                    c2 = int32(c2 + 1)
+                nn = int32(nn + 1)
         if not (c1 < ntr_min or B1 <= F0 or A1 <= F0 or A1 < depth_min * B1):
             g = A1 * A1 / B1
             if _better(g, k1, bg, bk):
@@ -479,18 +483,18 @@ def _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min):
     shared table where available)."""
     A = F0
     B = F0
-    cnt = 0
-    nn = 0
+    cnt = int32(0)
+    nn = int32(0)
     while True:
-        kk = kk0 + (toff[nn] if nn < nsh else _offset(nn, P, dj))
+        kk = int32(kk0 + (toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)))
         if kk >= Mj:
             break
-        v = abc[o + kk]
+        v = abc[uint32(o + kk)]
         A += v.real
         B += v.imag
         if v.imag > F0:
-            cnt += 1
-        nn += 1
+            cnt = int32(cnt + 1)
+        nn = int32(nn + 1)
     if cnt < ntr_min or B <= F0 or A <= F0 or A < depth_min * B:
         return F0, A, B
     return A * A / B, A, B
@@ -507,12 +511,12 @@ def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius
     j = task_j[w]
     P = periods[q]
     dj = float64(mstep[j]) * delta
-    o = off[j]
-    Mj = off[j + 1] - o
+    o = int32(off[j])
+    Mj = int32(off[j + 1] - off[j])
     nph = max(1, int32(P / dj))
     toff = cuda.shared.array(TOFF, int32)
     ntr = int32(float64(Mj) * dj / P) + 2
-    nsh = min(ntr, TOFF)
+    nsh = int32(min(ntr, TOFF))
     for nn in range(tid, nsh, cuda.blockDim.x):
         toff[nn] = _offset(nn, P, dj)
     cuda.syncthreads()
