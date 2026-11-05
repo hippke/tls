@@ -1062,6 +1062,16 @@ def mean_recursion(At, idx, y, starts, sizes, K, isS, x, n0, ey):
             x[r] += K[i, r] * innov
 
 
+@numba.njit(cache=True)
+def loglik_from_whitened(ey, isS, n_diffuse):
+    """Log likelihood from the normalised innovations and 1 / sqrt(S), as
+    _filter_segment."""
+    ll = 0.0
+    for i in range(n_diffuse, len(ey)):
+        ll -= 0.5 * (math.log(2 * math.pi) - 2.0 * math.log(isS[i]) + ey[i] * ey[i])
+    return ll
+
+
 SEGMENT_MIN = 1024  # points per segment of the parallel passes, at least
 
 

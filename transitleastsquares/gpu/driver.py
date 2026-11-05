@@ -203,6 +203,88 @@ def kalman_gpu(t, y, R, model, nseg=1, on_device=True):
     return dev, ey
 
 
+GPU_FIT_MIN = 15000  # points; below, the FP64 likelihood on the CPU is faster
+FIT_SEGMENT = 64  # points per GPU thread in the fit's short series: one thread's speed limits them
+FIT_BURN = 128
+FIT_BIN = 8  # points per bin of the key pass (the burn-in removes its error)
+
+
+class KalmanLikelihood:
+    """The log likelihood of fixed data under changing models (the fit), as
+    gp.statespace.log_likelihood, with the covariance recursion on the device
+    as in kalman_gpu. Returns None if the recursion fails its check (all values
+    finite, overlaps agree): the caller then uses the FP64 filter."""
+
+    def __init__(self, t, y, yerr, segment=None, burn=None, kbin=None):
+        self.t, self.y, self.e2 = t, y, yerr**2
+        n = len(t)
+        self.kbin = FIT_BIN if kbin is None else kbin
+        ns = max(1, n // (FIT_SEGMENT if segment is None else segment))
+        edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
+        q0 = int(np.searchsorted(edges, RICCATI_SEGMENT))  # the first points exactly (diffuse start)
+        self.n0 = int(edges[q0])
+        self.edges = edges[q0:]
+        self.keys = np.maximum(self.edges[:-1] - (FIT_BURN if burn is None else burn), self.n0)
+        self.cad = float(np.median(np.diff(t)))
+        self.d_keys, self.d_edges = cuda.to_device(self.keys), cuda.to_device(self.edges)
+        self.d_K, self.d_iS, self.d_ov, self.d_idx, self.d_R = None, None, None, None, cuda.device_array(n, np.float32)
+        self.ey = np.empty(n)
+        self.iS = np.empty(n, np.float32)
+        self.K = None
+
+    def __call__(self, model):
+        from transitleastsquares.gp.statespace import (
+            _block_sizes, loglik_from_whitened, mean_recursion, riccati_head, riccati_keys, transition_table,
+        )
+
+        kinds, starts, pars, P0 = model.blocks()
+        sizes = _block_sizes(kinds)
+        d, n0 = P0.shape[0], self.n0
+        if self.K is None:
+            self.K = np.empty((len(self.t), d), np.float32)
+            self.d_K = cuda.device_array(self.K.shape, np.float32)
+            self.d_iS = cuda.device_array(len(self.t), np.float32)
+            self.d_ov = cuda.device_array(len(self.keys), np.float32)
+            self.d_starts, self.d_sizes = cuda.to_device(starts), cuda.to_device(sizes)
+            self.h = np.zeros(d)
+            self.h[starts] = 1.0
+        R = self.e2 + model.jitter**2
+        idx, At, Qt = transition_table(self.t, kinds, pars)
+        if self.d_idx is None:
+            self.d_idx = cuda.to_device(idx)
+        x, P = riccati_head(self.t, self.y, R, kinds, starts, pars, P0, n0, self.K, self.iS, self.ey)
+        Pk = riccati_keys(self.t, R, kinds, starts, pars, P, n0, self.keys, self.kbin, 2.0 * self.cad)
+        Gt = At.copy()
+        for b in range(len(kinds)):
+            for r in range(sizes[b]):
+                Gt[:, b, r, r] -= 1.0
+        PkH = Pk @ self.h
+        self.d_R.copy_to_device(_f32(R))
+        K.riccati_segments[(len(self.keys) + 127) // 128, 128](
+            cuda.to_device(_f32(Gt)), cuda.to_device(_f32(Qt)), self.d_idx, self.d_R, self.d_starts, self.d_sizes,
+            cuda.to_device(_f32(Pk)), cuda.to_device(_f32(PkH)), cuda.to_device(_f32(PkH @ self.h)), self.d_keys,
+            self.d_edges, self.d_K, self.d_iS, self.d_ov)
+        Khead, iShead = self.K[:n0].copy(), self.iS[:n0].copy()
+        self.d_K.copy_to_host(self.K)
+        self.d_iS.copy_to_host(self.iS)
+        self.K[:n0], self.iS[:n0] = Khead, iShead
+        ov = self.d_ov.copy_to_host()
+        both = self.keys < self.edges[:-1]
+        if not (np.isfinite(self.iS).all() and np.isfinite(self.K).all()) or \
+                not np.max(np.abs(ov[both] / self.iS[self.edges[:-1][both] - 1] - 1), initial=0.0) <= 0.5 * RICCATI_CHECK_TOL:
+            return None
+        mean_recursion(At, idx, self.y, starts, sizes, self.K, self.iS, x, n0, self.ey)
+        return loglik_from_whitened(self.ey, self.iS, model.n_diffuse)
+
+
+def lomb_scargle_peak(t, yc, freqs):
+    """The frequency of the highest peak of gp.baselines._ls_power, FP32."""
+    power = cuda.device_array(len(freqs), np.float32)
+    K.ls_power[(len(freqs) + 127) // 128, 128](cuda.to_device(_f32(t - t[0])), cuda.to_device(_f32(yc)),
+                                               cuda.to_device(_f32(freqs)), power)
+    return freqs[int(np.argmax(power.copy_to_host()))]
+
+
 def tail_operators_gpu(dev, ey):
     """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
     segment on the device, joined backwards on the CPU in FP64, then W, w

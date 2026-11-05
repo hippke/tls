@@ -4,10 +4,11 @@ period fold, shared by the TLS backend "events-gpu" and gp.search(device=
 
 Precision: the kernels compute in FP32 (consumer cards run FP64 at ~1/64 of
 the FP32 rate); only time differences t_i - t_c and the transit offsets
-round(n P / dj) use FP64 (once per sample and per transit). Everything that
-needs FP64 throughout (Kalman gains, tail operators, the smoother, the GP fit,
-statistics) stays on the CPU. Results equal the CPU kernels up to FP32
-rounding, not bit for bit.
+round(n P / dj) use FP64 (once per sample and per transit). On the device too:
+the covariance recursion of the Kalman pass (as the change from FP64 key
+covariances, driver.kalman_gpu) and the tail recursion. On the CPU, in FP64: the
+coarse key pass, the state recursion, the GP fit, statistics. Results equal the
+CPU kernels up to FP32 rounding, not bit for bit.
 
 Needs numba-cuda (pip install "numba-cuda[cu13]") and an NVIDIA driver.
 """

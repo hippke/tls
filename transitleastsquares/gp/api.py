@@ -78,6 +78,7 @@ def search(
     rotation_period=None,
     n_starts=1,
     fit_bin_width=FIT_BIN_WIDTH,
+    flare_bin_width=FIT_BIN_WIDTH,
     period_min=0,
     period_max=float("inf"),
     oversampling_factor=tls_constants.OVERSAMPLING_FACTOR,
@@ -100,7 +101,11 @@ def search(
         (default: estimated from the point-to-point scatter).
     baseline: "rotation" or "spline" (fitted by maximum likelihood), or a
         Baseline instance (used as given, no fit and no clipping).
-    clip_flares: when fitting, remove positive outliers iteratively.
+    clip_flares: when fitting, remove positive outliers iteratively;
+        flare_bin_width: also remove flares found in the residuals binned to
+        this width (days, default 10 min) if the cadence is shorter than half
+        of it, as most points of a flare are hidden in the noise of a single
+        point; None: single points only.
     rotation_period: starting guess of the rotation fit (default:
         Lomb-Scargle peak); n_starts: rotation fit starting points (1-4,
         default 1; more starts find better optima in ~1/4 of the cases, but
@@ -123,14 +128,15 @@ def search(
         options without the FFA: "blocked-screen-coarse" (the fast choice
         on the GPU, where the FFA does not pay).
         Bayes factors always use the full fold.
-    device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold;
-        needs numba-cuda; see transitleastsquares.gpu).
+    device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold, and
+        the rotation fit's likelihood on long data; needs numba-cuda; see
+        transitleastsquares.gpu).
     bin_fraction: None (default) or e.g. 1/30: the single events of a
         duration D use data binned to <= bin_fraction D (approximate;
         faster for short cadences).
     trend: compute the trend of the result (posterior mean of the baseline
-        outside the best signal's transits: one smoother pass, the largest
-        CPU cost of a GPU search); False: trend = None.
+        outside the best signal's transits: one more Kalman pass); False:
+        trend = None.
     use_threads: numba threads for the fit and the search (default: numba's
         current setting).
     timings: optional dict, filled with the wall time per stage.
@@ -148,9 +154,9 @@ def search(
             kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width) \
                 if baseline == "rotation" else {}
             if clip_flares:
-                b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, **kw)
+                b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, device=device, flare_bin=flare_bin_width, **kw)
             else:
-                b, ll = BASELINES[baseline].fit(t, y, dy, **kw)
+                b, ll = BASELINES[baseline].fit(t, y, dy, device=device, **kw)
                 use = np.ones(len(t), bool)
         elif isinstance(baseline, Baseline):
             b, ll, use = baseline, None, np.ones(len(t), bool)

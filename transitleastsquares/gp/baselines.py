@@ -49,7 +49,7 @@ def _ls_power(t, yc, freqs):
     return power
 
 
-def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
+def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5, device="cpu"):
     """Peak of the Lomb-Scargle periodogram, as the starting point of the
     rotation fit. The cost is (points x frequencies), both growing with the
     span: data with a cadence below period_min / 16 are binned to
@@ -62,6 +62,10 @@ def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
     span = t.max() - t.min()
     df = 1 / (oversample * span)
     freqs = np.arange(1 / period_max, 1 / period_min, df)
+    if device == "gpu":
+        from transitleastsquares.gpu import driver
+
+        return 1 / driver.lomb_scargle_peak(t, yc, freqs)
     return 1 / freqs[np.argmax(_ls_power(t, yc, freqs))]
 
 
@@ -147,7 +151,7 @@ class RotationBaseline(Baseline):
 
     @classmethod
     def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None,
-            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3):
+            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3, device="cpu", converge=None):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
         peak); use: points to fit (default all); n_starts (1-4, default 1) starting
         points in up to use_threads threads (default: numba's thread count);
@@ -161,16 +165,16 @@ class RotationBaseline(Baseline):
         planets as passes=3, tol=1e-4 (400 K2 injections) at 2x less fit
         time, but not always the same optimum. For better optima (e.g. to
         use the rotation period), fit with n_starts=4, passes=3, tol=1e-4
-        and pass the baseline to gp.search.
+        and pass the baseline to gp.search. device="gpu", converge: see fitting.fit_rotation.
         Returns (baseline, log likelihood of the unbinned data)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:
             m = slice(None) if use is None else np.asarray(use, bool)
-            period_guess = rotation_period_guess(t[m], y[m])
+            period_guess = rotation_period_guess(t[m], y[m], device=device)
         p, ll_ppt = fitting.fit_rotation(
             t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
             start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
-            bin_width=bin_width, passes=passes, tol=tol,
+            bin_width=bin_width, passes=passes, tol=tol, device=device, converge=converge,
         )
         n = len(t) if use is None else int(np.sum(use))
         return cls._from_ppt(p), ll_ppt + (n - 1) * math.log(PPT)
@@ -204,10 +208,10 @@ class SplineBaseline(Baseline):
         return spline_model(self.h, sig, cad, self._jitter)
 
     @classmethod
-    def fit(cls, t, y, dy, use=None, h_range=(0.05, 5.0), use_threads=None, start=None):
+    def fit(cls, t, y, dy, use=None, h_range=(0.05, 5.0), use_threads=None, start=None, device="cpu"):
         """Type-II maximum likelihood for h and the jitter (3 starts in up to
         use_threads threads, or a single pass from start, a previous
-        SplineBaseline). Returns (baseline, log likelihood)."""
+        SplineBaseline), on the CPU for any device. Returns (baseline, log likelihood)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         s = None if start is None else dict(h=start.h, jitter=start._jitter)
         p, ll_ppt = fitting.fit_spline(t, (y - 1) * PPT, dy * PPT, mask=use, h_range=h_range,
@@ -218,28 +222,56 @@ class SplineBaseline(Baseline):
         return b, ll_ppt + (n - 3) * math.log(PPT)
 
 
-def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, **fit_kwargs):
+def _flare_bins(t, resid, use, width, nsigma, low=1.0):
+    """The points of flares in the residuals binned to width: bins above nsigma MADs,
+    their neighbours while above low MADs, and one more bin on each side. At a short
+    cadence most points of a flare are hidden in the noise of a single point."""
+    k = np.floor((t - t[0]) / width).astype(np.int64)
+    nb = int(k[-1]) + 1
+    n, nk = np.bincount(k, minlength=nb), np.bincount(k[use], minlength=nb)
+    rb = np.bincount(k, resid, minlength=nb) / np.maximum(n, 1)
+    full = nk >= 0.5 * np.median(nk[nk > 0])
+    rk = np.bincount(k[use], resid[use], minlength=nb)[full] / nk[full]
+    mad = 1.4826 * np.median(np.abs(rk - np.median(rk)))
+    flag = np.zeros(nb, bool)
+    if not (np.isfinite(mad) and mad > 0):
+        return flag[k]
+    for s in np.flatnonzero((rb > nsigma * mad) & (n >= 0.5 * np.median(n[n > 0]))):
+        a = b = s
+        while a > 0 and n[a - 1] > 0 and rb[a - 1] > low * mad:
+            a -= 1
+        while b < nb - 1 and n[b + 1] > 0 and rb[b + 1] > low * mad:
+            b += 1
+        flag[max(a - 1, 0):b + 2] = True
+    return flag[k]
+
+
+def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu", flare_bin=FIT_BIN_WIDTH, **fit_kwargs):
     """Fit a baseline ("rotation" or "spline") and iteratively remove
     positive outliers (flares) of its residuals against the trend of the
     points kept so far; dips (transits) are never
     clipped. Each round is warm-started from the previous one. A round that
     would remove more than 20 % of the points, or a degenerate trend, ends
-    the clipping. Returns (baseline, log likelihood, use) with use = points
-    kept."""
+    the clipping. flare_bin (days, default 10 min): also remove flares found
+    in the residuals binned to this width, if the cadence is shorter than half
+    of it; None: single points only. The clipping uses the FP64 trend on every
+    device. Returns (baseline, log likelihood, use) with use = points kept."""
     cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
     if kind == "rotation" and fit_kwargs.get("period_guess") is None:
         # once, before clipping: it also sets the fit's period bounds
-        fit_kwargs["period_guess"] = rotation_period_guess(t, y)
+        fit_kwargs["period_guess"] = rotation_period_guess(t, y, device=device)
     use = np.ones(len(t), bool)
     b = None
     for _ in range(max_iter):
-        b, ll = cls.fit(t, y, dy, use=use, start=b, **fit_kwargs)
+        b, ll = cls.fit(t, y, dy, use=use, start=b, device=device, **fit_kwargs)
         resid = y - b.trend(t, y, dy, use)  # conditioned on the kept points: a clipped flare no longer pulls the trend
         r = resid[use]
         mad = 1.4826 * np.median(np.abs(r - np.median(r)))
         if not (np.isfinite(mad) and mad > 0):
             break  # degenerate trend: keep the current points
         new = use & (resid < nsigma * mad)
+        if flare_bin is not None and np.median(np.diff(t)) < 0.5 * flare_bin:
+            new &= ~_flare_bins(t, resid, use, flare_bin, nsigma)
         if new.sum() == use.sum() or new.sum() < 0.8 * use.sum():
             break  # converged, or a round would remove > 20 % (not flares)
         use = new

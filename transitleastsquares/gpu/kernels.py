@@ -733,6 +733,38 @@ def riccati_segments(Gt, Qt, idx, R, starts, sizes, Pk, PkH, SkH, keys, edges, K
 
 
 @cuda.jit
+def ls_power(t, yc, freqs, power):
+    """gp.baselines._ls_power in FP32, one thread per frequency (t from its first
+    point; only the position of the peak is used)."""
+    i = cuda.grid(1)
+    if i >= freqs.shape[0]:
+        return
+    w = float32(2.0 * math.pi) * freqs[i]
+    C = F0
+    S = F0
+    CC = F0
+    SS = F0
+    CS = F0
+    for k in range(t.shape[0]):
+        a = w * t[k]
+        c = float32(math.cos(a))
+        s = float32(math.sin(a))
+        C += yc[k] * c
+        S += yc[k] * s
+        CC += c * c
+        SS += s * s
+        CS += c * s
+    phi = HALF * float32(math.atan2(CS + CS, CC - SS))
+    cp = float32(math.cos(phi))
+    sp = float32(math.sin(phi))
+    yy = C * cp + S * sp
+    yz = S * cp - C * sp
+    cc = CC * cp * cp + (CS + CS) * cp * sp + SS * sp * sp
+    ss = SS * cp * cp - (CS + CS) * cp * sp + CC * sp * sp
+    power[i] = yy * yy / cc + yz * yz / ss
+
+
+@cuda.jit
 def numerator(ey, isS, K, w, z):
     """z_i = ey_i / sqrt(S_i) + K_i . w_i (gp.events.numerator_weights)."""
     i = cuda.grid(1)

@@ -10,6 +10,7 @@ from transitleastsquares.gp.nelder_mead import nelder_mead
 from transitleastsquares.gp.statespace import gp_mean, log_likelihood, rotation_model, spline_model
 
 ROT_KEYS = ["sigma", "period", "Q0", "dQ", "f", "sigma_slow", "rho_slow", "jitter"]
+CONVERGE_MAX = 10  # restarts per likelihood (fit_rotation, converge)
 
 
 # generic starting points (log-parameter shifts of the base guess); the first
@@ -47,7 +48,7 @@ def bin_series(t, y, yerr, width):
 
 
 def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
-                 bin_width=None, passes=1, tol=1e-3):
+                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None):
     """Type-II maximum likelihood for the rotation model.
 
     Without start: n_starts (1-4, default 1) generic starting points, each
@@ -62,7 +63,14 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     when the cadence is shorter than half of it (the kernel timescales are
     >= 0.5 d, so the GP is smooth within a bin). The jitter is fitted per bin
     and converted to per point (x sqrt(median points per bin)); the returned
-    log likelihood is that of the unbinned data."""
+    log likelihood is that of the unbinned data.
+
+    device="gpu": the likelihood of a long (binned) series with the covariance
+    recursion on the GPU; the returned log likelihood stays FP64.
+
+    converge: restart Nelder-Mead from its result (each restart spreads the
+    simplex again) until the log likelihood gains less than this, also from a
+    start; on the GPU first with its likelihood, then in FP64."""
     m = np.ones(len(t), bool) if mask is None else mask
     tm, ym, em = t[m], y[m], yerr[m]
     std = np.std(ym)
@@ -80,12 +88,19 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         base = np.log([std, period_guess, 1.0, 1.0, 0.5, 0.3 * std, 5.0, np.median(em) * 0.5])
         x0s = [base + sh for sh in ROT_START_SHIFTS[:n_starts]]
     else:
-        x0s, passes = [np.log([start[k] for k in ROT_KEYS])], 1
+        # floor: a parameter that underflowed to 0 has log = -inf, which puts NaN into the simplex (no convergence)
+        x0s, passes = [np.log(np.maximum([start[k] for k in ROT_KEYS], np.finfo(float).tiny))], 1
     threads = numba.get_num_threads() if use_threads is None else max(1, int(use_threads))
     # one start: the threads go into the likelihood; several: one start per thread
     ll_threads = threads if len(x0s) == 1 else 1
+    gpu_lik = None
+    if device == "gpu":
+        from transitleastsquares.gpu import driver
 
-    def nll(lx):
+        if len(tm) >= driver.GPU_FIT_MIN:
+            gpu_lik = driver.KalmanLikelihood(tm, ym, em)
+
+    def nll(lx, exact=False):
         with np.errstate(over="ignore"):  # far-out simplex vertices: penalised below
             p = dict(zip(ROT_KEYS, np.exp(lx)))
         if not (0.3 * period_guess < p["period"] < 3 * period_guess and 0.5 < p["rho_slow"] < 100):
@@ -96,7 +111,8 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
                 or p["f"] > 100:
             return 1e25
         try:
-            v = -log_likelihood(rotation_model(p), tm, ym, em, ll_threads)
+            ll = None if gpu_lik is None or exact else gpu_lik(rotation_model(p))
+            v = -(log_likelihood(rotation_model(p), tm, ym, em, ll_threads) if ll is None else ll)
         except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
             return 1e25
         return v if np.isfinite(v) else 1e25
@@ -107,6 +123,16 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
             r = nelder_mead(nll, x0 if best is None else best.x, maxiter=4000, xatol=tol, fatol=tol)
             if best is None or r.fun < best.fun:
                 best = r
+        if converge is None:
+            return best
+        for obj in (nll,) if gpu_lik is None else (nll, lambda lx: nll(lx, True)):
+            for _ in range(CONVERGE_MAX):
+                f0 = obj(best.x)
+                r = nelder_mead(obj, best.x, maxiter=4000, xatol=tol, fatol=tol)
+                if r.fun < f0:
+                    best = r
+                if not f0 - r.fun >= converge:
+                    break
         return best
 
     best = min(_thread_map(run, x0s, use_threads), key=lambda r: r.fun)
