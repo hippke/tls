@@ -35,6 +35,16 @@ def T14(
     return result
 
 
+@numba.jit(fastmath=True, parallel=False, nopython=True, cache=True)
+def T14_durations(R_s, M_s, periods, small):
+    """T14 in days for an array of periods: one call instead of one through
+    the dispatcher per period (with keywords, a slow path of 50 us per call)."""
+    out = numpy.empty(len(periods))
+    for i in range(len(periods)):
+        out[i] = T14(R_s, M_s, periods[i], tls_constants.FRACTIONAL_TRANSIT_DURATION_MAX, small) * periods[i]
+    return out
+
+
 def _density(M, R):
     return M / (R * R * R)
 

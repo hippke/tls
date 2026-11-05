@@ -23,7 +23,7 @@ from transitleastsquares.gp.events import (
 )
 from transitleastsquares.gp.fold_ffa import FOLD_NAMES, fold_ffa, fold_options
 from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_blocks_packed, transition_matrices
-from transitleastsquares.grid import T14, duration_limit_masses, period_grid
+from transitleastsquares.grid import T14_durations, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
 FOLDS = ("blocked",) + FOLD_NAMES
@@ -160,8 +160,8 @@ def _search(
         tls_constants.R_STAR_MIN, tls_constants.R_STAR_MAX,
         tls_constants.M_STAR_MIN, tls_constants.M_STAR_MAX,
     )
-    dmin = np.array([T14(tls_constants.R_STAR_MIN, m_short, P, small=True) * P for P in periods])
-    dmax = np.array([T14(tls_constants.R_STAR_MAX, m_long, P, small=False) * P for P in periods])
+    dmin = T14_durations(tls_constants.R_STAR_MIN, m_short, periods, True)
+    dmax = T14_durations(tls_constants.R_STAR_MAX, m_long, periods, False)
     durs = [dmin.min()]
     while durs[-1] < dmax.max():
         durs.append(durs[-1] * duration_grid_step)

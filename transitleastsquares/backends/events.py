@@ -30,7 +30,7 @@ import numpy
 
 from transitleastsquares import tls_constants
 from transitleastsquares.backends import SearchBackend, SearchResult
-from transitleastsquares.grid import T14
+from transitleastsquares.grid import T14_durations
 
 T0_STEP = 0.1  # T0 grid step as a fraction of the duration (long durations)
 TASKS = 256  # parallel tasks of the single events (balanced, see below)
@@ -178,8 +178,8 @@ class EventsBackend(SearchBackend):
         texp = cad
         delta = cad / float(os.environ.get("TLS_EVENTS_DIV", 4))
         span = t[-1] - t[0]
-        dmin = numpy.array([T14(p.R_star_min, p.M_star_min, P, small=True) * P for P in periods])
-        dmax = numpy.array([T14(p.R_star_max, p.M_star_max, P, small=False) * P for P in periods])
+        dmin = T14_durations(p.R_star_min, p.M_star_min, periods, True)
+        dmax = T14_durations(p.R_star_max, p.M_star_max, periods, False)
         step = tls_constants.DURATION_GRID_STEP
         durs = [dmin.min()]
         while durs[-1] < dmax.max():

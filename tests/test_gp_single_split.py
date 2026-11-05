@@ -67,3 +67,13 @@ def test_search_single_split(name):
     new = _search(t, f, e, model, single="split", **SEARCH)
     assert new["period"] == ref["period"] and new["duration"] == ref["duration"]
     np.testing.assert_allclose(new["dchi2"], ref["dchi2"], rtol=1e-9, atol=1e-9)
+
+
+def test_t14_durations():
+    """One call for all periods gives T14(...) * P per period."""
+    from transitleastsquares.grid import T14, T14_durations
+
+    periods = np.geomspace(0.5, 200.0, 50)
+    for small in (True, False):
+        ref = np.array([T14(1.1, 0.9, P, small=small) * P for P in periods])
+        np.testing.assert_allclose(T14_durations(1.1, 0.9, periods, small), ref, rtol=1e-14)
