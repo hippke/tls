@@ -168,7 +168,7 @@ def test_tail_operators_gpu(name):
     Kg, S, ey = kalman_whiten(t, y, yerr**2 + model.jitter**2, kinds, starts, pars, P0, 1)
     ey[:model.n_diffuse] = 0.0
     W, w = tail_operators(A, Kg, S, model.H, ey, 1)
-    Wd, wd, zd, _ = driver.tail_operators_gpu(A, Kg, S, model.H, ey)
+    Wd, wd, zd = driver.tail_operators_gpu(driver.gains_on_device(A, Kg, S, model.H), ey)
     Wg, wg, zg = Wd.copy_to_host(), wd.copy_to_host(), zd.copy_to_host()
     scale = np.abs(W).max(axis=(1, 2))[:, None, None] + 1e-30
     z = numerator_weights(ey, S, Kg, w)
@@ -192,3 +192,77 @@ def test_trend_gpu(name):
     amp = np.ptp(ref)
     print(name, "max |trend_gpu - trend| / amplitude", np.max(np.abs(new - ref)) / amp)
     assert np.max(np.abs(new - ref)) < 1e-5 * amp
+
+
+def _long_case(name):
+    """25 s cadence, 100k points, gaps, heteroscedastic: the range of the kernel."""
+    from transitleastsquares import gp
+
+    r = np.random.default_rng(3)
+    t = np.arange(0.0, 29.0, 25 / 86400)
+    t = t[(t < 10) | (t > 12)]
+    t = t + r.uniform(-1e-7, 1e-7, len(t))
+    e = 1e-3 * (1 + 0.2 * np.sin(t))
+    f = 1 + r.normal(0, 1, len(t)) * e + 3e-3 * np.sin(2 * np.pi * t / 2.3)
+    if name == "rot":
+        return t, f, e, gp.RotationBaseline(sigma=3e-3, period=2.3, Q0=3.0, dQ=20.0, f=0.6, sigma_slow=1e-3, rho_slow=8.0,
+                                            jitter=3e-4)
+    if name == "stiff":  # as fitted to K2-25: a large slow term (FP32 breaks down)
+        return t, f, e, gp.RotationBaseline(sigma=3e-3, period=2.3, Q0=7.446, dQ=612.0, f=1.377, sigma_slow=35e-3,
+                                            rho_slow=100.0, jitter=3e-4)
+    return t, f, e, gp.SplineBaseline(h=0.2, jitter=3e-4, sigma_ref=1e-3, cadence=25 / 86400)
+
+
+@pytest.mark.parametrize("name,where,rk_max,rs_max,re_max", [("rot", "gpu", 1e-3, 1e-4, 1e-3), ("spline", "spline", 1e-5, 1e-5, 1e-5),
+                                                             ("stiff", "check failed", 1e-5, 1e-5, 1e-5),
+                                                             ("k2_rot", "gpu", 1e-3, 1e-3, 2e-3),
+                                                             ("k2_spline", "spline", 1e-5, 1e-5, 1e-5)])
+def test_kalman_gpu(name, where, rk_max, rs_max, re_max, monkeypatch):
+    """The covariance recursion on the device (FP32, restarted per segment from
+    the coarse FP64 pass) gives the FP64 filter's gains and innovations. The
+    K2 cases (30 min cadence: below GPU_KALMAN_MIN, the host filter runs in
+    practice) only check that it holds for real time stamps. Splines stay on
+    the host."""
+    from gp_cases import CASES
+    from transitleastsquares.gp.statespace import kalman_whiten
+    from transitleastsquares.gpu import driver
+
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
+    if name.startswith("k2"):
+        load, baseline = CASES[name]
+        t, f, e = load()
+    else:
+        t, f, e, baseline = _long_case(name)
+    y, yerr = (f - 1) * 1e3, e * 1e3
+    model = baseline._model(t, e)
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)
+    dev, ey2 = driver.kalman_gpu(t, y, R, model)
+    K2, iS2 = dev["K"].copy_to_host(), dev["isS"].copy_to_host()
+    assert dev["kalman"] == where
+    nd = model.n_diffuse
+    rk = np.sqrt(np.mean((K2[nd:] - Kg[nd:]) ** 2) / np.mean(Kg[nd:] ** 2))
+    rs = np.max(np.abs(iS2[nd:] * np.sqrt(S[nd:]) - 1))
+    re = np.abs(ey2[nd:] - ey[nd:]).max()
+    print(name, "n", len(t), "K rms", rk, "S max", rs, "ey max", re, "chi2", np.sum(ey2[nd:] ** 2) - np.sum(ey[nd:] ** 2))
+    assert rk < rk_max
+    assert rs < rs_max
+    assert re < re_max
+
+
+def test_kalman_gpu_check_fails(monkeypatch):
+    """A failed self-check of the FP32 recursion falls back to the host filter."""
+    from transitleastsquares.gp.statespace import kalman_whiten
+    from transitleastsquares.gpu import driver
+
+    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
+    monkeypatch.setattr(driver, "RICCATI_CHECK_TOL", 1e-12)
+    t, f, e, baseline = _long_case("rot")
+    y, yerr = (f - 1) * 1e3, e * 1e3
+    model = baseline._model(t, e)
+    kinds, starts, pars, P0 = model.blocks()
+    R = yerr**2 + model.jitter**2
+    dev, ey2 = driver.kalman_gpu(t, y, R, model)
+    assert dev["kalman"] == "check failed"
+    np.testing.assert_array_equal(ey2, kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)[2])

@@ -70,12 +70,12 @@ def single_white(t, rw, w, t0, delta, durs, nsubs, table, texp, mstep, off, row_
 
 
 @cuda.jit
-def single_gp(t, z, eyd, Ap, starts, sizes, hidx, K, isS, H, W, t0, delta, durs, nsubs, table, texp, mstep, off,
+def single_gp(t, z, eyd, At, idx, starts, sizes, hidx, K, isS, H, W, t0, delta, durs, nsubs, table, texp, mstep, off,
               row_j, ab):
     """gp.events.single_events_split in FP32 (one thread per row): a = sum s z
     minus the diffuse-start terms, b = |L^-1 s|^2 by the filter with the
-    precomputed gains, the diagonal blocks of the transitions (Ap: blocks of
-    1 or 2, gp.events.pack_blocks) and the tail x' W x."""
+    precomputed gains, the diagonal blocks of the transitions (At[idx[i]]:
+    blocks of 1 or 2) and the tail x' W x."""
     i = cuda.grid(1)
     if i >= ab.shape[0]:
         return
@@ -98,15 +98,16 @@ def single_gp(t, z, eyd, Ap, starts, sizes, hidx, K, isS, H, W, t0, delta, durs,
     bb = F0
     last = -1
     while s < n and t[s] < tcm + half:
+        u = idx[s]
         for k in range(nb):  # predict, block-diagonal
             s0 = starts[k]
             if sizes[k] == 2:
                 x0 = x[s0]
                 x1 = x[s0 + 1]
-                xp[s0] = Ap[s, k, 0, 0] * x0 + Ap[s, k, 0, 1] * x1
-                xp[s0 + 1] = Ap[s, k, 1, 0] * x0 + Ap[s, k, 1, 1] * x1
+                xp[s0] = At[u, k, 0, 0] * x0 + At[u, k, 0, 1] * x1
+                xp[s0 + 1] = At[u, k, 1, 0] * x0 + At[u, k, 1, 1] * x1
             else:
-                xp[s0] = Ap[s, k, 0, 0] * x[s0]
+                xp[s0] = At[u, k, 0, 0] * x[s0]
         hx = F0
         for q in range(nh):
             hx += H[hidx[q]] * xp[hidx[q]]
@@ -527,11 +528,12 @@ def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius
 
 
 @cuda.jit(device=True, inline=True)
-def _tail_step(Ap, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tmp):
+def _tail_step(At, idx, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tmp):
     """gp.events._tail_step in FP32 with the transitions as blocks: from
     W_{m+1} = Wn, w_{m+1} = wn to Wm, wm at m = i - 1; F_i in F."""
     nb = starts.shape[0]
     s = isS[i]
+    u = idx[i]
     for k in range(d):
         gv[k] = F0
     for b in range(nb):  # gv = -(H A_i) / sqrt(S_i)
@@ -539,7 +541,7 @@ def _tail_step(Ap, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tm
         for cc in range(sizes[b]):
             acc = F0
             for ll in range(sizes[b]):
-                acc += H[s0 + ll] * Ap[i, b, ll, cc]
+                acc += H[s0 + ll] * At[u, b, ll, cc]
             gv[s0 + cc] = -acc * s
     for r in range(d):  # F = A - K (H A) = A + K gv / s
         for c in range(d):
@@ -548,7 +550,7 @@ def _tail_step(Ap, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tm
         s0 = starts[b]
         for rr in range(sizes[b]):
             for cc in range(sizes[b]):
-                F[s0 + rr, s0 + cc] += Ap[i, b, rr, cc]
+                F[s0 + rr, s0 + cc] += At[u, b, rr, cc]
     for r in range(d):  # tmp = Wn F
         for c in range(d):
             acc = F0
@@ -568,7 +570,7 @@ def _tail_step(Ap, starts, sizes, K, isS, H, ey, i, d, Wn, wn, Wm, wm, F, gv, tm
 
 
 @cuda.jit
-def tail_maps(Ap, starts, sizes, K, isS, H, ey, edges, Phi, C, cc):
+def tail_maps(At, idx, starts, sizes, K, isS, H, ey, edges, Phi, C, cc):
     """Phase 1 of gp.events.tail_operators (one thread per segment k >= 1):
     the segment's affine map W_lo = Phi' W_b Phi + C, w_lo = Phi' w_b + cc,
     composed backwards from its boundary edges[k + 1]."""
@@ -591,7 +593,7 @@ def tail_maps(Ap, starts, sizes, K, isS, H, ey, edges, Phi, C, cc):
             Wn[r, c] = F0
             Ph[r, c] = F1 if r == c else F0
     for m in range(edges[k + 1] - 1, edges[k] - 1, -1):
-        _tail_step(Ap, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
+        _tail_step(At, idx, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
         for r in range(d):
             wn[r] = wm[r]
             for c in range(d):
@@ -613,7 +615,7 @@ def tail_maps(Ap, starts, sizes, K, isS, H, ey, edges, Phi, C, cc):
 
 
 @cuda.jit
-def tail_fill(Ap, starts, sizes, K, isS, H, ey, edges, Wb, wb, W, w):
+def tail_fill(At, idx, starts, sizes, K, isS, H, ey, edges, Wb, wb, W, w):
     """Phase 3 of gp.events.tail_operators (one thread per segment): W, w of
     every point of the segment from the known boundary Wb[k], wb[k]."""
     k = cuda.grid(1)
@@ -632,13 +634,84 @@ def tail_fill(Ap, starts, sizes, K, isS, H, ey, edges, Wb, wb, W, w):
         for c in range(d):
             Wn[r, c] = Wb[k, r, c]
     for m in range(edges[k + 1] - 1, edges[k] - 1, -1):
-        _tail_step(Ap, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
+        _tail_step(At, idx, starts, sizes, K, isS, H, ey, m + 1, d, Wn, wn, Wm, wm, F, gv, tmp)
         for r in range(d):
             wn[r] = wm[r]
             w[m, r] = wm[r]
             for c in range(d):
                 Wn[r, c] = Wm[r, c]
                 W[m, r, c] = Wm[r, c]
+
+
+@cuda.jit
+def riccati_segments(At, Qt, idx, R, starts, sizes, Pk, keys, edges, K, isS):
+    """The covariance recursion (FP32), one thread per segment: from Pk[q]
+    (filtered at the point before keys[q], which is before the segment: the
+    filter forgets the key's error) the gains and 1 / sqrt(S) of the points
+    edges[q]..edges[q + 1] - 1."""
+    q = cuda.grid(1)
+    if q >= Pk.shape[0]:
+        return
+    d = K.shape[1]
+    nb = starts.shape[0]
+    P = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    M = cuda.local.array((MAX_DIM, MAX_DIM), float32)
+    PH = cuda.local.array(MAX_DIM, float32)
+    for r in range(d):
+        for c in range(d):
+            P[r, c] = Pk[q, r, c]
+    lo = edges[q]
+    for i in range(keys[q], edges[q + 1]):
+        u = idx[i]
+        for b in range(nb):  # M = A P
+            s0 = starts[b]
+            if sizes[b] == 2:
+                a00, a01, a10, a11 = At[u, b, 0, 0], At[u, b, 0, 1], At[u, b, 1, 0], At[u, b, 1, 1]
+                for c in range(d):
+                    p0 = P[s0, c]
+                    p1 = P[s0 + 1, c]
+                    M[s0, c] = a00 * p0 + a01 * p1
+                    M[s0 + 1, c] = a10 * p0 + a11 * p1
+            else:
+                a00 = At[u, b, 0, 0]
+                for c in range(d):
+                    M[s0, c] = a00 * P[s0, c]
+        for b in range(nb):  # P = M A' + Q
+            s0 = starts[b]
+            if sizes[b] == 2:
+                a00, a01, a10, a11 = At[u, b, 0, 0], At[u, b, 0, 1], At[u, b, 1, 0], At[u, b, 1, 1]
+                for r in range(d):
+                    m0 = M[r, s0]
+                    m1 = M[r, s0 + 1]
+                    P[r, s0] = m0 * a00 + m1 * a01
+                    P[r, s0 + 1] = m0 * a10 + m1 * a11
+                P[s0, s0] += Qt[u, b, 0, 0]
+                P[s0, s0 + 1] += Qt[u, b, 0, 1]
+                P[s0 + 1, s0] += Qt[u, b, 1, 0]
+                P[s0 + 1, s0 + 1] += Qt[u, b, 1, 1]
+            else:
+                a00 = At[u, b, 0, 0]
+                for r in range(d):
+                    P[r, s0] = M[r, s0] * a00
+                P[s0, s0] += Qt[u, b, 0, 0]
+        s = R[i]
+        for r in range(d):  # H = 1 on each block's first state
+            acc = F0
+            for b in range(nb):
+                acc += P[r, starts[b]]
+            PH[r] = acc
+        for b in range(nb):
+            s += PH[starts[b]]
+        inv = F1 / s
+        if i >= lo:
+            isS[i] = float32(math.sqrt(inv))
+            for r in range(d):
+                K[i, r] = PH[r] * inv
+        for r in range(d):
+            for c in range(r, d):
+                v = P[r, c] - PH[r] * PH[c] * inv
+                P[r, c] = v
+                P[c, r] = v
 
 
 @cuda.jit

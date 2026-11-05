@@ -40,20 +40,14 @@ def single_events_gp(t, z, eyd, A, Kg, S, H, W, t0, delta, durs, nsub, table, te
     """gp.events.single_events_split on the GPU (FP32; the gains, transitions
     and tail operator come from the FP64 CPU passes; the transitions as their
     diagonal blocks): device array (rows, 2)."""
-    from transitleastsquares.gp.events import pack_blocks, transition_blocks
-
     total = int(off[-1])
     d_ab = cuda.device_array((total, 2), np.float32)
     nsubs = np.full(len(durs), nsub, np.int32)
-    starts, sizes = transition_blocks(A)
-    if sizes.max() > 2:
-        raise ValueError("GPU single events: transition blocks of more than 2 states")
-    Ap = pack_blocks(A, starts, sizes)
+    dev = gains_on_device(A, Kg, S, H)
     hidx = np.nonzero(H)[0].astype(np.int64)
     K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
         cuda.to_device(np.ascontiguousarray(t, float)), cuda.to_device(_f32(z)), cuda.to_device(_f32(eyd)),
-        cuda.to_device(_f32(Ap)), cuda.to_device(starts), cuda.to_device(sizes), cuda.to_device(hidx),
-        cuda.to_device(_f32(Kg)), cuda.to_device(_f32(1.0 / np.sqrt(S))), cuda.to_device(_f32(H)),
+        dev["At"], dev["idx"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"],
         cuda.to_device(_f32(W)), float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs),
         cuda.to_device(_f32(table)), np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)),
         cuda.to_device(np.asarray(off, np.int64)), cuda.to_device(_row_j(off)), d_ab)
@@ -62,15 +56,14 @@ def single_events_gp(t, z, eyd, A, Kg, S, H, W, t0, delta, durs, nsub, table, te
 
 def single_events_gp_dev(t, z, dev, W, t0, delta, durs, nsub, table, texp, mstep, off):
     """single_events_gp with the inputs already on the device (from
-    tail_operators_gpu): z, W device arrays; dev the packed transitions and
-    gains."""
+    tail_operators_gpu): z, W device arrays; dev the transitions and gains."""
     total = int(off[-1])
     d_ab = cuda.device_array((total, 2), np.float32)
     nsubs = np.full(len(durs), nsub, np.int32)
     hidx = np.nonzero(dev["H"].copy_to_host())[0].astype(np.int64)
     K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
         cuda.to_device(np.ascontiguousarray(t, float)), z, cuda.to_device(np.zeros(0, np.float32)),
-        dev["Ap"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"], W,
+        dev["At"], dev["idx"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"], W,
         float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs), cuda.to_device(_f32(table)),
         np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)), cuda.to_device(np.asarray(off, np.int64)),
         cuda.to_device(_row_j(off)), d_ab)
@@ -80,33 +73,130 @@ def single_events_gp_dev(t, z, dev, W, t0, delta, durs, nsub, table, texp, mstep
 TAIL_SEGMENT = 256  # points per GPU thread in the tail recursion
 
 
-def tail_operators_gpu(A, Kg, S, H, ey):
-    """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
-    segment on the device, joined backwards on the CPU in FP64, then W, w
-    per segment on the device) and the numerator weights z. A: the dense
-    transitions, or their blocks (Ap, starts, sizes) from
-    statespace.transition_blocks_packed. Returns device arrays (W, w, z) and
-    the packed transition blocks and gains on the device (single_events_gp_dev)."""
+def gains_on_device(A, Kg, S, H):
+    """Gains and transitions from the CPU's passes on the device (FP32). A:
+    the dense transitions; per point one table entry."""
     from transitleastsquares.gp.events import pack_blocks, transition_blocks
 
-    if isinstance(A, tuple):
-        Ap, starts, sizes = A
-    else:
-        starts, sizes = transition_blocks(A)
-        Ap = pack_blocks(A, starts, sizes)
-    n, d = Kg.shape[0], Kg.shape[1]
+    starts, sizes = transition_blocks(A)
     if sizes.max() > 2:
-        raise ValueError("GPU tail: transition blocks of more than 2 states")
-    dev = dict(Ap=cuda.to_device(_f32(Ap)), starts=cuda.to_device(starts),
-               sizes=cuda.to_device(sizes), K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))),
-               H=cuda.to_device(_f32(H)), ey=cuda.to_device(_f32(ey)))
+        raise ValueError("GPU: transition blocks of more than 2 states")
+    return dict(At=cuda.to_device(_f32(pack_blocks(A, starts, sizes))),
+                idx=cuda.to_device(np.arange(len(A), dtype=np.int32)), starts=cuda.to_device(starts),
+                sizes=cuda.to_device(sizes), K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))),
+                H=cuda.to_device(_f32(H)))
+
+
+GPU_KALMAN_MIN = 50000  # points; below, the FP64 filter on the CPU is as fast and exact
+RICCATI_SEGMENT = 256  # points per GPU thread of the covariance recursion
+RICCATI_BURN = 256  # points before each segment, from its key covariance
+RICCATI_BIN = 16  # points per bin of the key pass, at most
+RICCATI_BIN_W0 = 0.1  # bin width, at most, in units of the fastest oscillator's 1 / w0
+RICCATI_CHECKS = 32  # segments recomputed in FP64 after the kernel
+RICCATI_CHECK_TOL = 1e-3  # largest relative difference of S in them
+RICCATI_KEY_TOL = 0.2  # ... of S against every segment's key covariance (coarse)
+
+
+def _key_bin(pars, cad):
+    return int(np.clip(RICCATI_BIN_W0 / (pars[:, 1].max() * cad), 1, RICCATI_BIN))
+
+
+def _riccati_ok(t, R, kinds, starts, pars, At, Qt, idx, Pk, keys, edges, Kh, iSh):
+    """Self-check of the FP32 recursion (large slow terms with the mean can
+    break it: their covariance cancels in S). All values finite; every segment
+    near its key's S; a sample of the segments, recomputed in FP64 from the
+    same key covariances, the same S (well below the tolerance on the hardest
+    models it is accepted for)."""
+    from transitleastsquares.gp.statespace import _gains_segment, key_innovation_variance
+
+    if not (np.isfinite(iSh).all() and np.isfinite(Kh).all()):
+        return False
+    Sk = key_innovation_variance(At, Qt, idx, R, kinds, starts, Pk, keys)
+    if not np.max(np.abs(iSh[keys] * np.sqrt(np.maximum(Sk, 0.0)) - 1)) <= 0.5 * RICCATI_KEY_TOL:
+        return False
+    d = Pk.shape[1]
+    for q in np.unique(np.linspace(0, len(keys) - 1, RICCATI_CHECKS).astype(np.int64)):
+        a, b = keys[q] - 1, edges[q + 1]  # from the key's point (filtered: its P is the key)
+        m = b - a
+        Kx, Sx, ex = np.empty((m, d)), np.empty(m), np.empty(m)
+        _gains_segment(t[a:b], np.zeros(m), R[a:b], kinds, starts, pars, np.zeros(d), Pk[q].copy(), 1, m, Kx, Sx, ex)
+        lo = edges[q] - a
+        if not np.max(np.abs(iSh[edges[q]:b] * np.sqrt(Sx[lo:]) - 1)) <= 0.5 * RICCATI_CHECK_TOL:
+            return False
+    return True
+
+
+def kalman_gpu(t, y, R, model, nseg=1):
+    """The Kalman pass of a GPU search: (dev, ey) with the gains, 1 / sqrt(S)
+    and transitions on the device (FP32, as gains_on_device) and ey (FP64) on
+    the host. Long light curves: the covariance recursion runs on the device,
+    per segment from a covariance of the coarse pass (riccati_keys, FP64), so
+    that FP32 rounding cannot accumulate; then the state recursion in FP64 on
+    the host. Each segment starts RICCATI_BURN points early: the coarse pass is
+    least accurate where the filter's memory is short (low noise), which is
+    where the burn-in removes its error. Short light curves, splines (FP32
+    breaks down on their ill-conditioned covariance) and any failed self-check
+    (_riccati_ok): statespace.kalman_whiten on the host."""
+    from transitleastsquares.gp.statespace import (
+        _block_sizes, kalman_whiten, mean_recursion, riccati_head, riccati_keys, transition_table,
+    )
+
+    kinds, starts, pars, P0 = model.blocks()
+    sizes = _block_sizes(kinds)
+    idx, At, Qt = transition_table(t, kinds, pars)
+    n, d = len(t), P0.shape[0]
+    dev = dict(At=cuda.to_device(_f32(At)), idx=cuda.to_device(idx), starts=cuda.to_device(starts),
+               sizes=cuda.to_device(sizes), H=cuda.to_device(_f32(model.H)))
+
+    def on_host(why):
+        Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+        dev.update(K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))), kalman=why)
+        return dev, ey
+
+    if n < GPU_KALMAN_MIN or n < 2 * RICCATI_SEGMENT:
+        return on_host("short")
+    if np.any(kinds == 1):
+        return on_host("spline")
+    ns = n // RICCATI_SEGMENT
+    edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
+    n0 = int(edges[1])
+    ey = np.empty(n)
+    Kh, iSh = np.empty((n, d), np.float32), np.empty(n, np.float32)
+    x, P = riccati_head(t, y, R, kinds, starts, pars, P0, n0, Kh, iSh, ey)
+    cad = float(np.median(np.diff(t)))
+    keys = np.maximum(edges[1:-1] - RICCATI_BURN, n0)
+    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, keys, _key_bin(pars, cad), 2.0 * cad)
+    d_K, d_iS = cuda.device_array((n, d), np.float32), cuda.device_array(n, np.float32)
+    d_K[:n0].copy_to_device(Kh[:n0])
+    d_iS[:n0].copy_to_device(iSh[:n0])
+    K.riccati_segments[(ns - 1 + 127) // 128, 128](dev["At"], cuda.to_device(_f32(Qt)), dev["idx"],
+                                                   cuda.to_device(_f32(R)), dev["starts"], dev["sizes"],
+                                                   cuda.to_device(_f32(Pk)), cuda.to_device(keys),
+                                                   cuda.to_device(edges[1:]), d_K, d_iS)
+    d_K.copy_to_host(Kh)
+    d_iS.copy_to_host(iSh)
+    if not _riccati_ok(t, R, kinds, starts, pars, At, Qt, idx, Pk, keys, edges[1:], Kh, iSh):
+        return on_host("check failed")
+    mean_recursion(At, idx, y, starts, sizes, Kh, iSh, x, n0, ey)
+    dev.update(K=d_K, isS=d_iS, kalman="gpu")
+    return dev, ey
+
+
+def tail_operators_gpu(dev, ey):
+    """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
+    segment on the device, joined backwards on the CPU in FP64, then W, w
+    per segment on the device) and the numerator weights z. dev: gains and
+    transitions (kalman_gpu or gains_on_device). Returns device arrays
+    (W, w, z); dev gets ey (single_events_gp_dev)."""
+    n, d = dev["K"].shape
+    dev["ey"] = cuda.to_device(_f32(ey))
     nseg = max(1, (n - 1) // TAIL_SEGMENT)
     edges = np.array([(k * (n - 1)) // nseg for k in range(nseg + 1)], np.int64)
     d_edges = cuda.to_device(edges)
     Phi = cuda.device_array((nseg, d, d), np.float32)
     C = cuda.to_device(np.zeros((nseg, d, d), np.float32))
     cc = cuda.to_device(np.zeros((nseg, d), np.float32))
-    args = (dev["Ap"], dev["starts"], dev["sizes"], dev["K"], dev["isS"], dev["H"], dev["ey"], d_edges)
+    args = (dev["At"], dev["idx"], dev["starts"], dev["sizes"], dev["K"], dev["isS"], dev["H"], dev["ey"], d_edges)
     if nseg > 1:
         K.tail_maps[(nseg - 1 + 127) // 128, 128](*args, Phi, C, cc)
     Ph, Ch, ch = (x.copy_to_host().astype(float) for x in (Phi, C, cc))
@@ -121,7 +211,7 @@ def tail_operators_gpu(A, Kg, S, H, ey):
     K.tail_fill[(nseg + 127) // 128, 128](*args, cuda.to_device(_f32(Wb)), cuda.to_device(_f32(wb)), W, w)
     z = cuda.device_array(n, np.float32)
     K.numerator[(n + 255) // 256, 256](dev["ey"], dev["isS"], dev["K"], w, z)
-    return W, w, z, dev
+    return W, w, z
 
 
 @functools.lru_cache(maxsize=None)
@@ -295,14 +385,11 @@ def _ffa_batch(d_ab, d_off, d_mstep, d_periods, delta, blocks, bj, bp, bm, sizes
 
 def trend_gpu(model, t, y, R, nseg=1):
     """Posterior mean of the baseline (ppt) without a smoother: f = y - R z
-    with z = C^-1 y from the Kalman pass (CPU, FP64) and the tail recursion
+    with z = C^-1 y from the Kalman pass (kalman_gpu) and the tail recursion
     and numerator weights on the GPU (FP32), as gp.events.numerator_weights.
     Equals the RTS smoother up to rounding (spline GP: up to a few % at its
     ill-conditioned diffuse start)."""
-    from transitleastsquares.gp.statespace import kalman_whiten, transition_blocks_packed
-
-    kinds, starts, pars, P0 = model.blocks()
-    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+    dev, ey = kalman_gpu(t, y, R, model, nseg)
     ey[:model.n_diffuse] = 0.0
-    _, _, z, _ = tail_operators_gpu(transition_blocks_packed(t, kinds, starts, pars), Kg, S, model.H, ey)
+    _, _, z = tail_operators_gpu(dev, ey)
     return y - R * z.copy_to_host().astype(float)

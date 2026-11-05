@@ -22,7 +22,7 @@ from transitleastsquares.gp.events import (
     template_table,
 )
 from transitleastsquares.gp.fold_ffa import FOLD_NAMES, fold_ffa, fold_options
-from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_blocks_packed, transition_matrices
+from transitleastsquares.gp.statespace import kalman_whiten, n_segments, transition_matrices
 from transitleastsquares.grid import T14_durations, duration_limit_masses, period_grid
 from transitleastsquares.stats import spectra
 
@@ -142,12 +142,14 @@ def _search(
     kinds, starts, pars, P0 = model.blocks()
     R = yerr**2 + model.jitter**2
     nseg = n_segments(len(t), numba.get_num_threads())
-    if device == "gpu":  # only the diagonal blocks (no dense (n, d, d) array)
-        A = transition_blocks_packed(t, kinds, starts, pars)
+    if device == "gpu":  # the gains stay on the device (FP32)
+        from transitleastsquares.gpu import driver
+
+        dev, ey = driver.kalman_gpu(t, y, R, model, nseg)
     else:
         A = transition_matrices(t, kinds, starts, pars, model.dim)
-    clock("matrices")
-    K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+        clock("matrices")
+        K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
     nd = model.n_diffuse
     eyd = ey[:nd].copy()  # (single="split" removes their terms itself)
     ey[:nd] = 0.0  # diffuse start: no information
@@ -181,10 +183,8 @@ def _search(
     else:
         mstep = np.ones(len(durs), np.int64)
     if device == "gpu":  # split single events and the fold on the device (FP32)
-        from transitleastsquares.gpu import driver
-
         off = compact_offsets(len(tc), mstep)
-        W_d, _, z_d, dev = driver.tail_operators_gpu(A, K, S, model.H, ey)  # FP32, on the device
+        W_d, _, z_d = driver.tail_operators_gpu(dev, ey)  # FP32, on the device
         clock("tail_operators")
         d_ab = driver.single_events_gp_dev(t, z_d, dev, W_d, tc[0], delta, durs, nsub, table, texp, mstep, off)
     elif strided:  # compact layout: per duration only the epochs it uses
