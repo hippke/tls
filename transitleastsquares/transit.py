@@ -146,15 +146,44 @@ def fractional_transit(
     return result
 
 
+class _LazyTemplates:
+    """lc_arr of get_cache for a backend that does not search with the templates:
+    a template is computed when it is asked for (each costs milliseconds on long
+    light curves, and the final T0 fit needs one)."""
+
+    def __init__(self, durations, maxwidth_in_samples, params):
+        self.durations, self.maxwidth, self.params = durations, maxwidth_in_samples, params
+        self.reference = None
+
+    def __len__(self):
+        return len(self.durations)
+
+    def __getitem__(self, row):
+        if self.reference is None:
+            self.reference = reference_transit(samples=self.maxwidth, **self.params)
+        scaled = fractional_transit(duration=self.durations[row], maxwidth=numpy.max(self.durations),
+                                    depth=tls_constants.SIGNAL_DEPTH, samples=self.maxwidth,
+                                    cached_reference_transit=self.reference, **self.params)
+        inside = numpy.where(scaled < (1 - tls_constants.NUMERICAL_STABILITY_CUTOFF))
+        return scaled[numpy.min(inside):numpy.max(inside) + 1]
+
+
 def get_cache(
-    durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark, verbose=True
+    durations, maxwidth_in_samples, per, rp, a, inc, ecc, w, u, limb_dark, verbose=True, lazy=False
 ):
     """Create one template per trial duration.
 
     Returns (lc_cache_overview, lc_arr): a structured array with the fields
     duration, width_in_samples and overshoot per row, and a 1-D object array
     with the (variable length) in-transit part of each template.
+
+    lazy: if even the shortest template has many samples, so that no row can be
+    left out: only the durations in the overview, and templates on demand.
     """
+    if lazy and numpy.min(durations) / numpy.max(durations) * maxwidth_in_samples >= 100:
+        overview = numpy.zeros(numpy.size(durations), dtype=[("duration", "f8"), ("width_in_samples", "i8"), ("overshoot", "f8")])
+        overview["duration"] = durations
+        return overview, _LazyTemplates(durations, maxwidth_in_samples, dict(per=per, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u=u, limb_dark=limb_dark))
 
     if verbose:
         print("Creating model cache for", str(len(durations)), "durations")

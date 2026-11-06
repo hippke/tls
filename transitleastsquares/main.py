@@ -82,7 +82,7 @@ class transitleastsquares:
         )
         return periods, durations
 
-    def _templates(self, durations):
+    def _templates(self, durations, lazy=False):
         maxwidth_in_samples = int(numpy.max(durations) * numpy.size(self.y))
         if maxwidth_in_samples % 2 != 0:
             maxwidth_in_samples = maxwidth_in_samples + 1
@@ -90,6 +90,7 @@ class transitleastsquares:
             durations=durations,
             maxwidth_in_samples=maxwidth_in_samples,
             verbose=self.verbose,
+            lazy=lazy,
             **self._template_params(),
         )
         return lc_cache_overview, lc_arr
@@ -154,6 +155,7 @@ class transitleastsquares:
                 durations=lc_cache_overview["duration"],
                 maxwidth_in_samples=maxwidth,
                 verbose=False,
+                lazy=not backend.uses_templates,
                 **self._template_params(),
             )
             # rows of the binned cache -> rows of the unbinned cache
@@ -219,7 +221,7 @@ class transitleastsquares:
         self._log(tls_constants.TLS_VERSION)
 
         periods, durations = self._grids()
-        lc_cache_overview, lc_arr = self._templates(durations)
+        lc_cache_overview, lc_arr = self._templates(durations, lazy=not backend.uses_templates)
 
         self._log(
             f"Searching {len(self.y)} data points, {len(periods)} periods from "

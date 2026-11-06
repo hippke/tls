@@ -107,3 +107,18 @@ def test_events_uses_user_n_transits_min():
         backend="events", n_transits_min=1, use_threads=1, show_progress_bar=False, verbose=False,
         period_min=5, period_max=39)
     assert numpy.min(numpy.abs(numpy.asarray(r.transit_times) - 23.0)) < 0.1
+
+
+def test_lazy_templates_equal():
+    """Templates on demand (a backend that does not search with them) equal the full cache."""
+    from transitleastsquares import transit
+
+    kw = dict(per=12.9, rp=0.1, a=23.1, inc=89.0, ecc=0.0, w=90.0, u=[0.4804, 0.1867], limb_dark="quadratic", verbose=False)
+    durations = numpy.geomspace(0.001, 0.05, 12)
+    ov, arr = transit.get_cache(durations, 200000, **kw)
+    ov_l, arr_l = transit.get_cache(durations, 200000, lazy=True, **kw)
+    assert isinstance(arr_l, transit._LazyTemplates) and len(arr_l) == len(arr)
+    numpy.testing.assert_array_equal(ov_l["duration"], ov["duration"])
+    for row in (0, 5, 11):
+        numpy.testing.assert_array_equal(arr_l[row], arr[row])
+    assert not isinstance(transit.get_cache(durations, 2000, lazy=True, **kw)[1], transit._LazyTemplates)

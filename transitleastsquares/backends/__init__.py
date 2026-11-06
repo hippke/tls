@@ -84,6 +84,7 @@ class SearchBackend:
     """Base class. Subclasses must implement :meth:`search`."""
 
     name = "base"
+    uses_templates = True  # searches with the transit templates (else they are made on demand, for the final T0 fit)
     exact = True  # reproduces the reference statistic up to rounding
 
     def search(

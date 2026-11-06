@@ -162,6 +162,7 @@ class EventsBackend(SearchBackend):
 
     name = "events"
     exact = False
+    uses_templates = False
     same_statistic = False  # least-squares depth on its own grids, not TLS's statistic
     fold = "blocked"  # or "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse" (gp.fold_ffa); env TLS_EVENTS_FOLD
 
