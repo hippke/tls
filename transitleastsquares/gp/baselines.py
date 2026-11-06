@@ -268,11 +268,11 @@ class SplineBaseline(Baseline):
     def fit(cls, t, y, dy, use=None, h_range=(0.05, 5.0), use_threads=None, start=None, device="cpu"):
         """Type-II maximum likelihood for h and the jitter (3 starts in up to
         use_threads threads, or a single pass from start, a previous
-        SplineBaseline), on the CPU for any device. Returns (baseline, log likelihood)."""
+        SplineBaseline); device: see fitting.fit_spline. Returns (baseline, log likelihood)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         s = None if start is None else dict(h=start.h, jitter=start._jitter)
         p, ll_ppt = fitting.fit_spline(t, (y - 1) * PPT, dy * PPT, mask=use, h_range=h_range,
-                                       start=s, use_threads=use_threads)
+                                       start=s, use_threads=use_threads, device=device)
         b = cls(p["h"], cadence=p["cadence"])
         b._jitter, b._sigma_ref = p["jitter"], p["sigma"]
         n = len(t) if use is None else int(np.sum(use))

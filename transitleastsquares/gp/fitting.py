@@ -147,19 +147,31 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     return p, log_likelihood(rotation_model(p), tm, ym, em, threads) if final else None
 
 
-def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None):
+def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None, device="cpu"):
     """Type-II maximum likelihood for the smoothing length h (and jitter):
     3 starts (in up to use_threads threads), or a single pass from start
-    (a previous solution)."""
+    (a previous solution). device="gpu": the likelihood of a long series from
+    segment elements on the GPU (one start at a time); the returned log
+    likelihood is the exact FP64 filter's."""
     m = np.ones(len(t), bool) if mask is None else mask
     tm, ym, em = t[m], y[m], yerr[m]
     sig, cad = np.median(yerr), np.median(np.diff(t))
+
+    gpu_lik = None
+    if device == "gpu":
+        from transitleastsquares.gpu import driver
+
+        if len(tm) >= driver.GPU_FIT_MIN:
+            gpu_lik = driver.KalmanLikelihood(tm, ym, em)
+            use_threads = 1
 
     def nll(lx):
         h, jit = np.exp(lx)
         if not h_range[0] <= h <= h_range[1]:
             return 1e25
-        v = -log_likelihood(spline_model(h, sig, cad, jit), tm, ym, em)
+        model = spline_model(h, sig, cad, jit)
+        ll = None if gpu_lik is None else gpu_lik(model)
+        v = -(log_likelihood(model, tm, ym, em) if ll is None else ll)
         return v if np.isfinite(v) else 1e25
 
     starts = [np.log([h0, sig]) for h0 in (0.1, 0.3, 1.0)] if start is None else \
@@ -170,7 +182,8 @@ def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threa
 
     best = min(_thread_map(run, starts, use_threads), key=lambda r: r.fun)
     h, jit = np.exp(best.x)
-    return dict(h=h, jitter=jit, sigma=sig, cadence=cad), -best.fun
+    ll = -best.fun if gpu_lik is None else log_likelihood(spline_model(h, sig, cad, jit), tm, ym, em)
+    return dict(h=h, jitter=jit, sigma=sig, cadence=cad), ll
 
 
 def clip_flares(make_model, fit, t, y, yerr, nsigma=4.0, max_iter=5):
