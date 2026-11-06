@@ -593,6 +593,111 @@ def _combine(x, P, F, c, Pe, J, eta, const, work):
     return -0.5 * const + quad - 0.5 * logdet
 
 
+@numba.njit(cache=True)
+def join_elements(t, y, R, kinds, starts, pars, P0, n_diffuse, n0, F, c, Pe, J, eta, const):
+    """The log likelihood from segment elements of the points n0... (kernels.segment_elements):
+    the exact filter over the first n0 points (R may hold only those), which hold the
+    diffuse start, then each element in order."""
+    x, P = np.zeros(P0.shape[0]), P0.copy()
+    ll = _filter_segment(t, y, R, kinds, starts, pars, x, P, 0, n0, n_diffuse)
+    work = _combine_work(P0.shape[0])
+    for k in range(len(const)):
+        ll += _combine(x, P, F[k], c[k], Pe[k], J[k], eta[k], const[k], work)
+    return ll
+
+
+@numba.njit(cache=True)
+def element_states(t, y, R, kinds, starts, pars, P0, n0, F, c, Pe, J, eta, const):
+    """The filter's K, S, ey over the first n0 points, and from the segment elements of
+    the points after them the filtered state before each segment (x0, P0s)."""
+    nk, d = len(const), P0.shape[0]
+    K, S, ey = np.empty((n0, d)), np.empty(n0), np.empty(n0)
+    x, P = np.zeros(d), P0.copy()
+    _gains_segment(t, y, R, kinds, starts, pars, x, P, 0, n0, K, S, ey)
+    x0, P0s = np.empty((nk, d)), np.empty((nk, d, d))
+    work = _combine_work(d)
+    for k in range(nk):
+        x0[k] = x
+        P0s[k] = P
+        _combine(x, P, F[k], c[k], Pe[k], J[k], eta[k], const[k], work)
+    return K, S, ey, x0, P0s
+
+
+@numba.njit(cache=True)
+def tail_chain(Phi, C, cc):
+    """W, w at the end of each segment of the tail recursion (FP64) from the maps of generated.tail_maps:
+    W(edges[k + 1]) = Phi' Wb Phi + C of segment k + 1."""
+    nk, d = len(cc), cc.shape[1]
+    Wb, wb = np.zeros((nk, d, d)), np.zeros((nk, d))
+    M = np.empty((d, d))
+    for k in range(nk - 2, -1, -1):
+        q = k + 1
+        for r in range(d):
+            for c in range(d):
+                acc = 0.0
+                for l in range(d):
+                    acc += Wb[q, r, l] * Phi[q, l, c]
+                M[r, c] = acc
+        for r in range(d):
+            for c in range(d):
+                acc = C[q, r, c]
+                for l in range(d):
+                    acc += Phi[q, l, r] * M[l, c]
+                Wb[k, r, c] = acc
+            acc = cc[q, r]
+            for l in range(d):
+                acc += Phi[q, l, r] * wb[q, l]
+            wb[k, r] = acc
+    return Wb, wb
+
+
+@numba.njit(cache=True)
+def adjoint_chain(W, v, w_last):
+    """w at the last point of each segment from the maps of kernels.adjoint_maps, backwards from
+    w_last at the last point of the series; returns also w at the point before them."""
+    nk, d = len(v), v.shape[1]
+    w = np.empty((nk, d))
+    cur = w_last.copy()
+    for k in range(nk - 1, -1, -1):
+        w[k] = cur
+        nxt = v[k].copy()
+        for r in range(d):
+            for c in range(d):
+                nxt[r] += W[k, r, c] * cur[c]
+        cur = nxt
+    return w, cur
+
+
+@numba.njit(cache=True)
+def adjoint_head(t, y, R, kinds, starts, pars, K, S, ey, w, out):
+    """out[i] = y[i] - R[i] z[i] over the first len(S) points, from w after them (mean_adjoint)."""
+    nb, d = len(kinds), K.shape[1]
+    size = _block_sizes(kinds)
+    Ab, Qb = np.zeros((nb, 2, 2)), np.zeros((nb, 2, 2))
+    dt_last = -1.0
+    w = w.copy()
+    for i in range(len(S) - 1, -1, -1):
+        z = ey[i] / math.sqrt(S[i])
+        for r in range(d):
+            z += K[i, r] * w[r]
+        out[i] = y[i] - R[i] * z
+        if i == 0:
+            break
+        dt = t[i] - t[i - 1]
+        if dt != dt_last:
+            for k in range(nb):
+                _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
+            dt_last = dt
+        for k in range(nb):
+            s0 = starts[k]
+            if size[k] == 1:
+                w[s0] = Ab[k, 0, 0] * (w[s0] - z)
+            else:
+                a, b = w[s0] - z, w[s0 + 1]
+                w[s0] = Ab[k, 0, 0] * a + Ab[k, 1, 0] * b
+                w[s0 + 1] = Ab[k, 0, 1] * a + Ab[k, 1, 1] * b
+
+
 @numba.njit(cache=True, parallel=True)
 def kalman_loglik_parallel(t, y, R, kinds, starts, pars, P0, n_diffuse, nseg):
     """kalman_loglik with the data split into nseg segments, filtered in
@@ -1069,105 +1174,6 @@ def kalman_loglik_table(idx, At, Qt, y, R, kinds, starts, P0, n_diffuse):
                 v = P[r, c] - PH[r] * PH[c] / s
                 P[r, c] = v
                 P[c, r] = v
-    return ll
-
-
-@numba.njit(cache=True)
-def riccati_head(t, y, R, kinds, starts, pars, P0, n0, K, isS, ey):
-    """The exact filter (FP64) over the first n0 points, which hold the
-    diffuse start: K, 1 / sqrt(S), ey stored; returns the filtered x, P."""
-    d = P0.shape[0]
-    x = np.zeros(d)
-    P = P0.copy()
-    K0, S0 = np.empty((n0, d)), np.empty(n0)
-    _gains_segment(t, y, R, kinds, starts, pars, x, P, 0, n0, K0, S0, ey)
-    for i in range(n0):
-        isS[i] = 1.0 / math.sqrt(S0[i])
-        for r in range(d):
-            K[i, r] = K0[i, r]
-    return x, P
-
-
-@numba.njit(cache=True)
-def riccati_keys(t, R, kinds, starts, pars, P, n0, edges, kbin, gap):
-    """Filtered covariance at each t[edges[s] - 1] from P at t[n0 - 1]: the
-    Riccati recursion (FP64) over bins of up to kbin points with their summed
-    information (R_b = 1 / sum(1 / R), at their weighted mean time, no bin
-    across a gap >= `gap`), which needs no state and costs 1 / kbin."""
-    nb, d = len(kinds), P.shape[0]
-    size = _block_sizes(kinds)
-    Ab, Qb = np.zeros((nb, 2, 2)), np.zeros((nb, 2, 2))
-    M, PH, x = np.empty((d, d)), np.empty(d), np.zeros(d)
-    P = P.copy()
-    out = np.empty((len(edges), d, d))
-    tprev, i = t[n0 - 1], n0
-    for s in range(len(edges)):
-        hi = edges[s]
-        while i < hi:
-            j, iw, wt = i, 0.0, 0.0
-            while j < hi and j - i < kbin and (j == i or t[j] - t[j - 1] < gap):
-                iw += 1.0 / R[j]
-                wt += t[j] / R[j]
-                j += 1
-            tb = wt / iw
-            for k in range(nb):
-                _block_transition(kinds[k], pars[k], tb - tprev, Ab[k], Qb[k])
-            _predict(kinds, starts, size, Ab, Qb, P, M, x)
-            sv = 1.0 / iw
-            for r in range(d):
-                acc = 0.0
-                for k in range(nb):
-                    acc += P[r, starts[k]]
-                PH[r] = acc
-            for k in range(nb):
-                sv += PH[starts[k]]
-            for r in range(d):
-                for c in range(r, d):
-                    v = P[r, c] - PH[r] * PH[c] / sv
-                    P[r, c] = v
-                    P[c, r] = v
-            tprev = tb
-            i = j
-        out[s] = P  # (filtered at the last bin's time)
-        dt = t[hi - 1] - tprev
-        if dt > 0:
-            for k in range(nb):
-                _block_transition(kinds[k], pars[k], dt, Ab[k], Qb[k])
-            _predict(kinds, starts, size, Ab, Qb, out[s], M, x)
-    return out
-
-
-@numba.njit(cache=True)
-def mean_recursion(At, idx, y, starts, sizes, K, isS, x, n0, ey):
-    """The state recursion (FP64, K and 1 / sqrt(S) as given) from x at point
-    n0 - 1: ey of the points n0... ."""
-    nb, d = starts.shape[0], K.shape[1]
-    for i in range(n0, len(y)):
-        u = idx[i]
-        for k in range(nb):
-            s0 = starts[k]
-            if sizes[k] == 1:
-                x[s0] = At[u, k, 0, 0] * x[s0]
-            else:
-                a, b = x[s0], x[s0 + 1]
-                x[s0] = At[u, k, 0, 0] * a + At[u, k, 0, 1] * b
-                x[s0 + 1] = At[u, k, 1, 0] * a + At[u, k, 1, 1] * b
-        hx = 0.0
-        for k in range(nb):
-            hx += x[starts[k]]
-        innov = y[i] - hx
-        ey[i] = innov * isS[i]
-        for r in range(d):
-            x[r] += K[i, r] * innov
-
-
-@numba.njit(cache=True)
-def loglik_from_whitened(ey, isS, n_diffuse):
-    """Log likelihood from the normalised innovations and 1 / sqrt(S), as
-    _filter_segment."""
-    ll = 0.0
-    for i in range(n_diffuse, len(ey)):
-        ll -= 0.5 * (math.log(2 * math.pi) - 2.0 * math.log(isS[i]) + ey[i] * ey[i])
     return ll
 
 

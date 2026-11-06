@@ -170,7 +170,9 @@ def test_tail_operators_gpu(name):
     W, w = tail_operators(A, Kg, S, model.H, ey, 1)
     Wd, wd, zd = driver.tail_operators_gpu(driver.gains_on_device(A, Kg, S, model.H), ey)
     Wg, wg, zg = Wd.copy_to_host(), wd.copy_to_host(), zd.copy_to_host()
-    scale = np.abs(W).max(axis=(1, 2))[:, None, None] + 1e-30
+    iu = np.triu_indices(W.shape[1])
+    W, Wg = W[:, iu[0], iu[1]], Wg[:, iu[0], iu[1]]  # the kernel fills the upper triangle
+    scale = np.abs(W).max(axis=1)[:, None] + 1e-30
     z = numerator_weights(ey, S, Kg, w)
     print(name, "W rel", np.max(np.abs(Wg - W) / scale), "z rel", np.max(np.abs(zg - z)) / np.abs(z).max())
     assert np.max(np.abs(Wg - W) / scale) < 1e-4
@@ -218,8 +220,8 @@ def _long_case(name):
                                                              ("k2_rot", "gpu", 1e-3, 1e-3, 2e-3),
                                                              ("k2_spline", "gpu", 1e-3, 1e-3, 2e-3)])
 def test_kalman_gpu(name, where, rk_max, rs_max, re_max, monkeypatch):
-    """The covariance recursion on the device (FP32, restarted per segment from
-    the coarse FP64 pass) gives the FP64 filter's gains and innovations. The
+    """The Kalman pass on the device (FP64 elements and filter, FP32 gains kept)
+    gives the FP64 filter's gains and innovations. The
     K2 cases (30 min cadence: below GPU_KALMAN_MIN, the host filter runs in
     practice) only check that it holds for real time stamps."""
     from gp_cases import CASES
@@ -250,23 +252,6 @@ def test_kalman_gpu(name, where, rk_max, rs_max, re_max, monkeypatch):
     assert re < re_max
 
 
-def test_kalman_gpu_check_fails(monkeypatch):
-    """A failed self-check of the FP32 recursion falls back to the host filter."""
-    from transitleastsquares.gp.statespace import kalman_whiten
-    from transitleastsquares.gpu import driver
-
-    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
-    monkeypatch.setattr(driver, "RICCATI_CHECK_TOL", 1e-12)
-    t, f, e, baseline = _long_case("rot")
-    y, yerr = (f - 1) * 1e3, e * 1e3
-    model = baseline._model(t, e)
-    kinds, starts, pars, P0 = model.blocks()
-    R = yerr**2 + model.jitter**2
-    dev, ey2 = driver.kalman_gpu(t, y, R, model)
-    assert dev["kalman"] == "check failed"
-    np.testing.assert_array_equal(ey2, kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)[2])
-
-
 @pytest.mark.parametrize("name", ["rot", "stiff", "spline"])
 def test_kalman_gpu_masked_start(name, monkeypatch):
     """Masked points at the start (the trend's pass, with a transit at the first
@@ -294,35 +279,57 @@ def test_kalman_gpu_masked_start(name, monkeypatch):
     assert re < 2e-3
 
 
-def test_kalman_gpu_overlap_detects(monkeypatch):
-    """A wrong key covariance in one segment fails the overlap check."""
-    from transitleastsquares.gp import statespace
+def test_kalman_likelihood_short_series():
+    """Shorter than the first points on the CPU: no kernel; a few elements: exact up to rounding."""
+    from transitleastsquares.gp.statespace import log_likelihood, rotation_model
+    from transitleastsquares.gpu import driver
+
+    rng = np.random.default_rng(5)
+    model = rotation_model(dict(sigma=2.0, period=2.7, Q0=5.0, dQ=1.0, f=0.5, sigma_slow=0.5, rho_slow=2.1, jitter=0.05))
+    for n in (100, 300, 1000):
+        t = np.arange(n) * 0.02
+        y, e = rng.normal(0, 1, n), np.full(n, 0.2)
+        np.testing.assert_allclose(driver.KalmanLikelihood(t, y, e)(model), log_likelihood(model, t, y, e), rtol=0, atol=1e-6)
+
+
+def test_kalman_likelihood_real_time_stamps():
+    """The fit's likelihood on the device: real time stamps (drifting step, dropouts, gaps), changing models on
+    the same device arrays, against the FP64 filter."""
+    from transitleastsquares.gp.statespace import log_likelihood, rotation_model
+    from transitleastsquares.gpu import driver
+
+    rng = np.random.default_rng(4)
+    n = 60000
+    dt = 0.0204 * (1 + 4e-5 * np.sin(np.arange(n) / 8000.0)) * (1 + 1e-7 * rng.normal(size=n))
+    dt[rng.integers(0, n, 2000)] *= rng.integers(2, 6, 2000)
+    dt[rng.integers(0, n, 16)] += 1.0
+    t = np.cumsum(dt)
+    e = np.full(n, 0.2)
+    y = 2.0 * np.sin(2 * np.pi * t / 2.7) + rng.normal(0, 0.2, n)
+    p0 = dict(sigma=2.0, period=2.7, Q0=50.0, dQ=1.0, f=0.05, sigma_slow=0.5, rho_slow=2.1, jitter=0.05)
+    lik = driver.KalmanLikelihood(t, y, e)
+    assert len(lik.e.steps) < 200
+    for s in range(4):
+        p = dict(p0, sigma=p0["sigma"] * 1.2**s, rho_slow=p0["rho_slow"] * 1.5**s, jitter=p0["jitter"] * 1.3**s)
+        model = rotation_model(p)
+        v = lik(model)
+        ref = log_likelihood(model, t, y, e)
+        print(s, "GPU - FP64 log likelihood", None if v is None else v - ref)
+        assert v is not None and abs(v - ref) < 0.02  # the step table's tolerance
+
+
+@pytest.mark.parametrize("name", ["rot", "stiff", "spline"])
+def test_trend_gpu_long(name, monkeypatch):
+    """The trend on the device equals the CPU's, also from masked points at the start."""
     from transitleastsquares.gpu import driver
 
     monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
-    t, f, e, baseline = _long_case("rot")
-    y, yerr = (f - 1) * 1e3, e * 1e3
-    model = baseline._model(t, e)
-    keys_orig = statespace.riccati_keys
-
-    def wrong(*a):
-        Pk = keys_orig(*a)
-        Pk[len(Pk) // 2] *= 3.0
-        return Pk
-
-    monkeypatch.setattr(statespace, "riccati_keys", wrong)
-    dev, _ = driver.kalman_gpu(t, y, yerr**2 + model.jitter**2, model)
-    assert dev["kalman"] == "check failed"
-
-
-def test_trend_gpu_spline_uses_host_filter(monkeypatch):
-    """A spline's trend does not use the kernel: same result with and without it."""
-    from transitleastsquares.gpu import driver
-
-    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 0)
-    t, f, e, baseline = _long_case("spline")
+    t, f, e, baseline = _long_case(name)
     use = np.ones(len(t), bool)
     use[:900] = False
+    use[5000:5600] = False
+    ref = baseline.trend(t, f, e, use, threads=1)
     new = baseline.trend(t, f, e, use, device="gpu")
-    monkeypatch.setattr(driver, "GPU_KALMAN_MIN", 1 << 40)
-    np.testing.assert_array_equal(new, baseline.trend(t, f, e, use, device="gpu"))
+    amp = np.std(ref)
+    print(name, "max |trend_gpu - trend| / std", np.max(np.abs(new - ref)) / amp)
+    assert np.max(np.abs(new - ref)) < 1e-5 * amp

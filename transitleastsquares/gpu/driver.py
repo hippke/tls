@@ -3,15 +3,17 @@ fold (brute force, or FFA + polish with the same blocks, shift plans and tie
 rules as gp.fold_ffa), returning the outputs of multiple_events_blocked."""
 
 import functools
+import math
 
 import numpy as np
 from numba import cuda
+from numba.cuda.cudadrv import driver as _driver
 
 from transitleastsquares.gp.fold_ffa import POLISH_R, REFINE_R, flat_plan, plan_blocks
-from transitleastsquares.gpu import kernels as K
+from transitleastsquares.gpu import generated, kernels as K
 
 THREADS = 128  # = kernels.FOLD_THREADS
-ROW_THREADS = 128  # single events: threads per CUDA block
+ROW_THREADS = 32  # single events: threads per CUDA block
 FFA_BUDGET = 1 << 27  # floats per FFA buffer and batch (512 MB)
 
 
@@ -44,10 +46,9 @@ def single_events_gp(t, z, eyd, A, Kg, S, H, W, t0, delta, durs, nsub, table, te
     d_ab = cuda.device_array((total, 2), np.float32)
     nsubs = np.full(len(durs), nsub, np.int32)
     dev = gains_on_device(A, Kg, S, H)
-    hidx = np.nonzero(H)[0].astype(np.int64)
-    K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
+    generated.single_gp(tuple(int(x) for x in dev["sizes"].copy_to_host()))[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
         cuda.to_device(np.ascontiguousarray(t, float)), cuda.to_device(_f32(z)), cuda.to_device(_f32(eyd)),
-        dev["At"], dev["idx"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"],
+        dev["At"], dev["idx"], dev["K"], dev["isS"],
         cuda.to_device(_f32(W)), float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs),
         cuda.to_device(_f32(table)), np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)),
         cuda.to_device(np.asarray(off, np.int64)), cuda.to_device(_row_j(off)), d_ab)
@@ -60,10 +61,9 @@ def single_events_gp_dev(t, z, dev, W, t0, delta, durs, nsub, table, texp, mstep
     total = int(off[-1])
     d_ab = cuda.device_array((total, 2), np.float32)
     nsubs = np.full(len(durs), nsub, np.int32)
-    hidx = np.nonzero(dev["H"].copy_to_host())[0].astype(np.int64)
-    K.single_gp[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
+    generated.single_gp(tuple(int(x) for x in dev["sizes"].copy_to_host()))[(total + ROW_THREADS - 1) // ROW_THREADS, ROW_THREADS](
         cuda.to_device(np.ascontiguousarray(t, float)), z, cuda.to_device(np.zeros(0, np.float32)),
-        dev["At"], dev["idx"], dev["starts"], dev["sizes"], cuda.to_device(hidx), dev["K"], dev["isS"], dev["H"], W,
+        dev["At"], dev["idx"], dev["K"], dev["isS"], W,
         float(t0), float(delta), cuda.to_device(_f32(durs)), cuda.to_device(nsubs), cuda.to_device(_f32(table)),
         np.float32(texp), cuda.to_device(np.asarray(mstep, np.int64)), cuda.to_device(np.asarray(off, np.int64)),
         cuda.to_device(_row_j(off)), d_ab)
@@ -87,194 +87,127 @@ def gains_on_device(A, Kg, S, H):
                 H=cuda.to_device(_f32(H)))
 
 
-GPU_KALMAN_MIN = 50000  # points; below, the FP64 filter on the CPU is as fast and exact
-RICCATI_SEGMENT = 256  # points per GPU thread of the covariance recursion
-RICCATI_BURN = 256  # points before each segment, from its key covariance
-RICCATI_BIN = 16  # points per bin of the key pass, at most
-RICCATI_BIN_W = 0.1  # bin width, at most, in units of the model's shortest time scale
-RICCATI_CHECKS = 32  # segments recomputed in FP64 after the kernel
-RICCATI_CHECK_TOL = 1e-3  # largest relative difference of S in them
-RICCATI_MASKED = 1e6  # R / median(R) above which a point counts as masked
+GPU_KALMAN_MIN = 8000  # points; below, the FP64 filter on the CPU is as fast
+GPU_FIT_MIN = 2500  # points; below, the FP64 likelihood on the CPU is as fast
+ELEMENT_BLOCK = 32  # threads per CUDA block: the blocks spread over the SMs (30), and more do not help
+FIT_HEAD = 16  # the first points on the CPU, at least (diffuse start)
 
 
-def _key_bin(kinds, pars, cad, R):
-    """Points per bin of the key pass, for the model's shortest time scale: an
-    oscillator's 1 / w0; a spline's (R cad / q)^(1/4), its steady-state filter."""
-    w = 0.0
-    for k in range(len(kinds)):
-        if kinds[k] == 2:
-            w = max(w, pars[k, 1])
-        elif kinds[k] == 1:
-            w = max(w, (pars[k, 0] / (np.median(R) * cad)) ** 0.25)
-    return RICCATI_BIN if w == 0.0 else int(np.clip(RICCATI_BIN_W / (w * cad), 1, RICCATI_BIN))
+def _grid(nk):
+    return (nk + ELEMENT_BLOCK - 1) // ELEMENT_BLOCK, ELEMENT_BLOCK
 
 
-def _riccati_ok(t, R, kinds, starts, pars, Pk, keys, edges, Kh, iSh, overlap):
-    """Self-check of the FP32 recursion. All values finite; at the point where
-    two segments overlap, both the same S; a sample of the segments, recomputed
-    in FP64 from the same key covariances, the same S."""
-    from transitleastsquares.gp.statespace import _gains_segment
-
-    if not (np.isfinite(iSh).all() and np.isfinite(Kh).all()):
-        return False
-    both = keys < edges[:-1]
-    if not np.max(np.abs(overlap[both] / iSh[edges[:-1][both] - 1] - 1), initial=0.0) <= 0.5 * RICCATI_CHECK_TOL:
-        return False
-    d = Pk.shape[1]
-    for q in np.unique(np.linspace(0, len(keys) - 1, RICCATI_CHECKS).astype(np.int64)):
-        a, b = keys[q] - 1, edges[q + 1]  # from the key's point (filtered: its P is the key)
-        m = b - a
-        Kx, Sx, ex = np.empty((m, d)), np.empty(m), np.empty(m)
-        _gains_segment(t[a:b], np.zeros(m), R[a:b], kinds, starts, pars, np.zeros(d), Pk[q].copy(), 1, m, Kx, Sx, ex)
-        lo = edges[q] - a
-        if not np.max(np.abs(iSh[edges[q]:b] * np.sqrt(Sx[lo:]) - 1)) <= 0.5 * RICCATI_CHECK_TOL:
-            return False
-    return True
+def _segment_length(n):
+    """Points per segment that balance the kernel (a thread's 4.7 us per point) and the join on the CPU (2.4 us per segment)."""
+    return max(64, int(math.sqrt(0.5 * n)))
 
 
-def kalman_gpu(t, y, R, model, nseg=1, on_device=True):
-    """The Kalman pass of a GPU search: (dev, ey) with the gains, 1 / sqrt(S)
-    and transitions on the device (FP32, as gains_on_device) and ey (FP64) on
-    the host. Long light curves: the covariance recursion runs on the device,
-    per segment from a covariance of the coarse pass (riccati_keys, FP64), with
-    only its change in FP32 (kernels.riccati_segments), so that rounding neither
-    accumulates nor meets the covariances that cancel in S (large slow terms);
-    then the state recursion in FP64 on the host. Each segment starts RICCATI_BURN points early: the coarse pass is
-    least accurate where the filter's memory is short (low noise), which is
-    where the burn-in removes its error. The exact filter runs until a segment's
-    worth of unmasked points has resolved the diffuse start (masked points at the
-    start of the trend's pass leave it unresolved). Short light curves and any
-    failed self-check (_riccati_ok): statespace.kalman_whiten on the host."""
-    from transitleastsquares.gp.statespace import (
-        _block_sizes, kalman_whiten, mean_recursion, riccati_head, riccati_keys, transition_table,
-    )
+class _Elements:
+    """The elements of the segments of a fixed series on the device (FP64,
+    generated.elements), for any model; what depends only on the data is set once."""
 
-    kinds, starts, pars, P0 = model.blocks()
-    sizes = _block_sizes(kinds)
-    idx, At, Qt = transition_table(t, kinds, pars)
-    n, d = len(t), P0.shape[0]
-    dev = dict(At=cuda.to_device(_f32(At)), idx=cuda.to_device(idx), starts=cuda.to_device(starts),
-               sizes=cuda.to_device(sizes), H=cuda.to_device(_f32(model.H)))
+    def __init__(self, t, y, R):
+        from transitleastsquares.gp.statespace import step_table
 
-    def on_host(why):
-        Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
-        dev.update(K=cuda.to_device(_f32(Kg)), isS=cuda.to_device(_f32(1.0 / np.sqrt(S))), kalman=why)
-        return dev, ey
+        self.t, self.y, self.R = t, y, R
+        n = len(t)
+        ns = max(1, n // _segment_length(n))
+        edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
+        q0 = min(int(np.searchsorted(edges, FIT_HEAD)), ns)
+        self.n0, self.edges = int(edges[q0]), edges[q0:]
+        self.nk = len(self.edges) - 1
+        self.idx, self.steps = step_table(t)
+        self.d = None
 
-    if not on_device or n < GPU_KALMAN_MIN or n < 2 * RICCATI_SEGMENT:
-        return on_host("short")
-    ns = n // RICCATI_SEGMENT
-    edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
-    seen = np.cumsum(R < RICCATI_MASKED * np.median(R))
-    q0 = int(np.searchsorted(edges, np.searchsorted(seen, RICCATI_SEGMENT) + 1))  # segments from q0 on the device
-    if q0 >= ns:
-        return on_host("short")
-    q0 = max(q0, 1)
-    edges = edges[q0:]
-    n0 = int(edges[0])
-    ey = np.empty(n)
-    Kh, iSh = np.empty((n, d), np.float32), np.empty(n, np.float32)
-    x, P = riccati_head(t, y, R, kinds, starts, pars, P0, n0, Kh, iSh, ey)
-    cad = float(np.median(np.diff(t)))
-    keys = np.maximum(edges[:-1] - RICCATI_BURN, n0)
-    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, keys, _key_bin(kinds, pars, cad, R), 2.0 * cad)
-    d_K, d_iS = cuda.device_array((n, d), np.float32), cuda.device_array(n, np.float32)
-    d_K[:n0].copy_to_device(Kh[:n0])
-    d_iS[:n0].copy_to_device(iSh[:n0])
-    Gt = At.copy()  # G = A - I
-    for b in range(len(kinds)):
-        for r in range(sizes[b]):
-            Gt[:, b, r, r] -= 1.0
-    h = np.zeros(d)
-    h[starts] = 1.0
-    PkH = Pk @ h
-    overlap = cuda.device_array(len(keys), np.float32)
-    K.riccati_segments[(len(keys) + 127) // 128, 128](cuda.to_device(_f32(Gt)), cuda.to_device(_f32(Qt)), dev["idx"],
-                                                      cuda.to_device(_f32(R)), dev["starts"], dev["sizes"],
-                                                      cuda.to_device(_f32(Pk)), cuda.to_device(_f32(PkH)),
-                                                      cuda.to_device(_f32(PkH @ h)), cuda.to_device(keys),
-                                                      cuda.to_device(edges), d_K, d_iS, overlap)
-    d_K.copy_to_host(Kh)
-    d_iS.copy_to_host(iSh)
-    if not _riccati_ok(t, R, kinds, starts, pars, Pk, keys, edges, Kh, iSh, overlap.copy_to_host()):
-        return on_host("check failed")
-    mean_recursion(At, idx, y, starts, sizes, Kh, iSh, x, n0, ey)
-    dev.update(K=d_K, isS=d_iS, kalman="gpu")
-    return dev, ey
+    def __call__(self, kinds, starts, pars, d, jit2=0.0):
+        """The kernel for this model; returns the elements on the host, and At."""
+        from transitleastsquares.gp.statespace import _block_sizes, step_transitions
 
-
-GPU_FIT_MIN = 15000  # points; below, the FP64 likelihood on the CPU is faster
-FIT_SEGMENT = 64  # points per GPU thread in the fit's short series: one thread's speed limits them
-FIT_BURN = 128
-FIT_BIN = 8  # points per bin of the key pass (the burn-in removes its error)
+        nk, nb = self.nk, len(kinds)
+        At, Qt = step_transitions(self.steps, kinds, pars)
+        if self.d is None:
+            self.sizes = tuple(int(x) for x in _block_sizes(kinds))
+            ne = len(self.steps)
+            nd2, nd1 = nk * d * d, nk * d
+            size = 3 * nd2 + 2 * nd1 + nk
+            self.d = dict(idx=cuda.to_device(self.idx), y=cuda.to_device(self.y), R=cuda.to_device(self.R),
+                          T=cuda.device_array((ne, 2, nb, 2, 2), np.float64), edges=cuda.to_device(self.edges),
+                          E=cuda.device_array(size, np.float64))
+            self.T = np.empty((ne, 2, nb, 2, 2))
+            self.E = np.empty(size)
+            E, o = self.E, 3 * nd2 + 2 * nd1
+            self.h = (E[:nd2].reshape(nk, d, d), E[3 * nd2:3 * nd2 + nd1].reshape(nk, d), E[nd2:2 * nd2].reshape(nk, d, d),
+                      E[2 * nd2:3 * nd2].reshape(nk, d, d), E[3 * nd2 + nd1:o].reshape(nk, d), E[o:])
+            self.kernel = generated.elements(self.sizes)[_grid(nk)] if nk > 0 else None
+        if nk > 0:
+            dv = self.d
+            self.T[:, 0], self.T[:, 1] = At, Qt
+            _driver.host_to_device(dv["T"], self.T, self.T.nbytes)  # (copy_to_device's checks cost 0.3 ms, a fit makes thousands)
+            self.kernel(dv["T"], dv["idx"], dv["y"], dv["R"], float(jit2), dv["edges"], nk, dv["E"])
+            _driver.device_to_host(self.E, dv["E"], self.E.nbytes)
+        return self.h, At
 
 
 class KalmanLikelihood:
     """The log likelihood of fixed data under changing models (the fit), as
-    gp.statespace.log_likelihood, with the covariance recursion on the device
-    as in kalman_gpu. Returns None if the recursion fails its check (all values
-    finite, overlaps agree): the caller then uses the FP64 filter."""
+    gp.statespace.log_likelihood with the step table: the elements of the segments
+    (FP64) on the device, joined in order on the host, so it is as exact as the
+    sequential filter. Returns None if it is not finite: the caller then uses the
+    FP64 filter."""
 
-    def __init__(self, t, y, yerr, segment=None, burn=None, kbin=None):
-        self.t, self.y, self.e2 = t, y, yerr**2
-        n = len(t)
-        self.kbin = FIT_BIN if kbin is None else kbin
-        ns = max(1, n // (FIT_SEGMENT if segment is None else segment))
-        edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
-        q0 = int(np.searchsorted(edges, RICCATI_SEGMENT))  # the first points exactly (diffuse start)
-        self.n0 = int(edges[q0])
-        self.edges = edges[q0:]
-        self.keys = np.maximum(self.edges[:-1] - (FIT_BURN if burn is None else burn), self.n0)
-        self.cad = float(np.median(np.diff(t)))
-        self.d_keys, self.d_edges = cuda.to_device(self.keys), cuda.to_device(self.edges)
-        self.d_K, self.d_iS, self.d_ov, self.d_idx, self.d_R = None, None, None, None, cuda.device_array(n, np.float32)
-        self.ey = np.empty(n)
-        self.iS = np.empty(n, np.float32)
-        self.K = None
+    def __init__(self, t, y, yerr):
+        self.e = _Elements(t, y, yerr**2)
+        self.t0, self.y0, self.e20 = t[:self.e.n0], y[:self.e.n0], yerr[:self.e.n0] ** 2
 
     def __call__(self, model):
-        from transitleastsquares.gp.statespace import (
-            _block_sizes, loglik_from_whitened, mean_recursion, riccati_head, riccati_keys, transition_table,
-        )
+        from transitleastsquares.gp.statespace import join_elements
 
         kinds, starts, pars, P0 = model.blocks()
-        sizes = _block_sizes(kinds)
-        d, n0 = P0.shape[0], self.n0
-        if self.K is None:
-            self.K = np.empty((len(self.t), d), np.float32)
-            self.d_K = cuda.device_array(self.K.shape, np.float32)
-            self.d_iS = cuda.device_array(len(self.t), np.float32)
-            self.d_ov = cuda.device_array(len(self.keys), np.float32)
-            self.d_starts, self.d_sizes = cuda.to_device(starts), cuda.to_device(sizes)
-            self.h = np.zeros(d)
-            self.h[starts] = 1.0
-        R = self.e2 + model.jitter**2
-        idx, At, Qt = transition_table(self.t, kinds, pars)
-        if self.d_idx is None:
-            self.d_idx = cuda.to_device(idx)
-        x, P = riccati_head(self.t, self.y, R, kinds, starts, pars, P0, n0, self.K, self.iS, self.ey)
-        Pk = riccati_keys(self.t, R, kinds, starts, pars, P, n0, self.keys, self.kbin, 2.0 * self.cad)
-        Gt = At.copy()
-        for b in range(len(kinds)):
-            for r in range(sizes[b]):
-                Gt[:, b, r, r] -= 1.0
-        PkH = Pk @ self.h
-        self.d_R.copy_to_device(_f32(R))
-        K.riccati_segments[(len(self.keys) + 127) // 128, 128](
-            cuda.to_device(_f32(Gt)), cuda.to_device(_f32(Qt)), self.d_idx, self.d_R, self.d_starts, self.d_sizes,
-            cuda.to_device(_f32(Pk)), cuda.to_device(_f32(PkH)), cuda.to_device(_f32(PkH @ self.h)), self.d_keys,
-            self.d_edges, self.d_K, self.d_iS, self.d_ov)
-        Khead, iShead = self.K[:n0].copy(), self.iS[:n0].copy()
-        self.d_K.copy_to_host(self.K)
-        self.d_iS.copy_to_host(self.iS)
-        self.K[:n0], self.iS[:n0] = Khead, iShead
-        ov = self.d_ov.copy_to_host()
-        both = self.keys < self.edges[:-1]
-        if not (np.isfinite(self.iS).all() and np.isfinite(self.K).all()) or \
-                not np.max(np.abs(ov[both] / self.iS[self.edges[:-1][both] - 1] - 1), initial=0.0) <= 0.5 * RICCATI_CHECK_TOL:
-            return None
-        mean_recursion(At, idx, self.y, starts, sizes, self.K, self.iS, x, n0, self.ey)
-        return loglik_from_whitened(self.ey, self.iS, model.n_diffuse)
+        jit2 = model.jitter**2
+        h, _ = self.e(kinds, starts, pars, P0.shape[0], jit2)
+        ll = join_elements(self.t0, self.y0, self.e20 + jit2, kinds, starts, pars, P0, model.n_diffuse, self.e.n0, *h)
+        return ll if np.isfinite(ll) else None
+
+
+def _filtered(t, y, R, model, K_dtype):
+    """The Kalman pass on the device (FP64 elements joined on the host, then the filter per
+    segment): (elements' object, At, device K, 1 / sqrt(S), ey (FP64), and the head's K, S, ey)."""
+    from transitleastsquares.gp.statespace import element_states
+
+    kinds, starts, pars, P0 = model.blocks()
+    n, d = len(t), P0.shape[0]
+    e = _Elements(t, y, R)
+    h, At = e(kinds, starts, pars, d)
+    n0 = e.n0
+    Kh, Sh, eyh, x0, P0s = element_states(t[:n0], y[:n0], R[:n0], kinds, starts, pars, P0, n0, *h)
+    d_K, d_iS, d_ey = cuda.device_array((n, d), K_dtype), cuda.device_array(n, K_dtype), cuda.device_array(n, np.float64)
+    dv = e.d
+    if e.nk > 0:
+        generated.filter_segments(e.sizes)[_grid(e.nk)](dv["T"], dv["idx"], dv["y"], dv["R"], dv["edges"],
+                                                         cuda.to_device(x0), cuda.to_device(P0s), d_K, d_iS, d_ey)
+    d_K[:n0].copy_to_device(Kh.astype(K_dtype))
+    d_iS[:n0].copy_to_device((1.0 / np.sqrt(Sh)).astype(K_dtype))
+    d_ey[:n0].copy_to_device(eyh)
+    return e, At, d_K, d_iS, d_ey, Kh, Sh, eyh
+
+
+def kalman_gpu(t, y, R, model, nseg=1):
+    """The Kalman pass of a GPU search: (dev, ey) with the gains, 1 / sqrt(S)
+    and transitions on the device (FP32, as gains_on_device) and ey (FP64) on the
+    host. Long light curves: the pass runs on the device in FP64 (_filtered), with
+    the transitions pooled within statespace.DT_TOL. Short ones: statespace.kalman_whiten on the host."""
+    from transitleastsquares.gp.statespace import _block_sizes, kalman_whiten, transition_table
+
+    kinds, starts, pars, P0 = model.blocks()
+    if len(t) < GPU_KALMAN_MIN or len(t) < 2 * FIT_HEAD:
+        idx, At, Qt = transition_table(t, kinds, pars)
+        Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+        return dict(At=cuda.to_device(_f32(At)), idx=cuda.to_device(idx), starts=cuda.to_device(starts),
+                    sizes=cuda.to_device(_block_sizes(kinds)), H=cuda.to_device(_f32(model.H)), K=cuda.to_device(_f32(Kg)),
+                    isS=cuda.to_device(_f32(1.0 / np.sqrt(S))), kalman="short"), ey
+    e, At, d_K, d_iS, d_ey, _, _, _ = _filtered(t, y, R, model, np.float32)
+    return dict(At=cuda.to_device(_f32(At)), idx=e.d["idx"], starts=cuda.to_device(starts), sizes=cuda.to_device(_block_sizes(kinds)),
+                H=cuda.to_device(_f32(model.H)), K=d_K, isS=d_iS, kalman="gpu"), d_ey.copy_to_host()
 
 
 def tail_operators_gpu(dev, ey):
@@ -282,7 +215,9 @@ def tail_operators_gpu(dev, ey):
     segment on the device, joined backwards on the CPU in FP64, then W, w
     per segment on the device) and the numerator weights z. dev: gains and
     transitions (kalman_gpu or gains_on_device). Returns device arrays
-    (W, w, z); dev gets ey (single_events_gp_dev)."""
+    (W, w, z), W in its upper triangle; dev gets ey (single_events_gp_dev)."""
+    from transitleastsquares.gp.statespace import tail_chain
+
     n, d = dev["K"].shape
     dev["ey"] = cuda.to_device(_f32(ey))
     nseg = max(1, (n - 1) // TAIL_SEGMENT)
@@ -291,19 +226,16 @@ def tail_operators_gpu(dev, ey):
     Phi = cuda.device_array((nseg, d, d), np.float32)
     C = cuda.to_device(np.zeros((nseg, d, d), np.float32))
     cc = cuda.to_device(np.zeros((nseg, d), np.float32))
-    args = (dev["At"], dev["idx"], dev["starts"], dev["sizes"], dev["K"], dev["isS"], dev["H"], dev["ey"], d_edges)
+    args = (dev["At"], dev["idx"], dev["K"], dev["isS"], dev["ey"], d_edges)
+    sizes = tuple(int(x) for x in dev["sizes"].copy_to_host())
     if nseg > 1:
-        K.tail_maps[(nseg - 1 + 127) // 128, 128](*args, Phi, C, cc)
-    Ph, Ch, ch = (x.copy_to_host().astype(float) for x in (Phi, C, cc))
-    Wb = np.zeros((nseg, d, d))
-    wb = np.zeros((nseg, d))
-    for k in range(nseg - 2, -1, -1):  # W(edges[k+1]) = Phi' Wb Phi + C of segment k + 1 (FP64)
-        q = k + 1
-        Wb[k] = Ph[q].T @ Wb[q] @ Ph[q] + Ch[q]
-        wb[k] = Ph[q].T @ wb[q] + ch[q]
-    W = cuda.to_device(np.zeros((n, d, d), np.float32))
-    w = cuda.to_device(np.zeros((n, d), np.float32))
-    K.tail_fill[(nseg + 127) // 128, 128](*args, cuda.to_device(_f32(Wb)), cuda.to_device(_f32(wb)), W, w)
+        generated.tail_maps(sizes)[_grid(nseg - 1)](*args, Phi, C, cc)
+    Wb, wb = tail_chain(*(x.copy_to_host().astype(float) for x in (Phi, C, cc)))
+    W = cuda.device_array((n, d, d), np.float32)
+    w = cuda.device_array((n, d), np.float32)
+    W[n - 1:].copy_to_device(np.zeros((1, d, d), np.float32))
+    w[n - 1:].copy_to_device(np.zeros((1, d), np.float32))
+    generated.tail_fill(sizes)[_grid(nseg)](*args, cuda.to_device(_f32(Wb)), cuda.to_device(_f32(wb)), W, w)
     z = cuda.device_array(n, np.float32)
     K.numerator[(n + 255) // 256, 256](dev["ey"], dev["isS"], dev["K"], w, z)
     return W, w, z
@@ -479,13 +411,24 @@ def _ffa_batch(d_ab, d_off, d_mstep, d_periods, delta, blocks, bj, bp, bm, sizes
 
 
 def trend_gpu(model, t, y, R, nseg=1):
-    """Posterior mean of the baseline (ppt) without a smoother: f = y - R z
-    with z = C^-1 y from the Kalman pass (kalman_gpu) and the tail recursion
-    and numerator weights on the GPU (FP32), as gp.events.numerator_weights.
-    Equals the RTS smoother up to rounding (spline GP: up to a few % at its
-    ill-conditioned diffuse start)."""
-    # (a spline's extrapolation across masked points at the start amplifies FP32 gains: FP64 filter)
-    dev, ey = kalman_gpu(t, y, R, model, nseg, on_device=not np.any(model.blocks()[0] == 1))
-    ey[:model.n_diffuse] = 0.0
-    _, _, z = tail_operators_gpu(dev, ey)
-    return y - R * z.copy_to_host().astype(float)
+    """Posterior mean of the baseline (ppt) without a smoother: f = y - R z with z = C^-1 y
+    (statespace.mean_adjoint) on the device in FP64: the Kalman pass of _filtered, then the backward
+    recursion per segment, as affine maps joined on the host, and z. Short series: mean_adjoint on the host."""
+    from transitleastsquares.gp.statespace import adjoint_chain, adjoint_head, mean_adjoint, smoothed_mean
+
+    n = len(t)
+    kinds, starts, pars, P0 = model.blocks()
+    if n < GPU_KALMAN_MIN or n < 2 * FIT_HEAD:
+        return mean_adjoint(t, y, R, kinds, starts, pars, P0) if nseg == 1 else smoothed_mean(t, y, R, kinds, starts, pars, P0, nseg)
+    d = P0.shape[0]
+    e, _, d_K, d_iS, d_ey, Kh, Sh, eyh = _filtered(t, y, R, model, np.float64)
+    dv, nk, n0 = e.d, e.nk, e.n0
+    W, v = cuda.device_array((nk, d, d), np.float64), cuda.device_array((nk, d), np.float64)
+    generated.adjoint_maps(e.sizes)[_grid(nk)](dv["T"], dv["idx"], d_K, d_iS, d_ey, dv["edges"], W, v)
+    w, w0 = adjoint_chain(W.copy_to_host(), v.copy_to_host(), np.zeros(d))
+    d_z = cuda.device_array(n, np.float64)
+    generated.adjoint_fill(e.sizes)[_grid(nk)](dv["T"], dv["idx"], d_K, d_iS, d_ey, dv["edges"], cuda.to_device(w), d_z)
+    z = d_z.copy_to_host()
+    out = y - R * z
+    adjoint_head(t[:n0], y[:n0], R[:n0], kinds, starts, pars, Kh, Sh, eyh, w0, out)
+    return out
