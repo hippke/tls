@@ -12,7 +12,7 @@ from numba.cuda.cudadrv import driver as _driver
 from transitleastsquares.gp.fold_ffa import POLISH_R, REFINE_R, flat_plan, plan_blocks
 from transitleastsquares.gpu import generated, kernels as K
 
-THREADS = 128  # = kernels.FOLD_THREADS
+THREADS = 64  # threads per CUDA block in the fold, at most kernels.FOLD_THREADS
 ROW_THREADS = 32  # single events: threads per CUDA block
 FFA_BUDGET = 1 << 27  # floats per FFA buffer and batch (512 MB)
 
@@ -210,6 +210,20 @@ def kalman_gpu(t, y, R, model, nseg=1):
                 H=cuda.to_device(_f32(model.H)), K=d_K, isS=d_iS, kalman="gpu"), d_ey.copy_to_host()
 
 
+_CARVED = set()
+
+
+def _launch_carved(kernel, n, args):
+    """Launch a kernel with a shared memory carveout on n blocks. numba-cuda sets the carveout in Kernel.bind, which
+    it skips for a kernel from its disk cache: one block first, to load it, then bind (once per process)."""
+    if kernel not in _CARVED:
+        kernel[1, THREADS](*args)
+        for k in kernel.overloads.values():
+            k.bind()
+        _CARVED.add(kernel)
+    kernel[n, THREADS](*args)
+
+
 def tail_operators_gpu(dev, ey):
     """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
     segment on the device, joined backwards on the CPU in FP64, then W, w
@@ -303,9 +317,9 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
         pj, pq = np.nonzero(sel)
         n = len(pq)
         out = [cuda.device_array(n, np.float32) for _ in range(3)] + [cuda.device_array(n, np.int32)]
-        K.fold_brute[n, THREADS](d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta), d_periods,
-                                 cuda.to_device(pq.astype(np.int32)), cuda.to_device(pj.astype(np.int32)),
-                                 int(ntr_min), np.float32(depth_min), int(coarse), *out)
+        _launch_carved(K.fold_brute, n, (d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta), d_periods,
+                                         cuda.to_device(pq.astype(np.int32)), cuda.to_device(pj.astype(np.int32)),
+                                         int(ntr_min), np.float32(depth_min), int(coarse), *out))
         g, A, B, k = (x.copy_to_host() for x in out)
         cand.append((pq, g, pj, k, A, B))
 
@@ -363,10 +377,10 @@ def fold(d_ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, depth_min=0.0, 
             tj = jn[tq]
             center = np.round(best_k0[tq] / mstep[tj]).astype(np.int64)
             out = [cuda.device_array(len(tq), np.float32) for _ in range(3)] + [cuda.device_array(len(tq), np.int32)]
-            K.refine_local[len(tq), THREADS](d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta),
-                                             d_periods, cuda.to_device(tq.astype(np.int32)),
-                                             cuda.to_device(tj.astype(np.int32)), cuda.to_device(center),
-                                             int(refine_r), int(ntr_min), np.float32(depth_min), *out)
+            _launch_carved(K.refine_local, len(tq), (d_ab.view(np.complex64).reshape(-1), d_off, d_mstep, float(delta),
+                                                     d_periods, cuda.to_device(tq.astype(np.int32)),
+                                                     cuda.to_device(tj.astype(np.int32)), cuda.to_device(center),
+                                                     int(refine_r), int(ntr_min), np.float32(depth_min), *out))
             g, A, B, k = (x.copy_to_host() for x in out)
             better = g.astype(float) > dchi2[tq]
             q = tq[better]

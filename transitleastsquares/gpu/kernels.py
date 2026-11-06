@@ -3,14 +3,16 @@
 import math
 
 import numpy as np
-from numba import cuda, float32, float64, int32, uint32
+from numba import cuda, float32, float64, int32, uint32, uint64
 
 F0 = np.float32(0.0)
 F1 = np.float32(1.0)
 HALF = np.float32(0.5)
 MAX_DIM = 8  # state dimension of the GP models (rotation: 7)
-TOFF = 4096  # transit offsets kept in shared memory per fold block
-FOLD_THREADS = 128
+HALF64 = uint64(1 << 31)  # 0.5 and the point of the fixed-point transit offsets (_step)
+SHIFT = uint64(32)
+FOLD_THREADS = 128  # at most
+CARVEOUT = 40  # % of the L1 / shared memory as shared memory for the fold: 23 % faster than the driver's default
 
 
 @cuda.jit(device=True, inline=True)
@@ -313,7 +315,7 @@ def _block_best(g, k, sg, sk):
     return bg, bk
 
 
-@cuda.jit(cache=True)
+@cuda.jit(cache=True, shared_memory_carveout=CARVEOUT)
 def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_min, coarse, out_g, out_A, out_B,
                out_k):
     """Brute-force fold of (period, duration) pairs, one CUDA block per pair:
@@ -338,12 +340,7 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
     Mj = int32(off[j + 1] - off[j])
     nph = max(1, int32(P / dj))
     nu = (nph + coarse - 1) // coarse
-    ntr = int32(float64(Mj) * dj / P) + 2
-    toff = cuda.shared.array(TOFF, int32)
-    nsh = int32(min(ntr, TOFF))
-    for nn in range(tid, nsh, nt):
-        toff[nn] = _offset(nn, P, dj)
-    cuda.syncthreads()
+    step = _step(P, dj)
     bg = F0
     bA = F0
     bB = F0
@@ -359,9 +356,9 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
         A2 = F0
         B2 = F0
         c2 = int32(0)
-        nn = int32(0)
+        acc = HALF64
         while True:
-            base = toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)
+            base = int32(acc >> SHIFT)
             kk = int32(k1 + base)
             if kk >= Mj:
                 break
@@ -377,19 +374,7 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
                 B2 += v.imag
                 if v.imag > F0:
                     c2 = int32(c2 + 1)
-            nn = int32(nn + 1)
-        if two:  # epoch k2 may have transits beyond the last of k1 (k2 > k1)
-            while True:
-                base = toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)
-                kk = int32(k2 + base)
-                if kk >= Mj:
-                    break
-                v = abc[uint32(o + kk)]
-                A2 += v.real
-                B2 += v.imag
-                if v.imag > F0:
-                    c2 = int32(c2 + 1)
-                nn = int32(nn + 1)
+            acc += step
         if not (c1 < ntr_min or B1 <= F0 or A1 <= F0 or A1 < depth_min * B1):
             g = A1 * A1 / B1
             if _better(g, k1, bg, bk):
@@ -408,22 +393,28 @@ def fold_brute(abc, off, mstep, delta, periods, pair_q, pair_j, ntr_min, depth_m
                 d += 1  # offsets -(c-1) .. -1, 1 .. c-1
             kk0 = ck + d
             if 0 <= kk0 < nph:
-                g, A, B = _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min)
+                g, A, B = _path_c(abc, o, Mj, step, kk0, ntr_min, depth_min)
                 if _better(g, kk0, bg, bk):
                     bg, bA, bB, bk = g, A, B, kk0
     _reduce_write(bg, bA, bB, bk, pr, out_g, out_A, out_B, out_k)
 
 
 @cuda.jit(device=True, inline=True)
-def _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min):
-    """Exact path of epoch kk0 on complex64 single events (offsets from the
-    shared table where available)."""
+def _step(P, dj):
+    """P / dj as a fixed-point number: acc += step gives the transit offsets
+    round(nn P / dj) = acc >> SHIFT without a table in memory, to 2^-32 * nn epochs."""
+    return uint64(P / dj * 4294967296.0)
+
+
+@cuda.jit(device=True, inline=True)
+def _path_c(abc, o, Mj, step, kk0, ntr_min, depth_min):
+    """Exact path of epoch kk0 on complex64 single events."""
     A = F0
     B = F0
     cnt = int32(0)
-    nn = int32(0)
+    acc = HALF64
     while True:
-        kk = int32(kk0 + (toff[uint32(nn)] if nn < nsh else _offset(nn, P, dj)))
+        kk = int32(kk0 + int32(acc >> SHIFT))
         if kk >= Mj:
             break
         v = abc[uint32(o + kk)]
@@ -431,13 +422,13 @@ def _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min):
         B += v.imag
         if v.imag > F0:
             cnt = int32(cnt + 1)
-        nn = int32(nn + 1)
+        acc += step
     if cnt < ntr_min or B <= F0 or A <= F0 or A < depth_min * B:
         return F0, A, B
     return A * A / B, A, B
 
 
-@cuda.jit(cache=True)
+@cuda.jit(cache=True, shared_memory_carveout=CARVEOUT)
 def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius, ntr_min, depth_min,
                  out_g, out_A, out_B, out_k):
     """Duration screen: exact paths of duration task_j around epoch center
@@ -451,19 +442,14 @@ def refine_local(abc, off, mstep, delta, periods, task_q, task_j, center, radius
     o = int32(off[j])
     Mj = int32(off[j + 1] - off[j])
     nph = max(1, int32(P / dj))
-    toff = cuda.shared.array(TOFF, int32)
-    ntr = int32(float64(Mj) * dj / P) + 2
-    nsh = int32(min(ntr, TOFF))
-    for nn in range(tid, nsh, cuda.blockDim.x):
-        toff[nn] = _offset(nn, P, dj)
-    cuda.syncthreads()
+    step = _step(P, dj)
     g = F0
     A = F0
     B = F0
     k = int32(-1)
     if tid < 2 * radius + 1:
         kk0 = (center[w] + tid - radius) % nph
-        g, A, B = _path_c(abc, o, Mj, P, dj, kk0, toff, nsh, ntr_min, depth_min)
+        g, A, B = _path_c(abc, o, Mj, step, kk0, ntr_min, depth_min)
         k = kk0
     _reduce_write(g, A, B, k, w, out_g, out_A, out_B, out_k)
 
