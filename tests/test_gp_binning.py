@@ -66,6 +66,22 @@ def test_search_with_binned_fit_finds_transit():
     assert abs(r.period - 3.1) / 3.1 < 0.01 and len(r.time) == len(t)
 
 
+def test_ls_power_fft():
+    """The FFT sums give the direct sum's periodogram, also with gaps and uneven steps."""
+    from transitleastsquares.gp.baselines import _ls_power, _ls_power_fft
+
+    rng = np.random.default_rng(2)
+    t = np.sort(rng.uniform(100.0, 900.0, 6000))
+    y = 3 * np.sin(2 * np.pi * t / 2.7) + rng.normal(0, 1, len(t))
+    y = y - y.mean()
+    df = 1 / (5 * (t[-1] - t[0]))
+    freqs = np.arange(0.05, 5.0, df)
+    ref = _ls_power(t, y, freqs)
+    new = _ls_power_fft(t, y, freqs[0], df, len(freqs))
+    assert np.argmax(new) == np.argmax(ref)
+    np.testing.assert_allclose(new, ref, rtol=2e-3, atol=2e-3 * ref.max())
+
+
 def test_rotation_period_guess_binned():
     """Short cadences are binned for the Lomb-Scargle guess; the peak is the
     same as for the unbinned periodogram."""

@@ -277,14 +277,6 @@ class KalmanLikelihood:
         return loglik_from_whitened(self.ey, self.iS, model.n_diffuse)
 
 
-def lomb_scargle_peak(t, yc, freqs):
-    """The frequency of the highest peak of gp.baselines._ls_power, FP32."""
-    power = cuda.device_array(len(freqs), np.float32)
-    K.ls_power[(len(freqs) + 127) // 128, 128](cuda.to_device(_f32(t - t[0])), cuda.to_device(_f32(yc)),
-                                               cuda.to_device(_f32(freqs)), power)
-    return freqs[int(np.argmax(power.copy_to_host()))]
-
-
 def tail_operators_gpu(dev, ey):
     """gp.events.tail_operators on the GPU in FP32 (segment-parallel: maps per
     segment on the device, joined backwards on the CPU in FP64, then W, w

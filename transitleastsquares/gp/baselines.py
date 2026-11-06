@@ -49,11 +49,62 @@ def _ls_power(t, yc, freqs):
     return power
 
 
-def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5, device="cpu"):
+LS_FFT_MIN = 1 << 20  # points x frequencies; below, the direct sum (_ls_power) is as fast
+LS_FFT_ORDER = 5  # points of the interpolation onto the FFT's grid
+
+
+@numba.njit(cache=True)
+def _extirpolate(x, re, im, gr, gi):
+    """Add the values re + i im at the positions x to the grid so that smooth functions
+    sum alike (Press & Rybicki 1989): Lagrange weights over LS_FFT_ORDER grid points."""
+    M, N = LS_FFT_ORDER, len(gr)
+    for k in range(len(x)):
+        xk = x[k]
+        i = int(xk)
+        if xk == i:
+            gr[i] += re[k]
+            gi[i] += im[k]
+            continue
+        lo = min(max(i - M // 2 + 1, 0), N - M)
+        num = 1.0
+        for j in range(M):
+            num *= xk - (lo + j)
+        den = 1.0
+        for j in range(1, M):
+            den *= j
+        for j in range(M):  # den: (-1)^j j! (M - 1 - j)!, from the last grid point down
+            if j > 0:
+                den *= j / (j - M)
+            w = num / (den * (xk - (lo + M - 1 - j)))
+            gr[lo + M - 1 - j] += w * re[k]
+            gi[lo + M - 1 - j] += w * im[k]
+
+
+def _trig_sums(t, y, f0, df, nf):
+    """sum y cos(2 pi f t) and sum y sin(2 pi f t) at f = f0 + j df, j < nf, by FFT."""
+    nfft = 1 << int(np.ceil(np.log2(5 * nf)))
+    gr, gi = np.zeros(nfft), np.zeros(nfft)
+    a = 2 * np.pi * f0 * t
+    _extirpolate(t * df * nfft, y * np.cos(a), y * np.sin(a), gr, gi)
+    z = np.fft.ifft(gr + 1j * gi)[:nf] * nfft
+    return z.real, z.imag
+
+
+def _ls_power_fft(t, yc, f0, df, nf):
+    """_ls_power at f0 + j df by FFT sums, with C2, S2 for CC, SS, CS."""
+    t = t - t[0]
+    C, S = _trig_sums(t, yc, f0, df, nf)
+    C2, S2 = _trig_sums(t, np.ones(len(t)), 2 * f0, 2 * df, nf)
+    phi = 0.5 * np.arctan2(S2, C2)
+    cc = 0.5 * (len(t) + C2 * np.cos(2 * phi) + S2 * np.sin(2 * phi))
+    return (C * np.cos(phi) + S * np.sin(phi)) ** 2 / cc + (S * np.cos(phi) - C * np.sin(phi)) ** 2 / (len(t) - cc)
+
+
+def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5):
     """Peak of the Lomb-Scargle periodogram, as the starting point of the
-    rotation fit. The cost is (points x frequencies), both growing with the
-    span: data with a cadence below period_min / 16 are binned to
-    period_min / 8 first (8 samples per shortest period)."""
+    rotation fit. The cost of the direct sum is (points x frequencies), both
+    growing with the span, so long series use FFT sums; data with a cadence below
+    period_min / 16 are binned to period_min / 8 first (8 samples per shortest period)."""
     t, y = np.asarray(t, float), np.asarray(y, float)
     width = period_min / 8
     if len(t) > 1 and np.median(np.diff(t)) < 0.5 * width:
@@ -62,11 +113,9 @@ def rotation_period_guess(t, y, period_min=0.2, period_max=20.0, oversample=5, d
     span = t.max() - t.min()
     df = 1 / (oversample * span)
     freqs = np.arange(1 / period_max, 1 / period_min, df)
-    if device == "gpu":
-        from transitleastsquares.gpu import driver
-
-        return 1 / driver.lomb_scargle_peak(t, yc, freqs)
-    return 1 / freqs[np.argmax(_ls_power(t, yc, freqs))]
+    if len(t) * len(freqs) < LS_FFT_MIN:
+        return 1 / freqs[np.argmax(_ls_power(t, yc, freqs))]
+    return 1 / freqs[np.argmax(_ls_power_fft(t, yc, freqs[0], df, len(freqs)))]
 
 
 FIT_BIN_WIDTH = 10.0 / 1440  # days; rotation fits bin data with a cadence below half of it
@@ -170,7 +219,7 @@ class RotationBaseline(Baseline):
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:
             m = slice(None) if use is None else np.asarray(use, bool)
-            period_guess = rotation_period_guess(t[m], y[m], device=device)
+            period_guess = rotation_period_guess(t[m], y[m])
         p, ll_ppt = fitting.fit_rotation(
             t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
             start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
@@ -259,7 +308,7 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
     cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
     if kind == "rotation" and fit_kwargs.get("period_guess") is None:
         # once, before clipping: it also sets the fit's period bounds
-        fit_kwargs["period_guess"] = rotation_period_guess(t, y, device=device)
+        fit_kwargs["period_guess"] = rotation_period_guess(t, y)
     use = np.ones(len(t), bool)
     b = None
     for _ in range(max_iter):
