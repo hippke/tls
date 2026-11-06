@@ -69,44 +69,67 @@ def test_search_single_split(name):
     np.testing.assert_allclose(new["dchi2"], ref["dchi2"], rtol=1e-9, atol=1e-9)
 
 
-def test_riccati_pieces():
-    """transition_table, riccati_head, riccati_keys (bins of 1 point: exact)
-    and mean_recursion reproduce kalman_whiten."""
-    from gp_cases import CASES
-    from transitleastsquares.gp.statespace import (
-        _block_sizes, _gains_segment, kalman_whiten, mean_recursion, riccati_head, riccati_keys, transition_table,
-    )
+def _kepler_like(n=6000, seed=3):
+    """Real time stamps: a slow drift of the step and rounding per point, dropouts of a few cadences, long gaps."""
+    rng = np.random.default_rng(seed)
+    dt = 0.0204 * (1 + 4e-5 * np.sin(np.arange(n) / 800.0)) * (1 + 1e-7 * rng.normal(size=n))
+    dt[rng.integers(0, n, 150)] *= rng.integers(2, 6, 150)
+    dt[n // 3] += 5.0
+    dt[2 * n // 3] += 1.3
+    t = np.cumsum(dt)
+    e = np.full(n, 0.2)
+    y = 2.0 * np.sin(2 * np.pi * t / 3.1) + rng.normal(0, 0.2, n)
+    return t, y, e
 
-    load, baseline = CASES["k2_rot"]
-    t, f, e = load()
-    y, yerr = (f - 1) * 1e3, e * 1e3
-    model = baseline._model(t, e)
+
+def test_step_table_pools_repeated_steps():
+    """Steps within the tolerance share an entry wherever they are: a gap's multiples do not add entries."""
+    from gp_cases import ROT_SYN
+    from transitleastsquares.gp.statespace import _block_sizes, kalman_loglik, kalman_loglik_table, step_table, step_transitions
+
+    t, y, e = _kepler_like()
+    idx, steps = step_table(t)
+    dt = np.diff(t)
+    assert len(np.unique(dt)) > 5000 and len(steps) < 100
+    assert steps[0] == 0.0 and idx[0] == 0
+    assert np.max(np.abs(steps[idx[1:]] / dt - 1)) < 1.5e-5
+    idx0, steps0 = step_table(t, 0.0)
+    np.testing.assert_array_equal(steps0[idx0[1:]], dt)
+    model = ROT_SYN._model(t, e / 1e3)
     kinds, starts, pars, P0 = model.blocks()
+    R = e**2 + model.jitter**2
+    At, Qt = step_transitions(steps, kinds, pars)
+    for k in range(len(kinds)):
+        np.testing.assert_array_equal(At[0, k], np.eye(2) if _block_sizes(kinds)[k] == 2 else np.diag([1.0, 0.0]))
+    np.testing.assert_array_equal(Qt[0], np.zeros_like(Qt[0]))
+    ll = kalman_loglik(t, y, R, kinds, starts, pars, P0, model.n_diffuse)
+    llt = kalman_loglik_table(idx, At, Qt, y, R, kinds, starts, P0, model.n_diffuse)
+    print("table - exact log likelihood", llt - ll)
+    assert abs(llt - ll) < 0.02
+    At0, Qt0 = step_transitions(steps0, kinds, pars)
+    np.testing.assert_allclose(kalman_loglik_table(idx0, At0, Qt0, y, R, kinds, starts, P0, model.n_diffuse), ll, rtol=1e-12)
+
+
+@pytest.mark.parametrize("name", ["rot", "spline"])
+def test_mean_adjoint_equals_smoother(name):
+    """y - R C^-1 y equals the RTS smoother, also across masked points and at a masked start."""
+    from gp_cases import ROT_SYN, SPLINE_SYN
+    from transitleastsquares.gp.statespace import gp_mean, mean_adjoint, smoothed_mean
+
+    t, y, e = _kepler_like()
+    model = (ROT_SYN if name == "rot" else SPLINE_SYN)._model(t, e / 1e3)
+    kinds, starts, pars, P0 = model.blocks()
+    use = np.ones(len(t), bool)
+    use[:40] = False
+    use[1000:1100] = False
+    use[::97] = False
+    yerr = np.where(use, e, 1e9)
     R = yerr**2 + model.jitter**2
-    Kg, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, 1)
-    idx, At, Qt = transition_table(t, kinds, pars)
-    print("table entries", len(At), "of", len(t))
-    assert len(At) < len(t) / 2  # steps within the tolerance share an entry
-    Atx = transition_table(t, kinds, pars, 0.0)
-    n, d, n0 = len(t), P0.shape[0], 100
-    K2, iS2, ey2 = np.empty((n, d)), np.empty(n), np.empty(n)
-    x, P = riccati_head(t, y, R, kinds, starts, pars, P0, n0, K2, iS2, ey2)
-    np.testing.assert_allclose(K2[:n0], Kg[:n0], rtol=1e-12)
-    np.testing.assert_allclose(ey2[:n0], ey[:n0], rtol=1e-12)
-    edges = np.array([n0 + 50, n0 + 400, n // 2], np.int64)
-    gap = 2.0 * np.median(np.diff(t))
-    Pk = riccati_keys(t, R, kinds, starts, pars, P, n0, edges, 1, gap)
-    Kx, Sx, ex = np.empty((n, d)), np.empty(n), np.empty(n)
-    for s, e_ in enumerate(edges):
-        xs, Ps = np.zeros(d), P0.copy()
-        _gains_segment(t, y, R, kinds, starts, pars, xs, Ps, 0, int(e_), Kx, Sx, ex)
-        np.testing.assert_allclose(Pk[s], Ps, rtol=1e-6, atol=1e-9 * np.abs(Ps).max())
-    iS = 1.0 / np.sqrt(S)
-    mean_recursion(Atx[1], Atx[0], y, starts, _block_sizes(kinds), Kg, iS, x.copy(), n0, ey2)
-    np.testing.assert_allclose(ey2, ey, rtol=1e-6, atol=1e-8)
-    mean_recursion(At, idx, y, starts, _block_sizes(kinds), Kg, iS, x.copy(), n0, ey2)
-    print("ey with the shared steps", np.abs(ey2 - ey).max())
-    assert np.abs(ey2 - ey).max() < 1e-3
+    ym = y * use
+    ref = smoothed_mean(t, ym, R, kinds, starts, pars, P0, 1)
+    np.testing.assert_allclose(mean_adjoint(t, ym, R, kinds, starts, pars, P0), ref, rtol=0, atol=1e-5)
+    np.testing.assert_array_equal(gp_mean(model, t, ym, yerr), mean_adjoint(t, ym, R, kinds, starts, pars, P0))
+    np.testing.assert_allclose(gp_mean(model, t, ym, yerr, 2), ref, rtol=0, atol=1e-5)
 
 
 def test_t14_durations():

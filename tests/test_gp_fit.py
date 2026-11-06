@@ -117,3 +117,33 @@ def test_search_flare_bin_width():
     r, r0 = gp.search(t, f, e, **kw), gp.search(t, f, e, flare_bin_width=None, **kw)
     assert (~r.use).sum() > (~r0.use).sum()
     assert (~r.use[fl > 1e-3]).mean() == 1
+
+
+def test_final_likelihood_once(monkeypatch):
+    """The clipping computes the exact log likelihood after its last round only, for the points of that fit."""
+    from transitleastsquares.gp import baselines, fitting
+
+    t, f, e, _ = _with_flares(2 / 1440)
+    calls = []
+    orig = baselines.Baseline.log_likelihood
+
+    def count(self, *a, **k):
+        calls.append(len(a[0]))
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(baselines.Baseline, "log_likelihood", count)
+    finals = []
+    fr = fitting.fit_rotation
+
+    def spy(*a, **k):
+        finals.append(k["final"])
+        return fr(*a, **k)
+
+    monkeypatch.setattr(fitting, "fit_rotation", spy)
+    b, ll, use = fit_with_flare_clipping("rotation", t, f, e, use_threads=1)
+    assert len(finals) >= 2 and not any(finals)
+    assert len(calls) == 1
+    np.testing.assert_allclose(orig(b, t[use], f[use], e[use]), ll, rtol=1e-12)
+    assert gp.RotationBaseline.fit(t, f, e, period_guess=3.7, use_threads=1, final=False)[1] is None
+    b1, ll1 = gp.RotationBaseline.fit(t, f, e, period_guess=3.7, use_threads=1)
+    np.testing.assert_allclose(orig(b1, t, f, e), ll1, rtol=1e-12)

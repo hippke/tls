@@ -162,10 +162,10 @@ def test_flare_clipping_guards(monkeypatch):
     from transitleastsquares.gp import baselines
 
     t, f, e = synthetic(days=12.0)
-    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None: np.full(len(t), np.nan))
+    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None, device="cpu": np.full(len(t), np.nan))
     b, ll, use = baselines.fit_with_flare_clipping("rotation", t, f, e, period_guess=2.3, n_starts=1)
     assert use.all()
-    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None: y - np.arange(len(y)))
+    monkeypatch.setattr(baselines.RotationBaseline, "trend", lambda self, t, y, dy, use=None, device="cpu": y - np.arange(len(y)))
     b, ll, use = baselines.fit_with_flare_clipping("rotation", t, f, e, period_guess=2.3, n_starts=1)
     assert use.sum() >= 0.8 * len(t)
 

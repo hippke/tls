@@ -127,11 +127,19 @@ class Baseline:
     def _model(self, t, dy):
         raise NotImplementedError
 
-    def log_likelihood(self, t, y, dy):
+    def log_likelihood(self, t, y, dy, threads=1, device="cpu"):
         """Gaussian log likelihood of the flux y (relative units) under this
-        baseline plus white noise dy, with the GP integrated out."""
+        baseline plus white noise dy, with the GP integrated out. device="gpu": of a long
+        series on the GPU (steps within statespace.DT_TOL share their transitions)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
-        ll_ppt = log_likelihood(self._model(t, dy), t, (y - 1) * PPT, dy * PPT)
+        ll_ppt = None
+        if device == "gpu":
+            from transitleastsquares.gpu import driver
+
+            if len(t) >= driver.GPU_FIT_MIN:
+                ll_ppt = driver.KalmanLikelihood(t, (y - 1) * PPT, dy * PPT)(self._model(t, dy))
+        if ll_ppt is None:
+            ll_ppt = log_likelihood(self._model(t, dy), t, (y - 1) * PPT, dy * PPT, threads)
         return ll_ppt + (len(t) - self._model(t, dy).n_diffuse) * math.log(PPT)
 
     def trend(self, t, y, dy, use=None, threads=None, device="cpu"):
@@ -200,7 +208,7 @@ class RotationBaseline(Baseline):
 
     @classmethod
     def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None,
-            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3, device="cpu", converge=None):
+            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3, device="cpu", converge=None, final=True):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
         peak); use: points to fit (default all); n_starts (1-4, default 1) starting
         points in up to use_threads threads (default: numba's thread count);
@@ -214,7 +222,7 @@ class RotationBaseline(Baseline):
         planets as passes=3, tol=1e-4 (400 K2 injections) at 2x less fit
         time, but not always the same optimum. For better optima (e.g. to
         use the rotation period), fit with n_starts=4, passes=3, tol=1e-4
-        and pass the baseline to gp.search. device="gpu", converge: see fitting.fit_rotation.
+        and pass the baseline to gp.search. device="gpu", converge, final: see fitting.fit_rotation.
         Returns (baseline, log likelihood of the unbinned data)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:
@@ -223,10 +231,10 @@ class RotationBaseline(Baseline):
         p, ll_ppt = fitting.fit_rotation(
             t, (y - 1) * PPT, dy * PPT, period_guess, mask=use,
             start=None if start is None else start._p, n_starts=n_starts, use_threads=use_threads,
-            bin_width=bin_width, passes=passes, tol=tol, device=device, converge=converge,
+            bin_width=bin_width, passes=passes, tol=tol, device=device, converge=converge, final=final,
         )
         n = len(t) if use is None else int(np.sum(use))
-        return cls._from_ppt(p), ll_ppt + (n - 1) * math.log(PPT)
+        return cls._from_ppt(p), None if ll_ppt is None else ll_ppt + (n - 1) * math.log(PPT)
 
 
 class SplineBaseline(Baseline):
@@ -304,16 +312,19 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
     the clipping. flare_bin (days, default 10 min): also remove flares found
     in the residuals binned to this width, if the cadence is shorter than half
     of it; None: single points only. The clipping uses the FP64 trend on every
-    device. Returns (baseline, log likelihood, use) with use = points kept."""
+    device (with statespace.DT_TOL on the GPU). Returns (baseline, log likelihood, use) with use = points kept."""
     cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
     if kind == "rotation" and fit_kwargs.get("period_guess") is None:
         # once, before clipping: it also sets the fit's period bounds
         fit_kwargs["period_guess"] = rotation_period_guess(t, y)
+    if kind == "rotation":
+        fit_kwargs["final"] = False  # its log likelihood once, after the last round
     use = np.ones(len(t), bool)
     b = None
     for _ in range(max_iter):
         b, ll = cls.fit(t, y, dy, use=use, start=b, device=device, **fit_kwargs)
-        resid = y - b.trend(t, y, dy, use)  # conditioned on the kept points: a clipped flare no longer pulls the trend
+        fitted = use
+        resid = y - b.trend(t, y, dy, use, device=device)  # conditioned on the kept points: a clipped flare no longer pulls the trend
         r = resid[use]
         mad = 1.4826 * np.median(np.abs(r - np.median(r)))
         if not (np.isfinite(mad) and mad > 0):
@@ -324,4 +335,7 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
         if new.sum() == use.sum() or new.sum() < 0.8 * use.sum():
             break  # converged, or a round would remove > 20 % (not flares)
         use = new
+    if kind == "rotation":
+        threads = fit_kwargs.get("use_threads")
+        ll = b.log_likelihood(t[fitted], y[fitted], dy[fitted], numba.get_num_threads() if threads is None else max(1, int(threads)), device)
     return b, ll, use

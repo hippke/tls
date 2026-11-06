@@ -7,7 +7,7 @@ import numba
 import numpy as np
 
 from transitleastsquares.gp.nelder_mead import nelder_mead
-from transitleastsquares.gp.statespace import gp_mean, log_likelihood, rotation_model, spline_model
+from transitleastsquares.gp.statespace import gp_mean, log_likelihood, rotation_model, spline_model, step_table
 
 ROT_KEYS = ["sigma", "period", "Q0", "dQ", "f", "sigma_slow", "rho_slow", "jitter"]
 CONVERGE_MAX = 10  # restarts per likelihood (fit_rotation, converge)
@@ -48,7 +48,7 @@ def bin_series(t, y, yerr, width):
 
 
 def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
-                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None):
+                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None, final=True):
     """Type-II maximum likelihood for the rotation model.
 
     Without start: n_starts (1-4, default 1) generic starting points, each
@@ -65,8 +65,11 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     and converted to per point (x sqrt(median points per bin)); the returned
     log likelihood is that of the unbinned data.
 
-    device="gpu": the likelihood of a long (binned) series with the covariance
-    recursion on the GPU; the returned log likelihood stays FP64.
+    device="gpu": the likelihood of a long (binned) series from segment elements
+    on the GPU (one start at a time). On one thread the CPU's likelihood shares transitions
+    between time steps within statespace.DT_TOL. The returned log likelihood is
+    always the exact FP64 filter's; final=False: skips it and returns None (a
+    round of flare clipping that is not the last).
 
     converge: restart Nelder-Mead from its result (each restart spreads the
     simplex again) until the log likelihood gains less than this, also from a
@@ -94,11 +97,12 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     # one start: the threads go into the likelihood; several: one start per thread
     ll_threads = threads if len(x0s) == 1 else 1
     gpu_lik = None
-    if device == "gpu":
+    if device == "gpu" and len(x0s) == 1:
         from transitleastsquares.gpu import driver
 
         if len(tm) >= driver.GPU_FIT_MIN:
             gpu_lik = driver.KalmanLikelihood(tm, ym, em)
+    steps = step_table(tm) if gpu_lik is None else None
 
     def nll(lx, exact=False):
         with np.errstate(over="ignore"):  # far-out simplex vertices: penalised below
@@ -112,7 +116,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
             return 1e25
         try:
             ll = None if gpu_lik is None or exact else gpu_lik(rotation_model(p))
-            v = -(log_likelihood(rotation_model(p), tm, ym, em, ll_threads) if ll is None else ll)
+            v = -(log_likelihood(rotation_model(p), tm, ym, em, ll_threads, steps) if ll is None else ll)
         except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
             return 1e25
         return v if np.isfinite(v) else 1e25
@@ -137,10 +141,10 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
 
     best = min(_thread_map(run, x0s, use_threads), key=lambda r: r.fun)
     p = dict(zip(ROT_KEYS, np.exp(best.x)))
-    if not binned:
-        return p, -best.fun
-    p["jitter"] *= jit_scale
-    return p, log_likelihood(rotation_model(p), t_all, y_all, e_all, threads)
+    if binned:
+        p["jitter"] *= jit_scale
+        tm, ym, em = t_all, y_all, e_all
+    return p, log_likelihood(rotation_model(p), tm, ym, em, threads) if final else None
 
 
 def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None):
