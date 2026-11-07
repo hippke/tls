@@ -118,6 +118,7 @@ def search(
     rotation_period=None,
     n_starts=1,
     fit_method="nelder-mead",
+    fit_device=None,
     fit_bin_width=FIT_BIN_WIDTH,
     flare_bin_width=FIT_BIN_WIDTH,
     period_min=0,
@@ -161,10 +162,18 @@ def search(
         did not find more planets in injection tests).
     fit_method: optimizer of the rotation fit: "nelder-mead" (default) or
         "gradient" (bounded quasi-Newton with the exact gradient of the
-        likelihood, FP64 on the CPU also with device="gpu"; n_starts 1-3).
+        likelihood, FP64, with device="gpu" on the GPU; n_starts 1-3).
         The gradient fit needs ~30x fewer likelihood evaluations and mostly
         reaches higher likelihoods, so its fits, and therefore the search
         results, differ from the default's.
+    fit_device: device of the baseline fit, "cpu" or "gpu" (default: device).
+        With several searches sharing a consumer GPU (FP64 at 1/64 of its
+        FP32 rate), fit_method="gradient" with fit_device="cpu" gives the
+        highest throughput without NVIDIA MPS (RTX 5060 and 16 cores, 14
+        processes, BLAS limited to one thread each: 0.32 s per Talens light
+        curve, against 0.43 s with the fit on the GPU); with MPS, 8 processes
+        fitting on the CPU and 8 on the GPU are fastest (0.28 s). A single
+        search is fastest with the fit on the GPU (0.62 s against 2.95 s).
     fit_bin_width: the rotation fit uses data binned to this width (days,
         default 10 min) if the cadence is shorter than half of it; the
         search always uses the unbinned data. None: never bin.
@@ -231,9 +240,10 @@ def search(
             kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width, method=fit_method) \
                 if baseline == "rotation" else {}
             if clip_flares:
-                b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, device=device, flare_bin=flare_bin_width, **kw)
+                b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, device=device, flare_bin=flare_bin_width,
+                                                     fit_device=fit_device, **kw)
             else:
-                b, ll = BASELINES[baseline].fit(t, y, dy, device=device, **kw)
+                b, ll = BASELINES[baseline].fit(t, y, dy, device=fit_device or device, **kw)
                 use = np.ones(len(t), bool)
         elif isinstance(baseline, Baseline):
             b, ll, use = baseline, None, np.ones(len(t), bool)

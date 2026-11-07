@@ -71,6 +71,19 @@ def test_checkpoints(monkeypatch):
     np.testing.assert_allclose(g2, g, rtol=1e-10, atol=1e-10 * np.abs(g).max())
 
 
+@pytest.mark.parametrize("nseg", [1, 5])
+def test_segments_cpu_reference(nseg):
+    """The smoother's gradient in segments (gp.gradient_segments, as the GPU computes it) = the adjoint."""
+    from transitleastsquares.gp.gradient_segments import SegmentGradient
+
+    t, y, e = _data()
+    for lx in LX.values():
+        ll, g = gradient.RotationGradient(t, y, e)(lx)
+        ll2, g2 = SegmentGradient(t, y, e, nseg=nseg)(lx)
+        np.testing.assert_allclose(ll2, ll, rtol=1e-7)  # (the elements' exact steps, the adjoint's pooled ones)
+        np.testing.assert_allclose(g2, g, rtol=1e-7, atol=1e-8 * np.abs(g).max())
+
+
 def test_minimize_bounded():
     def quad(x):  # minimum at (3, -1, 0.5); the box holds x0 <= 2 and x1 >= -0.5
         c, w = np.array([3.0, -1.0, 0.5]), np.array([1.0, 10.0, 0.1])

@@ -81,8 +81,9 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     start; on the GPU first with its likelihood, then in FP64.
 
     method="gradient": bounded quasi-Newton (quasi_newton.minimize_bounded)
-    with the exact gradient (gradient.RotationGradient, reverse mode, FP64 on
-    the CPU on every device; one thread per start). Bounds: those of
+    with the exact gradient (FP64; one thread per start): on the CPU
+    gradient.RotationGradient (reverse mode), with device="gpu" and long
+    series gpu.gradient.KalmanGradient (the smoother in segments). Bounds: those of
     Nelder-Mead's penalty, and lower bounds of GRADIENT_FLOOR (rho_slow: 0.5,
     period: 0.3 period_guess). n_starts 1-3 (GRADIENT_START_SHIFTS); passes and
     converge restart the quasi-Newton (fresh inverse Hessian); tol is not used.
@@ -114,7 +115,7 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     # one start: the threads go into the likelihood; several: one start per thread
     ll_threads = threads if len(x0s) == 1 else 1
     if method == "gradient":
-        best = _fit_rotation_gradient(tm, ym, em, x0s, period_guess, std, amp_max, passes, converge, use_threads)
+        best = _fit_rotation_gradient(tm, ym, em, x0s, period_guess, std, amp_max, passes, converge, use_threads, device)
         p = dict(zip(ROT_KEYS, np.exp(best.x)))
         if binned:
             p["jitter"] *= jit_scale
@@ -171,9 +172,18 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
     return p, log_likelihood(rotation_model(p), tm, ym, em, threads) if final else None
 
 
-def _fit_rotation_gradient(t, y, yerr, x0s, period_guess, std, amp_max, passes, converge, use_threads):
-    """fit_rotation with method="gradient": the best of the quasi-Newton runs from x0s."""
+def _fit_rotation_gradient(t, y, yerr, x0s, period_guess, std, amp_max, passes, converge, use_threads, device="cpu"):
+    """fit_rotation with method="gradient": the best of the quasi-Newton runs from x0s. device="gpu": the
+    gradient on the GPU (gpu.gradient, FP32 kernels) for series of at least driver.GPU_FIT_MIN points,
+    falling back to its FP64 kernels and then to the CPU's for an evaluation that fails (a predicted
+    covariance not positive definite, or a series too long for the device)."""
     from transitleastsquares.gp.gradient import RotationGradient
+
+    on_gpu = False
+    if device == "gpu":
+        from transitleastsquares.gpu import driver
+
+        on_gpu = len(t) >= driver.GPU_FIT_MIN
 
     floor, me = GRADIENT_FLOOR, np.median(yerr)
     lo = np.log([floor * std, 0.3 * period_guess, floor, floor, floor, floor * std, 0.5, floor * me])
@@ -181,14 +191,27 @@ def _fit_rotation_gradient(t, y, yerr, x0s, period_guess, std, amp_max, passes, 
     lo, hi = np.minimum(lo, hi), hi  # (scatter below the errors: the jitter floor stays below its ceiling)
 
     def run(x0):
-        lik = RotationGradient(t, y, yerr)  # (per start: its own buffers)
+        # the gradients to try in turn (per start: their own buffers): on the GPU in FP32 kernels, then FP64, then
+        # the CPU's; one that fails (a predicted covariance not positive definite) hands the evaluation on
+        makers = [lambda: RotationGradient(t, y, yerr)]
+        if on_gpu:
+            from transitleastsquares.gpu.gradient import KalmanGradient
+
+            makers = [lambda: KalmanGradient(t, y, yerr, precision="fp32"),
+                      lambda: KalmanGradient(t, y, yerr, precision="fp64")] + makers
+        liks = [None] * len(makers)
 
         def fg(lx):
-            try:
-                ll, g = lik(lx)
-            except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
-                return np.inf, np.zeros(len(lx))
-            return (-ll, -g) if np.isfinite(ll) and np.all(np.isfinite(g)) else (np.inf, np.zeros(len(lx)))
+            for k, make in enumerate(makers):
+                try:
+                    if liks[k] is None:
+                        liks[k] = make()
+                    ll, g = liks[k](lx)
+                except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
+                    continue
+                if np.isfinite(ll) and np.all(np.isfinite(g)):
+                    return -ll, -g
+            return np.inf, np.zeros(len(lx))
 
         x = np.clip(np.nan_to_num(x0, neginf=-700.0), lo, hi)
         best = None

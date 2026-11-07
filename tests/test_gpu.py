@@ -333,3 +333,43 @@ def test_trend_gpu_long(name, monkeypatch):
     amp = np.std(ref)
     print(name, "max |trend_gpu - trend| / std", np.max(np.abs(new - ref)) / amp)
     assert np.max(np.abs(new - ref)) < 1e-5 * amp
+
+
+def test_kalman_gradient():
+    """The gradient on the device (smoother in segments) = the CPU's adjoint, on real-like time stamps (FP64
+    kernels up to rounding; FP32 kernels to ~1e-6 of the largest component, absolute ~1e-2)."""
+    from transitleastsquares.gp import gradient
+    from transitleastsquares.gpu.gradient import KalmanGradient
+
+    rng = np.random.default_rng(6)
+    n = 20000
+    dt = 0.0204 * (1 + 1e-7 * rng.normal(size=n))
+    dt[rng.integers(0, n, 600)] *= rng.integers(2, 6, 600)
+    dt[rng.integers(0, n, 6)] += 1.0
+    t = np.cumsum(dt)
+    e = np.full(n, 0.2)
+    y = 2.0 * np.sin(2 * np.pi * t / 2.7) + 0.5 * np.sin(2 * np.pi * t / 9.0) + rng.normal(0, 0.2, n)
+    for lx in (np.log([2.0, 2.7, 5.0, 1.0, 0.5, 0.5, 2.1, 0.05]), np.log([0.7, 3.5, 0.3, 80.0, 20.0, 1.5, 9.0, 0.3])):
+        ll, g = gradient.RotationGradient(t, y, e)(lx)
+        for seg in (32, 200):
+            ll2, g2 = KalmanGradient(t, y, e, seg, precision="fp64")(lx)
+            np.testing.assert_allclose(ll2, ll, rtol=1e-7)  # (the first points' exact steps, the adjoint's pooled ones)
+            np.testing.assert_allclose(g2, g, rtol=1e-7, atol=1e-8 * np.abs(g).max())
+            ll3, g3 = KalmanGradient(t, y, e, seg, precision="fp32")(lx)  # FP32 kernels: the likelihood stays FP64
+            assert ll3 == ll2
+            np.testing.assert_allclose(g3, g, rtol=0, atol=1e-4 * np.abs(g).max() + 0.05)
+
+
+def test_gradient_fit_gpu():
+    from gp_cases import synthetic
+    from transitleastsquares import gp
+
+    t, f, e = synthetic(days=60.0, cadence=0.0102)
+    b_cpu, ll_cpu = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, method="gradient")
+    b_gpu, ll_gpu = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, method="gradient", device="gpu")
+    assert abs(ll_gpu - ll_cpu) < 0.01
+    assert abs(b_gpu.period - b_cpu.period) / b_cpu.period < 1e-3
+    r = gp.search(t, f, e, rotation_period=2.3, fit_method="gradient", device="gpu", period_min=1.0, period_max=4.0)
+    r2 = gp.search(t, f, e, rotation_period=2.3, fit_method="gradient", device="gpu", fit_device="cpu",
+                   period_min=1.0, period_max=4.0)
+    assert abs(r.period - 3.1) < 0.02 and abs(r2.period - 3.1) < 0.02

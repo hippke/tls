@@ -14,6 +14,7 @@ Unreleased
 ------------------------------------
 
 :Added: ``gp.search(..., fit_method="gradient")`` (and ``method="gradient"`` in ``gp.RotationBaseline.fit``): the rotation fit by a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter), about 30 times fewer likelihood evaluations than the default Nelder-Mead fit, and mostly higher likelihoods. The default is unchanged.
+:Added: With ``device="gpu"`` the gradient fit computes the gradient on the GPU (RTS smoother in parallel segments; FP32 kernels for the gradient, the likelihood in FP64), and ``fit_device`` chooses the device of the fit separately from the search's.
 
 
 Version 2.1.0 (7 November 2026)

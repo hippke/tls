@@ -307,7 +307,8 @@ def _flare_bins(t, resid, use, width, nsigma, low=1.0):
     return flag[k]
 
 
-def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu", flare_bin=FIT_BIN_WIDTH, **fit_kwargs):
+def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu", flare_bin=FIT_BIN_WIDTH, fit_device=None,
+                           **fit_kwargs):
     """Fit a baseline ("rotation" or "spline") and iteratively remove
     positive outliers (flares) of its residuals against the trend of the
     points kept so far; dips (transits) are never
@@ -316,7 +317,8 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
     the clipping. flare_bin (days, default 10 min): also remove flares found
     in the residuals binned to this width, if the cadence is shorter than half
     of it; None: single points only. The clipping uses the FP64 trend on every
-    device (with statespace.DT_TOL on the GPU). Returns (baseline, log likelihood, use) with use = points kept."""
+    device (with statespace.DT_TOL on the GPU). fit_device: the device of the fits (default: device).
+    Returns (baseline, log likelihood, use) with use = points kept."""
     cls = {"rotation": RotationBaseline, "spline": SplineBaseline}[kind]
     if kind == "rotation" and fit_kwargs.get("period_guess") is None:
         # once, before clipping: it also sets the fit's period bounds
@@ -326,7 +328,7 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
     use = np.ones(len(t), bool)
     b = None
     for _ in range(max_iter):
-        b, ll = cls.fit(t, y, dy, use=use, start=b, device=device, **fit_kwargs)
+        b, ll = cls.fit(t, y, dy, use=use, start=b, device=fit_device or device, **fit_kwargs)
         fitted = use
         resid = y - b.trend(t, y, dy, use, device=device)  # conditioned on the kept points: a clipped flare no longer pulls the trend
         r = resid[use]
@@ -341,5 +343,6 @@ def fit_with_flare_clipping(kind, t, y, dy, nsigma=4.0, max_iter=5, device="cpu"
         use = new
     if kind == "rotation":
         threads = fit_kwargs.get("use_threads")
-        ll = b.log_likelihood(t[fitted], y[fitted], dy[fitted], numba.get_num_threads() if threads is None else max(1, int(threads)), device)
+        ll = b.log_likelihood(t[fitted], y[fitted], dy[fitted], numba.get_num_threads() if threads is None else max(1, int(threads)),
+                              fit_device or device)
     return b, ll, use

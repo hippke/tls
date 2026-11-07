@@ -32,7 +32,8 @@ Baseline and fit:
 :clip_flares: *(bool, default: True)* Remove positive outliers iteratively when fitting.
 :rotation_period: *(float)* Starting guess of the rotation period for the fit (default: the Lomb-Scargle peak).
 :n_starts: *(int, default: 1)* Starting points of the rotation fit (1-4).
-:fit_method: *(str, default: "nelder-mead")* Optimizer of the rotation fit. ``"gradient"``: bounded quasi-Newton with the exact gradient of the likelihood (reverse mode, FP64 on the CPU on every device, ``n_starts`` 1-3). It needs about 30 times fewer likelihood evaluations than the default and mostly reaches higher likelihoods, so its fits, and the search results, differ from the default's.
+:fit_method: *(str, default: "nelder-mead")* Optimizer of the rotation fit. ``"gradient"``: bounded quasi-Newton with the exact gradient of the likelihood (reverse mode, FP64 on the CPU on every device, ``n_starts`` 1-3). It needs about 30 times fewer likelihood evaluations than the default and mostly reaches higher likelihoods, so its fits, and the search results, differ from the default's. With ``device="gpu"`` the gradient is computed on the GPU (the smoother in segments).
+:fit_device: *(str, default: the value of ``device``)* Device of the hyperparameter fit, ``"cpu"`` or ``"gpu"``. Several searches sharing a consumer GPU (FP64 at 1/64 of the FP32 rate) are fastest with ``fit_method="gradient", fit_device="cpu"``; a single search is fastest with the fit on the GPU. Several processes on one machine: limit NumPy's BLAS to one thread per process (``OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1``); its thread pools otherwise oversubscribe the cores (14 processes: 35 s instead of 50 s for 112 light curves).
 :fit_bin_width: *(float, default: 10 min)* The fit uses data binned to this width (days) if the cadence is shorter than half of it. ``None``: never bin. The search always uses the unbinned data.
 
 Search grid (as in TLS):

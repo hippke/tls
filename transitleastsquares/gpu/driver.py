@@ -106,12 +106,12 @@ class _Elements:
     """The elements of the segments of a fixed series on the device (FP64,
     generated.elements), for any model; what depends only on the data is set once."""
 
-    def __init__(self, t, y, R):
+    def __init__(self, t, y, R, segment=None):
         from transitleastsquares.gp.statespace import step_table
 
         self.t, self.y, self.R = t, y, R
         n = len(t)
-        ns = max(1, n // _segment_length(n))
+        ns = max(1, n // (segment or _segment_length(n)))  # segment: points per segment (default _segment_length)
         edges = np.array([(k * n) // ns for k in range(ns + 1)], np.int64)
         q0 = min(int(np.searchsorted(edges, FIT_HEAD)), ns)
         self.n0, self.edges = int(edges[q0]), edges[q0:]

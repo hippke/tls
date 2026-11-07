@@ -228,32 +228,57 @@ def _rotation_blocks(lx):
 
 
 def _sho_complex(sig, w0, Qf, dt):
-    """A, Q (steps, 2, 2) and the prior diagonal of an SHO, as _block_transition
-    (the same branches, chosen on the real parts), in complex arithmetic."""
+    """A, Q (..., steps, 2, 2) and the prior diagonal of an SHO, as _block_transition (the same branches,
+    chosen on the real parts), in complex arithmetic; the parameters broadcast against dt."""
     a = w0 / (2 * Qf)
-    disc = w0 * w0 - a * a
-    lim = 1e-14 * (w0 * w0).real
-    if disc.real > lim:
-        bb = np.sqrt(disc)
-        c, sb = np.cos(bb * dt), np.sin(bb * dt) / bb
-    elif disc.real < -lim:
-        bb = np.sqrt(-disc)
-        c, sb = np.cosh(bb * dt), np.sinh(bb * dt) / bb
-    else:
-        c, sb = np.ones(len(dt), complex), dt.astype(complex)
+    disc = w0 * w0 - a * a + 0 * dt
+    lim = 1e-14 * (w0 * w0 + 0 * dt).real
+    under, over = disc.real > lim, disc.real < -lim
+    bb_u = np.sqrt(np.where(under, disc, 1.0))
+    bb_o = np.sqrt(np.where(over, -disc, 1.0))
+    c = np.where(under, np.cos(bb_u * dt), np.where(over, np.cosh(bb_o * dt), 1.0))
+    sb = np.where(under, np.sin(bb_u * dt) / bb_u, np.where(over, np.sinh(bb_o * dt) / bb_o, dt))
     ex = np.exp(-a * dt)
-    A = np.empty((len(dt), 2, 2), complex)
-    A[:, 0, 0] = ex * (c + a * sb)
-    A[:, 0, 1] = ex * sb
-    A[:, 1, 0] = -ex * w0 * w0 * sb
-    A[:, 1, 1] = ex * (c - a * sb)
+    A = np.empty(disc.shape + (2, 2), complex)
+    A[..., 0, 0] = ex * (c + a * sb)
+    A[..., 0, 1] = ex * sb
+    A[..., 1, 0] = -ex * w0 * w0 * sb
+    A[..., 1, 1] = ex * (c - a * sb)
     p00, p11 = sig * sig, (w0 * sig) ** 2
     Q = np.empty_like(A)
-    Q[:, 0, 0] = p00 - (A[:, 0, 0] ** 2 * p00 + A[:, 0, 1] ** 2 * p11)
-    Q[:, 0, 1] = -(A[:, 0, 0] * A[:, 1, 0] * p00 + A[:, 0, 1] * A[:, 1, 1] * p11)
-    Q[:, 1, 0] = Q[:, 0, 1]
-    Q[:, 1, 1] = p11 - (A[:, 1, 0] ** 2 * p00 + A[:, 1, 1] ** 2 * p11)
+    Q[..., 0, 0] = p00 - (A[..., 0, 0] ** 2 * p00 + A[..., 0, 1] ** 2 * p11)
+    Q[..., 0, 1] = -(A[..., 0, 0] * A[..., 1, 0] * p00 + A[..., 0, 1] * A[..., 1, 1] * p11)
+    Q[..., 1, 0] = Q[..., 0, 1]
+    Q[..., 1, 1] = p11 - (A[..., 1, 0] ** 2 * p00 + A[..., 1, 1] ** 2 * p11)
     return A, Q, (p00, p11)
+
+
+def derivative_tables(lx, steps, starts):
+    """The derivatives of the entries' A and Q and of the prior diagonal of each SHO block in the log
+    hyperparameters (all but the jitter), by complex step: [(rows j, block b, s0, dA, dQ, dp00, dp11)]."""
+    n = len(lx)
+    lz = np.tile(np.asarray(lx, float).astype(complex), (n - 1, 1))
+    lz[np.arange(n - 1), np.arange(n - 1)] += 1j * _H  # row j: the step in lx[j]; the jitter only enters R
+    dt = np.asarray(steps, float).astype(complex)
+    out = []
+    for k, (sig, w0, Qf) in enumerate(_rotation_blocks(lz.T)):
+        on = (sig.imag != 0) | (w0.imag != 0) | (np.imag(Qf) != 0)
+        if not on.any():
+            continue
+        A, Q, (p00, p11) = _sho_complex(sig[on, None], w0[on, None], Qf[on, None] if np.ndim(Qf) else Qf, dt[None, :])
+        out.append((np.flatnonzero(on), k + 1, starts[k + 1], A.imag / _H, Q.imag / _H, p00.imag[:, 0] / _H, p11.imag[:, 0] / _H))
+    return out
+
+
+def contract(lx, steps, starts, Ab, Qb, P0b, rsum, jitter, tables=None):
+    """The gradient in lx from the adjoints of the entries' A and Q (Ab, Qb: entries, blocks, 2, 2), of P0
+    (P0b) and the sum of those of R (rsum); tables: derivative_tables (computed if not given)."""
+    g = np.zeros(len(lx))
+    for j, b, s0, dA, dQ, d00, d11 in (derivative_tables(lx, steps, starts) if tables is None else tables):
+        g[j] += (np.einsum("uab,juab->j", Ab[:, b], dA) + np.einsum("uab,juab->j", Qb[:, b], dQ) + P0b[s0, s0] * d00
+                 + P0b[s0 + 1, s0 + 1] * d11)
+    g[-1] = rsum * 2 * jitter**2
+    return g
 
 
 class RotationGradient:
@@ -279,17 +304,4 @@ class RotationGradient:
         Ab, Qb, P0b = np.empty((ne, nb, 2, 2)), np.empty((ne, nb, 2, 2)), np.zeros(P0.shape)
         ll, rsum = loglik_adjoint(self.idx, At, Qt, self.y, self.e2 + model.jitter**2, kinds, starts, P0,
                                   model.n_diffuse, self.seg, *self.buf, Ab, Qb, P0b)
-        g = np.zeros(len(lx))
-        dt = self.steps.astype(complex)
-        for j in range(len(lx) - 1):  # complex step in lx[j]; the jitter only enters R
-            lz = lx.astype(complex)
-            lz[j] += 1j * _H
-            for k, (sig, w0, Qf) in enumerate(_rotation_blocks(lz)):
-                if sig.imag == 0 and w0.imag == 0 and np.imag(Qf) == 0:
-                    continue
-                A, Q, (p00, p11) = _sho_complex(sig, w0, Qf, dt)
-                b, s0 = k + 1, starts[k + 1]
-                g[j] += (np.sum(Ab[:, b] * A.imag) + np.sum(Qb[:, b] * Q.imag)
-                         + P0b[s0, s0] * p00.imag + P0b[s0 + 1, s0 + 1] * p11.imag) / _H
-        g[-1] = rsum * 2 * model.jitter**2
-        return ll, g
+        return ll, contract(lx, self.steps, starts, Ab, Qb, P0b, rsum, model.jitter)
