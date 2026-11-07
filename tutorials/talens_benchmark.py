@@ -5,7 +5,8 @@ Data (Oxford University Research Archive, doi:10.5287/ora-aeaxy98vd): unzip
 full-noplanet.zip (1.5 GB) into DATA_DIR and put star_catalog.ftr,
 planet_catalog_inner.ftr and planet_catalog_outer.ftr next to it, so that
 DATA_DIR/lightcurves/full_noplanet/cadence_600s/0000000000.ftr exists.
-Needs pandas, pyarrow (to read .ftr files) and batman-package (injection).
+Needs pandas, pyarrow (to read .ftr files) and batman-package (injection; on Python 3.12
+or later, batman also needs setuptools).
 
 Usage (the full benchmark: 2000 + 2000 injections and 500 planet-free light curves):
     python talens_benchmark.py DATA_DIR results.jsonl [--n N] [--device gpu] [--workers 8]
