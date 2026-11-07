@@ -7,6 +7,7 @@ import numba
 import numpy as np
 
 from transitleastsquares.gp.nelder_mead import nelder_mead
+from transitleastsquares.gp.quasi_newton import minimize_bounded
 from transitleastsquares.gp.statespace import gp_mean, log_likelihood, rotation_model, spline_model, step_table
 
 ROT_KEYS = ["sigma", "period", "Q0", "dQ", "f", "sigma_slow", "rho_slow", "jitter"]
@@ -21,6 +22,10 @@ ROT_START_SHIFTS = [
     np.log([2, 1, 0.3, 100, 0.5, 0.5, 3, 0.5]),
     np.log([1, 1, 20, 5, 1, 1, 10, 1]),
 ]
+# method="gradient": the second generic start leads the gradient fit into a degenerate corner (jitter, sigma_slow -> 0,
+# all Q -> 1/2) in 9 of 24 Talens light curves (bench/gradfit), so the gradient fit starts from the others
+GRADIENT_START_SHIFTS = [ROT_START_SHIFTS[i] for i in (0, 2, 3)]
+GRADIENT_FLOOR = 1e-4  # lower bounds of the gradient fit: amplitudes x the scatter (jitter: x the median error), Q0, dQ, f
 
 
 def _thread_map(fn, items, use_threads):
@@ -48,7 +53,7 @@ def bin_series(t, y, yerr, width):
 
 
 def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
-                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None, final=True):
+                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None, final=True, method="nelder-mead"):
     """Type-II maximum likelihood for the rotation model.
 
     Without start: n_starts (1-4, default 1) generic starting points, each
@@ -73,7 +78,16 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
 
     converge: restart Nelder-Mead from its result (each restart spreads the
     simplex again) until the log likelihood gains less than this, also from a
-    start; on the GPU first with its likelihood, then in FP64."""
+    start; on the GPU first with its likelihood, then in FP64.
+
+    method="gradient": bounded quasi-Newton (quasi_newton.minimize_bounded)
+    with the exact gradient (gradient.RotationGradient, reverse mode, FP64 on
+    the CPU on every device; one thread per start). Bounds: those of
+    Nelder-Mead's penalty, and lower bounds of GRADIENT_FLOOR (rho_slow: 0.5,
+    period: 0.3 period_guess). n_starts 1-3 (GRADIENT_START_SHIFTS); passes and
+    converge restart the quasi-Newton (fresh inverse Hessian); tol is not used.
+    About 30x fewer evaluations than Nelder-Mead with tol 1e-3, and higher
+    likelihoods in most cases (bench/gradfit)."""
     m = np.ones(len(t), bool) if mask is None else mask
     tm, ym, em = t[m], y[m], yerr[m]
     std = np.std(ym)
@@ -85,17 +99,27 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         if start is not None:
             start = dict(start, jitter=start["jitter"] / jit_scale)
     amp_max = 10 * std  # amplitudes and jitter: at most 10x the scatter of the data
+    if method not in ("nelder-mead", "gradient"):
+        raise ValueError('method must be "nelder-mead" or "gradient"')
+    shifts = ROT_START_SHIFTS if method == "nelder-mead" else GRADIENT_START_SHIFTS
     if start is None:
-        if not 1 <= n_starts <= len(ROT_START_SHIFTS):
-            raise ValueError(f"n_starts must be 1-{len(ROT_START_SHIFTS)}")
+        if not 1 <= n_starts <= len(shifts):
+            raise ValueError(f"n_starts must be 1-{len(shifts)}")
         base = np.log([std, period_guess, 1.0, 1.0, 0.5, 0.3 * std, 5.0, np.median(em) * 0.5])
-        x0s = [base + sh for sh in ROT_START_SHIFTS[:n_starts]]
+        x0s = [base + sh for sh in shifts[:n_starts]]
     else:
         # floor: a parameter that underflowed to 0 has log = -inf, which puts NaN into the simplex (no convergence)
         x0s, passes = [np.log(np.maximum([start[k] for k in ROT_KEYS], np.finfo(float).tiny))], 1
     threads = numba.get_num_threads() if use_threads is None else max(1, int(use_threads))
     # one start: the threads go into the likelihood; several: one start per thread
     ll_threads = threads if len(x0s) == 1 else 1
+    if method == "gradient":
+        best = _fit_rotation_gradient(tm, ym, em, x0s, period_guess, std, amp_max, passes, converge, use_threads)
+        p = dict(zip(ROT_KEYS, np.exp(best.x)))
+        if binned:
+            p["jitter"] *= jit_scale
+            tm, ym, em = t_all, y_all, e_all
+        return p, log_likelihood(rotation_model(p), tm, ym, em, threads) if final else None
     gpu_lik = None
     if device == "gpu" and len(x0s) == 1:
         from transitleastsquares.gpu import driver
@@ -145,6 +169,39 @@ def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, us
         p["jitter"] *= jit_scale
         tm, ym, em = t_all, y_all, e_all
     return p, log_likelihood(rotation_model(p), tm, ym, em, threads) if final else None
+
+
+def _fit_rotation_gradient(t, y, yerr, x0s, period_guess, std, amp_max, passes, converge, use_threads):
+    """fit_rotation with method="gradient": the best of the quasi-Newton runs from x0s."""
+    from transitleastsquares.gp.gradient import RotationGradient
+
+    floor, me = GRADIENT_FLOOR, np.median(yerr)
+    lo = np.log([floor * std, 0.3 * period_guess, floor, floor, floor, floor * std, 0.5, floor * me])
+    hi = np.log([amp_max, 3 * period_guess, 1e4, 1e5, 100, amp_max, 100, amp_max])
+    lo, hi = np.minimum(lo, hi), hi  # (scatter below the errors: the jitter floor stays below its ceiling)
+
+    def run(x0):
+        lik = RotationGradient(t, y, yerr)  # (per start: its own buffers)
+
+        def fg(lx):
+            try:
+                ll, g = lik(lx)
+            except (np.linalg.LinAlgError, ValueError, ZeroDivisionError):
+                return np.inf, np.zeros(len(lx))
+            return (-ll, -g) if np.isfinite(ll) and np.all(np.isfinite(g)) else (np.inf, np.zeros(len(lx)))
+
+        x = np.clip(np.nan_to_num(x0, neginf=-700.0), lo, hi)
+        best = None
+        for _ in range(passes if converge is None else CONVERGE_MAX):
+            r = minimize_bounded(fg, x if best is None else best.x, lo, hi)
+            gain = np.inf if best is None else best.fun - r.fun
+            if best is None or r.fun < best.fun:
+                best = r
+            if converge is not None and not gain >= converge:
+                break
+        return best
+
+    return min(_thread_map(run, x0s, use_threads), key=lambda r: r.fun)
 
 
 def fit_spline(t, y, yerr, mask=None, h_range=(0.05, 5.0), start=None, use_threads=None, device="cpu"):

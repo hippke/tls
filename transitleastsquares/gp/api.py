@@ -117,6 +117,7 @@ def search(
     clip_flares=True,
     rotation_period=None,
     n_starts=1,
+    fit_method="nelder-mead",
     fit_bin_width=FIT_BIN_WIDTH,
     flare_bin_width=FIT_BIN_WIDTH,
     period_min=0,
@@ -158,6 +159,12 @@ def search(
         Lomb-Scargle peak); n_starts: rotation fit starting points (1-4,
         default 1; more starts find better optima in ~1/4 of the cases, but
         did not find more planets in injection tests).
+    fit_method: optimizer of the rotation fit: "nelder-mead" (default) or
+        "gradient" (bounded quasi-Newton with the exact gradient of the
+        likelihood, FP64 on the CPU also with device="gpu"; n_starts 1-3).
+        The gradient fit needs ~30x fewer likelihood evaluations and mostly
+        reaches higher likelihoods, so its fits, and therefore the search
+        results, differ from the default's.
     fit_bin_width: the rotation fit uses data binned to this width (days,
         default 10 min) if the cadence is shorter than half of it; the
         search always uses the unbinned data. None: never bin.
@@ -219,7 +226,9 @@ def search(
         if isinstance(baseline, str):
             if baseline not in BASELINES:
                 raise ValueError(f"baseline must be one of {sorted(BASELINES)} or a Baseline instance")
-            kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width) \
+            if baseline == "spline" and fit_method != "nelder-mead":
+                raise ValueError('fit_method="gradient" is for the rotation baseline only')
+            kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width, method=fit_method) \
                 if baseline == "rotation" else {}
             if clip_flares:
                 b, ll, use = fit_with_flare_clipping(baseline, t, y, dy, device=device, flare_bin=flare_bin_width, **kw)

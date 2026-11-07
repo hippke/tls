@@ -10,6 +10,12 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Unreleased
+------------------------------------
+
+:Added: ``gp.search(..., fit_method="gradient")`` (and ``method="gradient"`` in ``gp.RotationBaseline.fit``): the rotation fit by a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter), about 30 times fewer likelihood evaluations than the default Nelder-Mead fit, and mostly higher likelihoods. The default is unchanged.
+
+
 Version 2.1.0 (7 November 2026)
 ------------------------------------
 
