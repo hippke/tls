@@ -59,6 +59,45 @@ def _binned_passes(t, y, yerr, model, width, nseg):
     return tb, yb, Rb, eyb, eydb, Ab, Kb, Sb, Wb, wb
 
 
+def _segment_events(t, y, yerr, models, segments, nseg_threads, tc, delta, durs, table, texp, nsub, mstep, off, single,
+                    device, clock):
+    """The compact single events and chi2_0 of light curve segments, each with
+    its own filter (a free mean per segment; the events of a transit add up over
+    the segments it has data in, as the log likelihood of independent segments)."""
+    if device == "gpu":
+        from transitleastsquares.gpu import driver
+    ab = np.zeros((off[-1], 2))
+    chi2_0 = 0.0
+    for (a, b), model in zip(segments, models):
+        ts, ys, es = t[a:b], y[a:b], yerr[a:b]
+        R = es**2 + model.jitter**2
+        nseg = n_segments(len(ts), nseg_threads)
+        nd = model.n_diffuse
+        if device == "gpu":
+            dev, ey = driver.kalman_gpu(ts, ys, R, model, nseg)
+            ey[:nd] = 0.0
+            chi2_0 += float(np.sum(ey**2))
+            clock("kalman")
+            W_d, _, z_d = driver.tail_operators_gpu(dev, ey)
+            clock("tail_operators")
+            d = driver.single_events_gp_dev(ts, z_d, dev, W_d, tc[0], delta, durs, nsub, table, texp, mstep, off)
+            ab += np.asarray(d.copy_to_host(), np.float64)
+        else:
+            kinds, starts, pars, P0 = model.blocks()
+            A = transition_matrices(ts, kinds, starts, pars, model.dim)
+            K, S, ey = kalman_whiten(ts, ys, R, kinds, starts, pars, P0, nseg)
+            eyd = ey[:nd].copy()
+            ey[:nd] = 0.0
+            chi2_0 += float(np.sum(ey**2))
+            clock("kalman")
+            W, w = tail_operators(A, K, S, model.H, ey, nseg)
+            clock("tail_operators")
+            ab += _single_strided(single, ts, ys, R, ey, eyd, A, K, S, W, w, model, nseg, tc, durs, table, texp, nsub,
+                                  mstep, off)
+        clock("single_events")
+    return ab, chi2_0
+
+
 class _Clock:
     """Accumulates wall time per stage into a dict (no-op without one)."""
 
@@ -93,6 +132,13 @@ def _search(
     device="cpu",
     bin_fraction=None,
     timings=None,
+    R_star_min=tls_constants.R_STAR_MIN,
+    R_star_max=tls_constants.R_STAR_MAX,
+    M_star_min=tls_constants.M_STAR_MIN,
+    M_star_max=tls_constants.M_STAR_MAX,
+    duration_min_scale=1.0,
+    grid_transits_min=None,
+    segments=None,
 ):
     """Periodic transit search with the GP baseline marginalised.
 
@@ -122,7 +168,14 @@ def _search(
     bin_fraction: None (default), or the single events of duration D use the
     data binned to the largest power-of-two multiple k of the cadence with
     k cadence <= bin_fraction D (approximate: the GP on bin means, the
-    template averaged over the bin; e.g. 1/30). Strided T0 grid, CPU only."""
+    template averaged over the bin; e.g. 1/30). Strided T0 grid, CPU only.
+    R_star_min, ..., M_star_max: stellar limits of the duration grid.
+    duration_min_scale: factor on the shortest trial duration of each period.
+    grid_transits_min: the longest trial period is span / grid_transits_min
+    (default n_transits_min).
+    segments: None, or index ranges (a, b) of t, each with its own filter;
+    model is then a list with one model per segment. Strided T0 grid, no Bayes
+    factors, no bin_fraction."""
     if fold not in FOLDS:
         raise ValueError(f"fold must be one of {FOLDS}")
     if single not in ("kalman", "split"):
@@ -131,6 +184,8 @@ def _search(
         raise ValueError('device must be "cpu" or "gpu"')
     if device == "gpu" and (bayes_factor or t0_step_duration is None):
         raise ValueError('device="gpu" needs the strided T0 grid and no Bayes factors')
+    if segments is not None and (bayes_factor or t0_step_duration is None or bin_fraction is not None):
+        raise ValueError("segments need the strided T0 grid, no Bayes factors and no bin_fraction")
     clock = _Clock(timings)
     t = np.asarray(t, float)
     y = (np.asarray(flux, float) - 1.0) * 1e3
@@ -139,31 +194,31 @@ def _search(
     texp = cad if texp is None else texp
     delta = cad / 4 if t0_step is None else t0_step
 
-    kinds, starts, pars, P0 = model.blocks()
-    R = yerr**2 + model.jitter**2
-    nseg = n_segments(len(t), numba.get_num_threads())
-    if device == "gpu":  # the gains stay on the device (FP32)
+    if device == "gpu":
         from transitleastsquares.gpu import driver
-
-        dev, ey = driver.kalman_gpu(t, y, R, model, nseg)
-    else:
-        A = transition_matrices(t, kinds, starts, pars, model.dim)
-        clock("matrices")
-        K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
-    nd = model.n_diffuse
-    eyd = ey[:nd].copy()  # (single="split" removes their terms itself)
-    ey[:nd] = 0.0  # diffuse start: no information
-    chi2_0 = float(np.sum(ey**2))
-    clock("kalman")
+    if segments is None:
+        kinds, starts, pars, P0 = model.blocks()
+        R = yerr**2 + model.jitter**2
+        nseg = n_segments(len(t), numba.get_num_threads())
+        if device == "gpu":  # the gains stay on the device (FP32)
+            dev, ey = driver.kalman_gpu(t, y, R, model, nseg)
+        else:
+            A = transition_matrices(t, kinds, starts, pars, model.dim)
+            clock("matrices")
+            K, S, ey = kalman_whiten(t, y, R, kinds, starts, pars, P0, nseg)
+        nd = model.n_diffuse
+        eyd = ey[:nd].copy()  # (single="split" removes their terms itself)
+        ey[:nd] = 0.0  # diffuse start: no information
+        chi2_0 = float(np.sum(ey**2))
+        clock("kalman")
 
     span = t.max() - t.min()
-    periods = np.sort(period_grid(1.0, 1.0, span, period_min, period_max, oversampling_factor))
-    m_short, m_long = duration_limit_masses(
-        tls_constants.R_STAR_MIN, tls_constants.R_STAR_MAX,
-        tls_constants.M_STAR_MIN, tls_constants.M_STAR_MAX,
-    )
-    dmin = T14_durations(tls_constants.R_STAR_MIN, m_short, periods, True)
-    dmax = T14_durations(tls_constants.R_STAR_MAX, m_long, periods, False)
+    grid_transits = n_transits_min if grid_transits_min is None else grid_transits_min
+    periods = np.sort(period_grid(1.0, 1.0, span, period_min, period_max, oversampling_factor,
+                                  n_transits_min=grid_transits))
+    m_short, m_long = duration_limit_masses(R_star_min, R_star_max, M_star_min, M_star_max)
+    dmin = T14_durations(R_star_min, m_short, periods, True) * duration_min_scale
+    dmax = T14_durations(R_star_max, m_long, periods, False)
     durs = [dmin.min()]
     while durs[-1] < dmax.max():
         durs.append(durs[-1] * duration_grid_step)
@@ -174,7 +229,7 @@ def _search(
     tc = t.min() + delta * np.arange(int(span / delta) + 1)
     table = template_table()
     clock("grids")
-    if device != "gpu":  # (the GPU path computes them on the device)
+    if device != "gpu" and segments is None:  # (the GPU path computes them on the device)
         W, w = tail_operators(A, K, S, model.H, ey, nseg)
     clock("tail_operators")
     strided = t0_step_duration is not None
@@ -182,7 +237,13 @@ def _search(
         mstep = np.maximum(1, np.floor(t0_step_duration * durs / delta)).astype(np.int64)
     else:
         mstep = np.ones(len(durs), np.int64)
-    if device == "gpu":  # split single events and the fold on the device (FP32)
+    if segments is not None:
+        off = compact_offsets(len(tc), mstep)
+        ab, chi2_0 = _segment_events(t, y, yerr, model, segments, numba.get_num_threads(), tc, delta, durs, table, texp,
+                                     nsub, mstep, off, single, device, clock)
+        if device == "gpu":
+            d_ab = driver.cuda.to_device(np.ascontiguousarray(ab, np.float32))
+    elif device == "gpu":  # split single events and the fold on the device (FP32)
         off = compact_offsets(len(tc), mstep)
         W_d, _, z_d = driver.tail_operators_gpu(dev, ey)  # FP32, on the device
         clock("tail_operators")
