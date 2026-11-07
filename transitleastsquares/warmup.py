@@ -10,6 +10,7 @@ compiling it themselves.
 """
 
 import time
+import warnings
 
 import numpy
 
@@ -63,14 +64,16 @@ def ensure_compiled(backend=None, verbose=True):
     t = numpy.linspace(0, 20, 3000)
     y = 1 + rng.normal(0, 1e-3, len(t))
     y[(t % 5.0) < 0.1] -= 3e-3
-    transitleastsquares(t, y, verbose=False).power(
-        backend=backend,
-        use_threads=1,
-        period_min=4.5,
-        period_max=5.5,
-        show_progress_bar=False,
-        verbose=False,
-    )
+    with warnings.catch_warnings():  # the tiny grid's fallback warning is not the user's
+        warnings.simplefilter("ignore")
+        transitleastsquares(t, y, verbose=False).power(
+            backend=backend,
+            use_threads=1,
+            period_min=4.5,
+            period_max=5.5,
+            show_progress_bar=False,
+            verbose=False,
+        )
     # statistics helpers not reached by the tiny search above (short spectrum)
     from transitleastsquares.helpers import running_median
 
