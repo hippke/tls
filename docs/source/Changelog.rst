@@ -10,6 +10,16 @@ The versioning scheme is: major.minor.revision
 :revision: Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
 
+Version 2.1.0 (7 November 2026)
+------------------------------------
+
+:Added: **Transit search with the stellar variability marginalised** (``transitleastsquares.gp``, experimental): ``gp.search(t, y, dy)`` models the star with a Gaussian process (a rotation kernel, or a smoothing spline) and integrates it out inside the search, so that the depth of every trial transit is fitted jointly with the variability instead of after a detrending. The GP hyperparameters are fitted first (with flare clipping); the search uses the same period grid as TLS. Options for light curves made of segments with offsets or drifts (``segment_gap``, ``segment_degree``: each segment its own filter and free mean), the stellar limits of the duration grid, ``duration_min_scale`` and ``grid_transits_min``. See :doc:`GP search` and tutorials 13 and 14.
+:Added: **GPU support** (NVIDIA, CUDA, with ``pip install "transitleastsquares[gpu]"``): ``gp.search(..., device="gpu")`` runs the hyperparameter fit, the Kalman passes, the single transit events and the period fold on the GPU, and ``power(backend="events-gpu")`` the TLS search of detrended data.
+:Added: Search backends ``events``, ``events-ffa`` and ``events-gpu`` for ``power(backend=...)``: the period search as a fold of single transit events (cost per period independent of the number of data points; faster for long light curves such as PLATO's). Approximate: least-squares depths on its own grids of durations and mid-transit times; the final T0 fit and all statistics are TLS's own.
+:Changed: The TLS search (``transitleastsquares(...).power()``) and its default backend are unchanged; the new modules are not imported by ``import transitleastsquares``.
+:Fixed: The first search in a process no longer shows the warning "period_grid defaults to R_star=1 and M_star=1 ...", which came from the internal warm-up search, not from the user's light curve. Results are unchanged.
+
+
 Version 2.0.4 (30 October 2026)
 ------------------------------------
 

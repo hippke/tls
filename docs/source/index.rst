@@ -9,6 +9,7 @@ The documentation for:
    Changelog
    Tutorials <https://github.com/hippke/tls/tree/master/tutorials>
    Python interface
+   GP search
    Command
    FAQ
    Submit an issue <https://github.com/hippke/tls/issues>

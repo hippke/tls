@@ -21,6 +21,16 @@ For an editable (development) install, use ``pip install -e .`` instead. If you 
 Dependencies: Python 3.9+, NumPy (>= 1.22), numba, tqdm. Optional: ``astroquery`` (for limb darkening and stellar density priors from the Kepler K1, K2, and TESS catalogs) and ``batman-package`` (only needed to run the test suite).
 
 
+GPU support
+------------------------
+
+The GP search (:doc:`GP search`) and the ``events-gpu`` backend of TLS can run on an NVIDIA GPU with CUDA. They need `numba-cuda <https://nvidia.github.io/numba-cuda/>`_ and an NVIDIA driver; the CUDA libraries come as pip packages::
+
+    pip install "transitleastsquares[gpu]"
+
+This installs ``numba-cuda[cu13]`` for CUDA 13 (driver 580 or later). For an older driver, install ``pip install "numba-cuda[cu12]"`` instead. ``transitleastsquares.gpu.available()`` tells whether a device is usable. Everything else runs without a GPU.
+
+
 Compatibility
 ------------------------
 

@@ -22,6 +22,14 @@ We present a new method to detect planetary transits from time-series photometry
 
 See the [changelog](https://transitleastsquares.readthedocs.io/en/latest/Changelog.html) for the full list of changes.
 
+## New in TLS 2.1: transit search with the stellar variability marginalised (experimental)
+* `from transitleastsquares import gp; results = gp.search(t, flux, flux_err)` models the star with a Gaussian process and integrates it out inside the search, instead of detrending first: every trial transit is fitted jointly with the stellar variability. It needs no detrending window and works on raw, normalised light curves.
+* **GPU support**: `gp.search(..., device="gpu")` on an NVIDIA GPU (`pip install "transitleastsquares[gpu]"`), a few seconds per light curve even for two years of PLATO data.
+* New TLS backends `events`, `events-ffa`, `events-gpu` (`power(backend=...)`) for long light curves.
+* Tutorials: [📑13 TLS with a GP baseline](https://github.com/hippke/tls/blob/master/tutorials/13%20TLS%20with%20a%20GP%20baseline%20-%20a%20spotted%20star%20with%20a%20planet.ipynb) (CPU and GPU) and [📑14 Reproducing the Talens et al. (2026) PLATO benchmark](https://github.com/hippke/tls/blob/master/tutorials/14%20Reproducing%20the%20Talens%20et%20al.%20(2026)%20PLATO%20benchmark.ipynb). Documentation: [GP search](https://transitleastsquares.readthedocs.io/en/latest/GP%20search.html).
+
+The TLS search itself (`transitleastsquares(t, y, dy).power()`) is unchanged.
+
 ## Installation
 
 TLS can be installed conveniently using: `pip install transitleastsquares`
@@ -36,6 +44,8 @@ pip install .
 ```
 
 For an editable (development) install, use `pip install -e .` instead of the last line.
+
+For the GPU (NVIDIA, CUDA 13, driver 580 or later): `pip install "transitleastsquares[gpu]"`, or `pip install ".[gpu]"` in the cloned directory. For older drivers, install `numba-cuda[cu12]` instead.
 
 Dependencies:
 Python 3.9+ (tested up to 3.14),
