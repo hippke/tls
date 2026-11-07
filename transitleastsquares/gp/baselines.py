@@ -208,25 +208,24 @@ class RotationBaseline(Baseline):
 
     @classmethod
     def fit(cls, t, y, dy, period_guess=None, use=None, n_starts=1, use_threads=None, start=None,
-            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3, device="cpu", converge=None, final=True, method="nelder-mead"):
+            bin_width=FIT_BIN_WIDTH, passes=1, tol=1e-3, device="cpu", converge=None, final=True, method="gradient"):
         """Type-II maximum likelihood. period_guess (default: Lomb-Scargle
-        peak); use: points to fit (default all); n_starts (1-4, default 1) starting
+        peak); use: points to fit (default all); n_starts (default 1) starting
         points in up to use_threads threads (default: numba's thread count);
         start: a previous RotationBaseline (single pass from there);
         bin_width: fit on data binned to this width (days, default 10 min)
         if the cadence is shorter than half of it (None: never bin);
-        passes, tol: Nelder-Mead passes from a cold start and their
-        tolerance (default 1 and 1e-3).
+        passes: optimizer runs from a cold start (each from the last
+        optimum); tol: Nelder-Mead's tolerance (default 1 and 1e-3).
         The hyperparameters are nuisance parameters of the search: the
-        likelihood is flat and multimodal, and the defaults find the same
-        planets as passes=3, tol=1e-4 (400 K2 injections) at 2x less fit
-        time, but not always the same optimum. For better optima (e.g. to
-        use the rotation period), fit with n_starts=4, passes=3, tol=1e-4
-        and pass the baseline to gp.search. device="gpu", converge, final: see fitting.fit_rotation.
-        method: "nelder-mead" (default) or "gradient" (bounded quasi-Newton
-        with the exact gradient, on the CPU: ~30x fewer likelihood
-        evaluations and mostly higher likelihoods; n_starts 1-3; see
-        fitting.fit_rotation).
+        likelihood is flat and multimodal, and a single start does not
+        always reach the best optimum. For better optima (e.g. to use the
+        rotation period), fit with n_starts=3 (or method="nelder-mead",
+        n_starts=4, passes=3, tol=1e-4) and pass the baseline to gp.search. device="gpu", converge, final: see fitting.fit_rotation.
+        method: "gradient" (default: bounded quasi-Newton with the exact
+        gradient; n_starts 1-3) or "nelder-mead" (the default of TLS 2.1:
+        ~30x more likelihood evaluations and mostly lower likelihoods;
+        n_starts 1-4); see fitting.fit_rotation.
         Returns (baseline, log likelihood of the unbinned data)."""
         t, y, dy = (np.asarray(a, float) for a in (t, y, dy))
         if period_guess is None:

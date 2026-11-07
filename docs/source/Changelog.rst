@@ -13,7 +13,7 @@ The versioning scheme is: major.minor.revision
 Unreleased
 ------------------------------------
 
-:Added: ``gp.search(..., fit_method="gradient")`` (and ``method="gradient"`` in ``gp.RotationBaseline.fit``): the rotation fit by a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter), about 30 times fewer likelihood evaluations than the default Nelder-Mead fit, and mostly higher likelihoods. The default is unchanged.
+:Changed: The rotation fit of ``gp.search`` (and ``gp.RotationBaseline.fit``) now uses a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter; ``fit_method="gradient"``, the new default): about 30 times fewer likelihood evaluations than the Nelder-Mead fit of TLS 2.1, mostly higher likelihoods, and on 300 light curves of the Talens et al. (2026) benchmark the same recovery (194 against 195 planets). The previous fit remains available as ``fit_method="nelder-mead"``; results differ slightly from TLS 2.1. ``n_starts`` is 1-3 for the gradient fit.
 :Added: With ``device="gpu"`` the gradient fit computes the gradient on the GPU (RTS smoother in parallel segments; FP32 kernels for the gradient, the likelihood in FP64), and ``fit_device`` chooses the device of the fit separately from the search's.
 
 

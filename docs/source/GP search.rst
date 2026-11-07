@@ -16,7 +16,7 @@ Quick start::
 How it works
 ------------------------
 
-1. The GP hyperparameters are fitted by maximum likelihood, by default on data binned to 10 min, with flares removed iteratively (positive outliers; dips are never clipped). The default kernel ``"rotation"`` is the rotation kernel of celerite2 (two damped oscillators at the rotation period and half of it), plus a slow non-periodic term and white-noise jitter. ``"spline"`` is a smoothing spline.
+1. The GP hyperparameters are fitted by maximum likelihood (a quasi-Newton method with the exact gradient of the likelihood), by default on data binned to 10 min, with flares removed iteratively (positive outliers; dips are never clipped). The default kernel ``"rotation"`` is the rotation kernel of celerite2 (two damped oscillators at the rotation period and half of it), plus a slow non-periodic term and white-noise jitter. ``"spline"`` is a smoothing spline.
 2. A Kalman filter whitens the light curve. For every trial duration and mid-transit time, the single transit event is the :math:`\chi^2` gain of a transit template with a free depth, with the GP marginalised.
 3. The single events are summed over the transits of every trial period (on the TLS period grid) and turned into an SDE spectrum as in TLS.
 
@@ -31,9 +31,9 @@ Baseline and fit:
 :baseline: *(str or Baseline, default: "rotation")* ``"rotation"`` or ``"spline"`` (fitted by maximum likelihood), or a ``gp.RotationBaseline`` / ``gp.SplineBaseline`` instance, used as given (no fit, no flare clipping).
 :clip_flares: *(bool, default: True)* Remove positive outliers iteratively when fitting.
 :rotation_period: *(float)* Starting guess of the rotation period for the fit (default: the Lomb-Scargle peak).
-:n_starts: *(int, default: 1)* Starting points of the rotation fit (1-4).
-:fit_method: *(str, default: "nelder-mead")* Optimizer of the rotation fit. ``"gradient"``: bounded quasi-Newton with the exact gradient of the likelihood (reverse mode, FP64 on the CPU on every device, ``n_starts`` 1-3). It needs about 30 times fewer likelihood evaluations than the default and mostly reaches higher likelihoods, so its fits, and the search results, differ from the default's. With ``device="gpu"`` the gradient is computed on the GPU (the smoother in segments).
-:fit_device: *(str, default: the value of ``device``)* Device of the hyperparameter fit, ``"cpu"`` or ``"gpu"``. Several searches sharing a consumer GPU (FP64 at 1/64 of the FP32 rate) are fastest with ``fit_method="gradient", fit_device="cpu"``; a single search is fastest with the fit on the GPU. Several processes on one machine: limit NumPy's BLAS to one thread per process (``OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1``); its thread pools otherwise oversubscribe the cores (14 processes: 35 s instead of 50 s for 112 light curves).
+:n_starts: *(int, default: 1)* Starting points of the rotation fit (1-3; 1-4 with ``fit_method="nelder-mead"``).
+:fit_method: *(str, default: "gradient")* Optimizer of the rotation fit. ``"gradient"``: bounded quasi-Newton with the exact gradient of the likelihood (on the CPU by reverse mode; with ``device="gpu"`` on the GPU, the smoother in segments with single-precision kernels and the likelihood in double precision). ``"nelder-mead"``: the derivative-free simplex, the default of TLS 2.1; it needs about 30 times more likelihood evaluations and mostly reaches lower likelihoods, so its fits, and the search results, differ slightly. On 300 light curves of the Talens et al. (2026) benchmark both found the same planets to within the binomial uncertainty (194 and 195). The spline baseline is always fitted by Nelder-Mead.
+:fit_device: *(str, default: the value of ``device``)* Device of the hyperparameter fit, ``"cpu"`` or ``"gpu"``. Several searches sharing a consumer GPU (FP64 at 1/64 of the FP32 rate) are fastest with ``fit_device="cpu"``, or half of them with each device under NVIDIA MPS; a single search is fastest with the fit on the GPU. Several processes on one machine: limit NumPy's BLAS to one thread per process (``OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1``); its thread pools otherwise oversubscribe the cores (14 processes: 35 s instead of 50 s for 112 light curves).
 :fit_bin_width: *(float, default: 10 min)* The fit uses data binned to this width (days) if the cadence is shorter than half of it. ``None``: never bin. The search always uses the unbinned data.
 
 Search grid (as in TLS):
@@ -52,7 +52,7 @@ Light curves made of segments (e.g., the quarters of a space mission, with offse
 
 Computation:
 
-:device: *(str, default: "cpu")* ``"gpu"``: an NVIDIA GPU (see :doc:`Installation`). Search and fold in single precision, the fit and the Kalman passes in double precision. The results equal the CPU results up to rounding.
+:device: *(str, default: "cpu")* ``"gpu"``: an NVIDIA GPU (see :doc:`Installation`). Search and fold in single precision, the likelihood and the Kalman passes in double precision (the gradient of the fit in single precision). The results equal the CPU results up to rounding.
 :fold: *(str, default: "blocked")* The period fold: ``"blocked"`` (every epoch of every period), or the approximate ``"ffa"`` (fast folding, faster on long light curves on the CPU), with options ``-screen`` and ``-coarse``.
 :use_threads: *(int)* Number of CPU threads (default: numba's setting).
 :trend: *(bool, default: True)* Compute the trend of the result (the posterior mean of the GP outside the transits of the best signal).

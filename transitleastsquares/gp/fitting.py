@@ -53,10 +53,10 @@ def bin_series(t, y, yerr, width):
 
 
 def fit_rotation(t, y, yerr, period_guess, mask=None, start=None, n_starts=1, use_threads=None,
-                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None, final=True, method="nelder-mead"):
+                 bin_width=None, passes=1, tol=1e-3, device="cpu", converge=None, final=True, method="gradient"):
     """Type-II maximum likelihood for the rotation model.
 
-    Without start: n_starts (1-4, default 1) generic starting points, each
+    Without start: n_starts (default 1; Nelder-Mead 1-4) generic starting points, each
     with `passes` Nelder-Mead passes (tolerance tol in log parameters and
     log likelihood), run in up to use_threads threads (default:
     numba's thread count); the best optimum wins (the likelihood is

@@ -1,9 +1,9 @@
 """transitleastsquares.gp: baseline fits.
 
 The fits with flare clipping on K2-25 must reach at least the reference
-likelihood (logL in ppt units -4595.4897 for the rotation GP with the
-default single Nelder-Mead pass at tolerance 1e-3; -6457.6451 for the
-spline) with the same flares clipped: optimizer changes must not cost fit
+likelihood (logL in ppt units -4595.4897 for the rotation GP with a single
+Nelder-Mead pass at tolerance 1e-3, the default of TLS 2.1; -6457.6451 for
+the spline) with the same flares clipped: optimizer changes must not cost fit
 quality without a recovery check (the rotation default trades the optimum
 for 2x speed; 400 K2 injections found the same planets). Parallel fit starts
 must equal sequential ones, and the search result must not depend on the
@@ -25,7 +25,7 @@ REFERENCE = {"rotation": (-4595.4897, 24, 1), "spline": (-6457.6451, 12, 3)}
 @pytest.mark.parametrize("kind", list(REFERENCE))
 def test_fit_quality(kind):
     t, f, e = k2_25()  # the 70 flares of the file removed; clipping finds 24 more
-    kw = dict(period_guess=1.876) if kind == "rotation" else {}
+    kw = dict(period_guess=1.876, method="nelder-mead") if kind == "rotation" else {}
     b, ll, use = fit_with_flare_clipping(kind, t, f, e, **kw)
     ll_ref, nclip_ref, nd = REFERENCE[kind]
     assert int((~use).sum()) == nclip_ref
@@ -37,12 +37,13 @@ def test_fit_quality(kind):
 
 
 def test_parallel_starts_deterministic():
-    """4 starts in 4 threads (GIL-free likelihood) = the same 4 starts in one
-    thread, bit for bit, and never worse than the single start."""
+    """4 Nelder-Mead starts in 4 threads (GIL-free likelihood) = the same 4 starts in one
+    thread, bit for bit, and never worse than the single start (the gradient fit: test_gp_gradient)."""
     t, f, e = synthetic()
-    b1, ll1 = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, n_starts=1)
-    b_seq, ll_seq = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, n_starts=4, use_threads=1)
-    b_par, ll_par = gp.RotationBaseline.fit(t, f, e, period_guess=2.3, n_starts=4, use_threads=4)
+    nm = dict(period_guess=2.3, method="nelder-mead")
+    b1, ll1 = gp.RotationBaseline.fit(t, f, e, n_starts=1, **nm)
+    b_seq, ll_seq = gp.RotationBaseline.fit(t, f, e, n_starts=4, use_threads=1, **nm)
+    b_par, ll_par = gp.RotationBaseline.fit(t, f, e, n_starts=4, use_threads=4, **nm)
     assert b_par == b_seq and ll_par == ll_seq
     assert ll_par >= ll1
 
@@ -60,11 +61,12 @@ def test_search_threads():
 
 
 def test_warm_start_parameter_at_zero(monkeypatch):
-    """A parameter that underflowed to 0 in the previous clipping round: the next round must still converge."""
+    """A parameter that underflowed to 0 in the previous clipping round: the next round must still converge
+    (Nelder-Mead; the gradient fit: test_gp_gradient.test_warm_start_parameter_at_zero)."""
     from transitleastsquares.gp import fitting
 
     t, f, e = synthetic()
-    b, _, use = fit_with_flare_clipping("rotation", t, f, e, use_threads=1)
+    b, _, use = fit_with_flare_clipping("rotation", t, f, e, use_threads=1, method="nelder-mead")
     nit = []
     nm = fitting.nelder_mead
 
@@ -75,7 +77,8 @@ def test_warm_start_parameter_at_zero(monkeypatch):
 
     monkeypatch.setattr(fitting, "nelder_mead", count)
     start = dict(b.as_dict(), f=0.0, sigma_slow=0.0)
-    p, ll = fitting.fit_rotation(t, (f - 1) * 1e3, e * 1e3, period_guess=b.as_dict()["period"], start=start, use_threads=1)
+    p, ll = fitting.fit_rotation(t, (f - 1) * 1e3, e * 1e3, period_guess=b.as_dict()["period"], start=start, use_threads=1,
+                                 method="nelder-mead")
     assert np.isfinite(ll) and all(np.isfinite(v) for v in p.values())
     assert nit[0] < 4000
 

@@ -117,7 +117,7 @@ def search(
     clip_flares=True,
     rotation_period=None,
     n_starts=1,
-    fit_method="nelder-mead",
+    fit_method="gradient",
     fit_device=None,
     fit_bin_width=FIT_BIN_WIDTH,
     flare_bin_width=FIT_BIN_WIDTH,
@@ -157,15 +157,14 @@ def search(
         of it, as most points of a flare are hidden in the noise of a single
         point; None: single points only.
     rotation_period: starting guess of the rotation fit (default:
-        Lomb-Scargle peak); n_starts: rotation fit starting points (1-4,
-        default 1; more starts find better optima in ~1/4 of the cases, but
-        did not find more planets in injection tests).
-    fit_method: optimizer of the rotation fit: "nelder-mead" (default) or
-        "gradient" (bounded quasi-Newton with the exact gradient of the
-        likelihood, FP64, with device="gpu" on the GPU; n_starts 1-3).
-        The gradient fit needs ~30x fewer likelihood evaluations and mostly
-        reaches higher likelihoods, so its fits, and therefore the search
-        results, differ from the default's.
+        Lomb-Scargle peak); n_starts: rotation fit starting points (default
+        1; 1-3 with the gradient fit, 1-4 with Nelder-Mead).
+    fit_method: optimizer of the rotation fit: "gradient" (default: bounded
+        quasi-Newton with the exact gradient of the likelihood; with
+        device="gpu" the gradient on the GPU) or "nelder-mead" (the default
+        of TLS 2.1: derivative-free, ~30x more likelihood evaluations, and
+        mostly lower likelihoods; the results differ slightly). The spline
+        baseline (two parameters) is always fitted by Nelder-Mead.
     fit_device: device of the baseline fit, "cpu" or "gpu" (default: device).
         With several searches sharing a consumer GPU (FP64 at 1/64 of its
         FP32 rate), fit_method="gradient" with fit_device="cpu" gives the
@@ -235,8 +234,6 @@ def search(
         if isinstance(baseline, str):
             if baseline not in BASELINES:
                 raise ValueError(f"baseline must be one of {sorted(BASELINES)} or a Baseline instance")
-            if baseline == "spline" and fit_method != "nelder-mead":
-                raise ValueError('fit_method="gradient" is for the rotation baseline only')
             kw = dict(period_guess=rotation_period, n_starts=n_starts, bin_width=fit_bin_width, method=fit_method) \
                 if baseline == "rotation" else {}
             if clip_flares:

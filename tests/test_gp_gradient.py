@@ -105,9 +105,9 @@ def test_minimize_bounded():
 
 def test_fit_k2_25():
     t, f, e = k2_25()
-    _, _, use = fit_with_flare_clipping("rotation", t, f, e, period_guess=1.876)
+    _, _, use = fit_with_flare_clipping("rotation", t, f, e, period_guess=1.876, method="nelder-mead")
     to_ppt = (use.sum() - 1) * np.log(1e3)
-    _, ll_nm = gp.RotationBaseline.fit(t, f, e, period_guess=1.876, use=use)
+    _, ll_nm = gp.RotationBaseline.fit(t, f, e, period_guess=1.876, use=use, method="nelder-mead")
     b1, ll1 = gp.RotationBaseline.fit(t, f, e, period_guess=1.876, use=use, method="gradient")
     b2, ll2 = gp.RotationBaseline.fit(t, f, e, period_guess=1.876, use=use, method="gradient", n_starts=2)
     assert ll1 - to_ppt >= -4595.4897 - 0.05
@@ -131,11 +131,27 @@ def test_fit_starts_and_threads():
 
 
 def test_search_fit_method():
+    """The gradient fit is the default; the spline baseline is always fitted by Nelder-Mead."""
     t, f, e = synthetic(days=12.0)
-    r = gp.search(t, f, e, rotation_period=2.3, fit_method="gradient", period_min=1.0, period_max=4.0)
-    assert abs(r.period - 3.1) < 0.02
+    r = gp.search(t, f, e, rotation_period=2.3, period_min=1.0, period_max=4.0)
+    r_nm = gp.search(t, f, e, rotation_period=2.3, fit_method="nelder-mead", period_min=1.0, period_max=4.0)
+    assert abs(r.period - 3.1) < 0.02 and abs(r_nm.period - 3.1) < 0.02
+    assert r.baseline != r_nm.baseline
+    rs = gp.search(t, f, e, baseline="spline", period_min=1.0, period_max=4.0)
+    assert abs(rs.period - 3.1) < 0.02
     with pytest.raises(ValueError):
-        gp.search(t, f, e, baseline="spline", fit_method="gradient", period_min=1.0, period_max=4.0)
+        gp.search(t, f, e, rotation_period=2.3, fit_method="bfgs", period_min=1.0, period_max=4.0)
+
+
+def test_warm_start_parameter_at_zero():
+    """A parameter that underflowed to 0 in the previous clipping round: the gradient fit starts from its bound."""
+    from transitleastsquares.gp import fitting
+
+    t, f, e = synthetic()
+    b, _, use = fit_with_flare_clipping("rotation", t, f, e, use_threads=1)
+    start = dict(b.as_dict(), f=0.0, sigma_slow=0.0)
+    p, ll = fitting.fit_rotation(t, (f - 1) * 1e3, e * 1e3, period_guess=b.as_dict()["period"], start=start, use_threads=1)
+    assert np.isfinite(ll) and all(np.isfinite(v) and v > 0 for v in p.values())
 
 
 SCRIPT = r"""
