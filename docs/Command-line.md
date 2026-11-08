@@ -1,39 +1,27 @@
-Command line interface
-=========================
+# Command line interface
 
 This describes the command line interface to TLS. After installation, you can call it from the command line.
 
-Usage
-------------------------
+## Usage
 
 Syntax:
-::
 
     transitleastsquares [-h] [-o OUTPUT] [-c CONFIG] lightcurve
 
 Minimum example:
-::
 
     transitleastsquares test_data.csv
 
-
 Maximum example:
-::
 
     transitleastsquares test_data.csv --config=tls_config.cfg --output=results.csv
 
+> [!NOTE]
+> In the current TLS version, custom transit shapes can not be defined with the command line interface. If you have a use case for more complex searches using the command line interface, please [open an issue on Github](https://github.com/hippke/tls/issues/new/choose) and I will add it to the next version.
 
-.. note::
-
-   In the current TLS version, custom transit shapes can not be defined with the command line interface. If you have a use case for more complex searches using the command line interface, please `open an issue on Github <https://github.com/hippke/tls/issues/new/choose>`_ and I will add it to the next version.
-
-
-Config file
-------------------------
+## Config file
 
 Syntax:
-
-::
 
     [Grid]
     R_star = 1
@@ -59,10 +47,9 @@ Syntax:
     [File]
     delimiter = ,
 
-
-Output
-------------------------
+## Output
 
 After a successful TLS run, 2 files are generated:
-:statistics:  ``lightcurve filename + _statistics.csv``
-:SDE-ogram: ``lightcurve filename + _power.csv``
+
+- statistics: `lightcurve filename + _statistics.csv`
+- SDE-ogram: `lightcurve filename + _power.csv`

@@ -1,0 +1,105 @@
+# Changelog
+
+This describes changes to TLS.
+
+The versioning scheme is: major.minor.revision
+
+- **major:** Will be increased when the API (the interface) changes in an incompatible way. Will be documented in this changelog.
+- **minor:** Will be increased when adding functionality in a backwards-compatible manner. Will be documented in this changelog.
+- **revision:** Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
+
+## Unreleased
+
+- **Changed:** The documentation is Markdown in [`docs/`](https://github.com/hippke/tls/tree/master/docs) on GitHub; Read the Docs is no longer used.
+- **Changed:** The rotation fit of `gp.search` (and `gp.RotationBaseline.fit`) now uses a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter; `fit_method="gradient"`, the new default): about 30 times fewer likelihood evaluations than the Nelder-Mead fit of TLS 2.1, mostly higher likelihoods, and on 300 light curves of the Talens et al. (2026) benchmark the same recovery (194 against 195 planets). The previous fit remains available as `fit_method="nelder-mead"`; results differ slightly from TLS 2.1. `n_starts` is 1-3 for the gradient fit.
+- **Added:** With `device="gpu"` the gradient fit computes the gradient on the GPU (RTS smoother in parallel segments; FP32 kernels for the gradient, the likelihood in FP64), and `fit_device` chooses the device of the fit separately from the search's.
+
+## Version 2.1.0 (7 November 2026)
+
+- **Added:** **Transit search with the stellar variability marginalised** (`transitleastsquares.gp`, experimental): `gp.search(t, y, dy)` models the star with a Gaussian process (a rotation kernel, or a smoothing spline) and integrates it out inside the search, so that the depth of every trial transit is fitted jointly with the variability instead of after a detrending. The GP hyperparameters are fitted first (with flare clipping); the search uses the same period grid as TLS. Options for light curves made of segments with offsets or drifts (`segment_gap`, `segment_degree`: each segment its own filter and free mean), the stellar limits of the duration grid, `duration_min_scale` and `grid_transits_min`. See [GP search](GP-search.md) and tutorials 13 and 14.
+- **Added:** **GPU support** (NVIDIA, CUDA, with `pip install "transitleastsquares[gpu]"`): `gp.search(..., device="gpu")` runs the hyperparameter fit, the Kalman passes, the single transit events and the period fold on the GPU, and `power(backend="events-gpu")` the TLS search of detrended data.
+- **Added:** Search backends `events`, `events-ffa` and `events-gpu` for `power(backend=...)`: the period search as a fold of single transit events (cost per period independent of the number of data points; faster for long light curves such as PLATO's). Approximate: least-squares depths on its own grids of durations and mid-transit times; the final T0 fit and all statistics are TLS's own.
+- **Changed:** The TLS search (`transitleastsquares(...).power()`) and its default backend are unchanged; the new modules are not imported by `import transitleastsquares`.
+- **Fixed:** The first search in a process no longer shows the warning "period_grid defaults to R_star=1 and M_star=1 ...", which came from the internal warm-up search, not from the user's light curve. Results are unchanged.
+
+## Version 2.0.4 (30 October 2026)
+
+- **Fixed:** Scripts without an `if __name__ == "__main__":` guard hung in `power()` with `use_threads > 1` under the "spawn" start method (default on macOS and Windows) and "forkserver" (default on Linux from Python 3.14): every worker re-ran the script, died, and was silently replaced. The workers of the built-in backends no longer re-run the main script (issue \#104, PR \#118). Diagnosed and tested on Apple Silicon by Louis Perner. Results are unchanged.
+
+## Version 2.0.3 (29 October 2026)
+
+- **Fixed:** For light curves with long gaps, the phase-folded model `model_folded_model` was too narrow (e.g., about half the width for TESS sectors years apart). It now matches `duration` (issue \#83, PR \#116 by Louis Perner). Only the plotted model changes; all other results are unchanged.
+- **Fixed:** The optional C backend (`backend="c"`) now compiles on macOS with Apple clang, using an external OpenMP runtime (`brew install libomp`, or set `LIBOMP_PREFIX`). Linux builds are unchanged (PR \#117 by Louis Perner). We don't have an Apple device for testing, so feedback from Mac users is welcome.
+- **Changed:** Packaging metadata uses an SPDX license expression (no change for users).
+
+## Version 2.0.2 (28 October 2026)
+
+- **Fixed:** For light curves with long gaps (e.g., TESS sectors observed years apart), `duration` was scaled by the fill factor and came out much too short, which also biased the in-/out-of-transit selection for `snr`, `snr_per_transit`, `transit_depths` and the related statistics (issue \#83, PR \#115 by Louis Perner). Periods, T0, SDE and the power spectrum are unchanged; durations of gapped data (e.g., K2) increase by a few percent.
+
+## Version 2.0.1 (11 October 2026)
+
+- **Fixed:** A float or fractional `oversampling_factor` (e.g. `3.0` or `3.14`) raised an error in the SDE detrending (issue \#105). Integer values and the results for them are unchanged.
+- **Changed:** Documentation of the period grid: the default minimum period assumes a Roche limit at 3 stellar radii, which is appropriate for solar-type stars (issue \#108).
+- **Changed:** New logo with a version badge.
+
+## Version 2.0 (5 October 2026)
+
+- **Changed:** **30-60x faster searches with unchanged detection rates.** The search is reimplemented as a stack of fused numba kernels (algebraic chi2 via A2/AR correlations, stable-run prefix sums, bucket sort, bucket-free walk fold on regular cadence, certified coarse-template screening for the exact backends, piecewise-linear templates for the default backend, pre-binning, scout durations, persistent worker pools). Backends are pluggable with the new `backend` parameter: `numba` (the original TLS 1.33 algorithm), `fused` (exact up to rounding, bit-identical results to `numba` up to floating-point rounding), and `fused-pl` (the new default; approximate, validated against the exact statistic on hundreds of injection-recovery cases with identical recovery rates and with $|\Delta\mathrm{SDE}| \leq 0.04$.
+- **Fixed:** 18 bugs of TLS 1.33, 10 of which change results: the final T0 fit now uses the measurement uncertainties (previously the flux was used as dy), the out-of-transit mask for the SNR statistics was about P times too narrow, "no transit fit" was detected with an exact float comparison and could yield a garbage detection, data points with t \<= 0 were silently dropped, user-supplied transit-shape parameters and stellar limits were ignored by the default template and the duration grid, short light curves (\~ \< 300 points) crashed, custom templates longer than 1 d were broken, the period uncertainty wrapped negative indices, the duration template could come from a different period than reported, and the command line interface was broken in five ways. The duration-limit mass pairing reported by Talens et al. (2026, arXiv:2609.15493) is fixed with density-clipped interval extremes (default results bit-identical).
+- **Changed:** TLS now uses its own limb-darkened transit model (all limb-darkening laws of batman; agreement with batman \<= 1e-8 for linear/quadratic laws). `batman` is no longer a runtime dependency, but remains an optional dependency for the test suite.
+- **Added:** Opt-in analytic SDE background detrending with `power(SDE_detrend="hybrid")`: subtracts the extreme-value background a + b\*ln(P) (in its GEV generalization for heavy-tailed noise) before the running median. Useful for light curves whose SDE(P) background is not white, e.g., due to systematics plateaus. Default (`"median"`) unchanged.
+- **Added:** Parameter `T0_search_margin` to control the T0 grid resolution of the search separately from the final T0 fit.
+- **Added:** A golden test set that freezes all 41 result fields of 14 diverse cases, a brute-force oracle for the core search, and a test suite of 592 tests.
+- **Changed:** Modern packaging with `pyproject.toml` (Python \>= 3.9, NumPy \>= 1.22); tests are pytest-based and located in the top-level `tests/` directory. The public API is unchanged.
+
+## Version 1.0.23 (12 March 2019)
+
+- **Fixed:** A bug in the post-detection statistics which caused a delay in large dataset (e.g., Kepler K1)
+
+## Version 1.0.21 (14 February 2019)
+
+- **Fixed:** A bug in `cleaned_array` which caused an error in case invalid `dy` values were supplied. Relevant for TESS FITS files. These should now run including uncertainties.
+- **Added:** New statistics: `before_transit_count`, `in_transit_count`, `after_transit_count` yield the number of data points in a bin of length transit duration before, in and after the phase-folded transit.
+- **Added:** New parameter `show_progress_bar` *(bool, default: True)* When set to `False`, no progress bar (using `tqdm`) will be shown
+- **Added:** Python 2 compatibility. For now, it is only single-core.
+
+## Version 1.0.20 (11 February 2019)
+
+- **Fixed:** A bug which erroneously interchanged <span class="title-ref">power</span> and <span class="title-ref">power_raw</span>
+
+## Version 1.0.19 (10 February 2019)
+
+- **Fixed:** A bug in the calculation of statistics which caused TLS to stall in some cases
+
+## Version 1.0.17 (07 February 2019)
+
+- **Fixed:** A bug in the calculation of the SNR statistic (post-fit statistics)
+- **Changed:** Major code refactoring
+- **Added:** Extensive test suite
+- **Added:** Warnings for the user, e.g. in case inputs are dubious. Numpy warnings are now a bug (if any left) and no longer hidden.
+- **Added:** Improved command line interface (now has its own command). Added all recent new functionality to the command line interface (all except custom transit shapes)
+
+## Version 1.0.16 (29 January 2019)
+
+- **Fixed:** A bug which caused to return an empty SDE-ogram if very small uncertainties `dy` were provided.
+- **Changed:** Switched linear interpolation code of model shapes to a numba implementation. It is 2x faster, 20ms --\> 10ms which is currently irrelevant if the shape is calculated only once per light curve, but will become relevant when the compensation for morphological light-curve distortions will be implemented. Then, the shapes will be re-calculated many times for a range of periods. Another advantage is that the dependency on scipy can now be removed. Scipy is still required for testing, however.
+
+## Version 1.0.15 (27 January 2019)
+
+- **Changed:** If no transits fits were performed during a search, a flat SDE-ogram and SDE=0 are returned, and a warning is raised. Previous behavior was to raise an exception and quit. This can happen if `transit_depth_min` is set to a large value (e.g., 1000 ppm) and the light curve is flat (e.g., Kepler-quality with good detrending and no transits), so that the threshold causes no transit fits to be performed.
+- **Changed:** Only useful warnings are printed to the user console. Internal processing issues (e.g., NaN values) are now hidden.
+- **Changed:** Catalog information (e.g., from the Kepler K2 EPIC catalog) which includes missing values now returns `NaN` values. Previously, `--` was returned. The `NaN` values must still be evaluated by the user before feeding them into a TLS model.
+- **Changed:** Catalog information is now entirely pulled using AstroQuery, from Vizier (Kepler K1, K2) and MAST. Dependency to package `kplr` has been dropped. This increases reliability as the MAST API was unstable in the past.
+- **Fixed:** A bug in the command-line version was fixed which caused the search to quit under certain circumstances.
+
+## Version 1.0.14. (24 January 2019)
+
+- **Added:** Automatically run `cleaned_array` before performing a search
+- **Added:** New return value: `results.transit_depths_uncertainties`
+- **Added:** New parameter: `use_threads`
+- **Changed:** `period_grid` limited to physically plausible values to avoid generating empty or extremely large grids
+- **Removed:** `numpy.set_printoptions(threshold=numpy.nan)` which fails in numpy 1.16+ (the latest version as of 24 Jan 2019)
+
+## Version 1.0 (01 January 2018)
+
+Initial release.

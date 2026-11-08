@@ -28,7 +28,7 @@ test = ["pytest", "scipy", "batman-package"]
 
 [project.urls]
 Homepage = "https://github.com/hippke/tls"
-Documentation = "https://transitleastsquares.readthedocs.io"
+Documentation = "https://github.com/hippke/tls/tree/master/docs"
 
 [project.scripts]
 transitleastsquares = "transitleastsquares.command_line:main"
