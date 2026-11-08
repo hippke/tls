@@ -10,6 +10,7 @@ The versioning scheme is: major.minor.revision
 
 ## Unreleased
 
+- **Added:** Tutorial 15, [the Grand Tour with simultaneous GP](https://github.com/hippke/tls/blob/master/tutorials/15%20The%20Grand%20Tour%20with%20simultaneous%20GP%20-%20from%20download%20to%20posterior.ipynb): from a raw K2 light curve of a young, strongly variable star to a planet's posterior with TLS 2.0 + GP and pizzetti with a GP, without detrending; tutorial 12 is now called the Grand Tour with wotan.
 - **Changed:** The documentation is Markdown in [`docs/`](https://github.com/hippke/tls/tree/master/docs) on GitHub; Read the Docs is no longer used.
 - **Changed:** The rotation fit of `gp.search` (and `gp.RotationBaseline.fit`) now uses a bounded quasi-Newton method with the exact gradient of the likelihood (adjoint Kalman filter; `fit_method="gradient"`, the new default): about 30 times fewer likelihood evaluations than the Nelder-Mead fit of TLS 2.1, mostly higher likelihoods, and on 300 light curves of the Talens et al. (2026) benchmark the same recovery (194 against 195 planets). The previous fit remains available as `fit_method="nelder-mead"`; results differ slightly from TLS 2.1. `n_starts` is 1-3 for the gradient fit.
 - **Added:** With `device="gpu"` the gradient fit computes the gradient on the GPU (RTS smoother in parallel segments; FP32 kernels for the gradient, the likelihood in FP64), and `fit_device` chooses the device of the fit separately from the search's.

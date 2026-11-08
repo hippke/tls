@@ -54,7 +54,7 @@ If you have trouble installing, please [open an issue](https://github.com/hippke
 
 ## Getting started
 Here is a terminal recording of a real TLS 2.0 search: 231,000 trial periods on 8 CPU cores in about 6 seconds (3 years of simulated photometry of a solar-type star with an Earth-like planet). For more examples, have a look at the [tutorials](https://github.com/hippke/tls/tree/master/tutorials) and the [documentation](https://github.com/hippke/tls/tree/master/docs).
-The [📑Grand Tour](https://github.com/hippke/tls/blob/master/tutorials/12%20The%20Grand%20Tour%20-%20from%20download%20to%20posterior.ipynb) goes from a raw TESS light curve to a planet's posterior: download with lightkurve, detrending with [wotan](https://github.com/hippke/wotan), the search with TLS, and the fit with [pizzetti](https://github.com/hippke/pizzetti).
+Two guided tours go from a raw light curve to a planet's posterior. The classical one, the [📑Grand Tour with wotan](https://github.com/hippke/tls/blob/master/tutorials/12%20The%20Grand%20Tour%20-%20from%20download%20to%20posterior.ipynb), downloads a TESS light curve with lightkurve, detrends it with [wotan](https://github.com/hippke/wotan), searches with TLS and fits with [pizzetti](https://github.com/hippke/pizzetti). The new one, the [📑Grand Tour with simultaneous GP](https://github.com/hippke/tls/blob/master/tutorials/15%20The%20Grand%20Tour%20with%20simultaneous%20GP%20-%20from%20download%20to%20posterior.ipynb), needs no detrending: a young, strongly variable K2 star is searched with TLS 2.0 + GP and the planet fitted with pizzetti and a Gaussian process.
 
 ![image](docs/animation.gif)
 
