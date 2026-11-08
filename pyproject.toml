@@ -37,7 +37,7 @@ transitleastsquares = "transitleastsquares.command_line:main"
 packages = ["transitleastsquares", "transitleastsquares.backends", "transitleastsquares.gp", "transitleastsquares.gpu"]
 
 [tool.setuptools.package-data]
-transitleastsquares = ["*.csv"]
+transitleastsquares = ["*.csv", "backends/csrc/*.c"]
 
 [tool.setuptools.dynamic]
 version = { attr = "transitleastsquares.version.TLS_VERSIONING" }

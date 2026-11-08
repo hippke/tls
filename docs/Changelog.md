@@ -8,7 +8,7 @@ The versioning scheme is: major.minor.revision
 - **minor:** Will be increased when adding functionality in a backwards-compatible manner. Will be documented in this changelog.
 - **revision:** Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
-## Unreleased
+## Version 2.2.0 (8 November 2026)
 
 - **Added:** Tutorial 15, [the Grand Tour with simultaneous GP](https://github.com/hippke/tls/blob/master/tutorials/15%20The%20Grand%20Tour%20with%20simultaneous%20GP%20-%20from%20download%20to%20posterior.ipynb): from a raw K2 light curve of a young, strongly variable star to a planet's posterior with TLS 2.0 + GP and pizzetti with a GP, without detrending; tutorial 12 is now called the Grand Tour with wotan.
 - **Changed:** The documentation is Markdown in [`docs/`](https://github.com/hippke/tls/tree/master/docs) on GitHub; Read the Docs is no longer used.
