@@ -13,22 +13,18 @@ We present a new method to detect planetary transits from time-series photometry
 
 ![image](docs/source/frontpage_rescaled.png)
 
-## What's new in TLS 2.0
-* **30–60x faster** than TLS 1.33 on warm benchmarks, with unchanged detection rates: a rewritten numba kernel stack evaluates the same statistic using algebraic correlations, prefix sums and validated approximations. The default backend is validated against the exact statistic on hundreds of injection-recovery cases; the `backend="fused"` backend is exact up to rounding and bit-identical to the original algorithm.
-* **18 bug fixes**, 10 of which change results (among them: a weighted final T0 fit, a correct out-of-transit noise estimate for the SNR, honest reporting when no transit is fit, and honouring user-supplied stellar limits and template parameters). The duration-limit mass pairing reported by Talens et al. (2026) is fixed.
-* **Own limb-darkened transit model** — [batman](https://www.cfa.harvard.edu/~lkreidberg/batman/) is no longer a runtime dependency (it remains an optional dependency for the test suite).
+## What's new in TLS 2
+* **Fast:** a two-year PLATO light curve at 25 s cadence (2.5 million points) is searched with simultaneous GP detrending in 4 min on a single CPU core, 25 s on 16 cores, or about 2 s on a consumer GPU (RTX 5060), including the hyperparameter fit and flare clipping. On the same data, biweight detrending followed by TLS 2.0 takes 3.4 min on one core and BLS 13 min; CETRA needs 12 min on the same GPU, `umbra` 1.9 h, TLS 1.32 about 3.5 d, and `nuance` years.
+
+  <img src="docs/source/fig_scaling.png" width="600" alt="Run time per light curve against the number of data points for TLS 2.0+GP (CPU and GPU), TLS 2.0, TLS 1.32, BLS, CETRA, umbra and nuance">
+
+  *Run time per light curve against the number of data points, for a synthetic PLATO light curve from one month to two years at 25 s cadence, on one core of an AMD Ryzen 9 7950X and on an NVIDIA RTX 5060. Open markers and dashed lines are extrapolations; stars are published CETRA timings on other GPUs.*
+* **Simultaneous GP detrending:** `from transitleastsquares import gp; results = gp.search(t, flux, flux_err)` models the star with a Gaussian process and integrates it out inside the search, instead of detrending first: every trial transit is fitted jointly with the stellar variability. It needs no detrending window and works on raw, normalised light curves.
+* **GPU support**: `gp.search(..., device="gpu")` on an NVIDIA GPU (`pip install "transitleastsquares[gpu]"`), about 2 s per light curve even for two years of PLATO data.
 * **Opt-in analytic SDE background** detrending: `power(SDE_detrend="hybrid")` (see the [documentation](https://transitleastsquares.readthedocs.io/en/latest/index.html)).
-* Pluggable search backends (`power(backend=...)`), modern packaging (`pyproject.toml`), and a golden test set that freezes all result fields.
-
-See the [changelog](https://transitleastsquares.readthedocs.io/en/latest/Changelog.html) for the full list of changes.
-
-## New in TLS 2.1: transit search with the stellar variability marginalised (experimental)
-* `from transitleastsquares import gp; results = gp.search(t, flux, flux_err)` models the star with a Gaussian process and integrates it out inside the search, instead of detrending first: every trial transit is fitted jointly with the stellar variability. It needs no detrending window and works on raw, normalised light curves.
-* **GPU support**: `gp.search(..., device="gpu")` on an NVIDIA GPU (`pip install "transitleastsquares[gpu]"`), a few seconds per light curve even for two years of PLATO data.
-* New TLS backends `events`, `events-ffa`, `events-gpu` (`power(backend=...)`) for long light curves.
 * Tutorials: [📑13 TLS with a GP baseline](https://github.com/hippke/tls/blob/master/tutorials/13%20TLS%20with%20a%20GP%20baseline%20-%20a%20spotted%20star%20with%20a%20planet.ipynb) (CPU and GPU) and [📑14 Reproducing the Talens et al. (2026) PLATO benchmark](https://github.com/hippke/tls/blob/master/tutorials/14%20Reproducing%20the%20Talens%20et%20al.%20(2026)%20PLATO%20benchmark.ipynb). Documentation: [GP search](https://transitleastsquares.readthedocs.io/en/latest/GP%20search.html).
 
-The TLS search itself (`transitleastsquares(t, y, dy).power()`) is unchanged.
+See the [changelog](https://transitleastsquares.readthedocs.io/en/latest/Changelog.html) for the full list of changes.
 
 ## Installation
 
