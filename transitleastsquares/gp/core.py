@@ -296,7 +296,7 @@ def _search(
         kw = {} if fold == "blocked" else fold_options(fold)
         dchi2, k0, jb, bA, bB, ntrials = fold_fn(
             ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
-            fold_groups(periods, delta), FOLD_CHUNK, **kw,
+            fold_groups(periods, delta, mstep, jlo, jhi), FOLD_CHUNK, **kw,
         )
         lse = None
     clock("multiple_events")

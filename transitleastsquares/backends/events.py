@@ -239,7 +239,7 @@ class EventsBackend(SearchBackend):
                 raise ValueError(f"unknown events fold {fold!r}")
             dchi2, _, jb, bA, bB, _ = fold_fn(
                 ab, off, len(tc), periods, delta, mstep, jlo, jhi, ntr_min,
-                fold_groups(periods, delta), FOLD_CHUNK, depth_min, **kw,
+                fold_groups(periods, delta, mstep, jlo, jhi), FOLD_CHUNK, depth_min, **kw,
             )
         finally:
             numba.set_num_threads(old)

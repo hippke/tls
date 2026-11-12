@@ -724,25 +724,50 @@ def multiple_events_strided(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
     return dchi2, best_k0, best_j, best_A, best_B, lse, ntrials
 
 
-FOLD_ACC_BYTES = 1024 * 1024  # accumulator budget of a period group (fits L2)
-FOLD_GROUP_MAX = 64  # periods per group
+FOLD_ACC_BYTES = 512 * 1024  # accumulator budget of a period group (with L2 room for the chunk)
+FOLD_GROUP_MAX = 16  # periods per group
 FOLD_CHUNK = 16384  # rows of single events per chunk
 FOLD_TASKS = 256  # parallel tasks; each takes every FOLD_TASKS-th group
 
 
-def fold_groups(periods, delta, budget=FOLD_ACC_BYTES, gmax=FOLD_GROUP_MAX):
+def fold_groups(periods, delta, mstep=None, jlo=None, jhi=None, budget=FOLD_ACC_BYTES, gmax=FOLD_GROUP_MAX):
     """Starts of groups of consecutive periods for multiple_events_blocked:
-    the per-epoch sums of a group (16 B per epoch and period) fit the budget."""
+    the per-epoch sums of a group (16 B per epoch and period) fit the budget.
+    With mstep, jlo, jhi (the fold's arguments) a period's sums are counted at
+    the coarsest epoch grid it uses, P / (min mstep[jlo..jhi] delta), as the
+    kernels allocate them; without, at the finest grid P / delta (groups 24-180x
+    smaller than needed on a PLATO light curve: 1.4 periods on average, so
+    a chunk of single events served about one period; 2026-11-12)."""
+    used = mstep is not None
+    if used:
+        mstep = np.asarray(mstep, np.int64)
+        jlo, jhi = np.asarray(jlo, np.int64), np.asarray(jhi, np.int64)
     starts = [0]
     acc = 0
     for p, P in enumerate(periods):
-        need = 16 * (int(P / delta) + 1)
+        if not used:
+            need = 16 * (int(P / delta) + 1)
+        elif jhi[p] >= jlo[p]:
+            need = 16 * (int(P / (delta * int(mstep[jlo[p]:jhi[p] + 1].min()))) + 1)
+        else:
+            need = 16  # no durations
         if p > starts[-1] and (acc + need > budget or p - starts[-1] >= gmax):
             starts.append(p)
             acc = 0
         acc += need
     starts.append(len(periods))
     return np.array(starts, np.int64)
+
+
+@numba.njit(cache=True)
+def _min_step(mstep, j0, j1):
+    """The smallest epoch step (in units of delta) of the durations j0..j1, 0 if there are none: a period's
+    per-epoch sums never need more than P / (this step x delta) + 1 entries (nph of multiple_events_blocked)."""
+    m = 0
+    for j in range(j0, j1 + 1):
+        if m == 0 or mstep[j] < m:
+            m = mstep[j]
+    return m
 
 
 @numba.njit(cache=True, parallel=True)
@@ -782,7 +807,8 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
             nmax = 0
             jmin, jmax = jlo[p0], jhi[p0]
             for p in range(p0, p1):
-                nmax = max(nmax, int(periods[p] / delta) + 1)
+                ms = _min_step(mstep, jlo[p], jhi[p])  # (0: no durations, e.g. all left to the FFA)
+                nmax = max(nmax, int(periods[p] / (ms * delta)) + 1 if ms > 0 else 1)
                 jmin = min(jmin, jlo[p])
                 jmax = max(jmax, jhi[p])
             sA = np.empty((G, nmax))
@@ -902,7 +928,8 @@ def multiple_events_blocked_coarse(ab, off, M, periods, delta, mstep, jlo, jhi, 
             nmax = 0
             jmin, jmax = jlo[p0], jhi[p0]
             for p in range(p0, p1):
-                nmax = max(nmax, int(periods[p] / delta) // c + 2)
+                ms = _min_step(mstep, jlo[p], jhi[p])
+                nmax = max(nmax, int(periods[p] / (ms * delta)) // c + 2 if ms > 0 else 2)
                 jmin = min(jmin, jlo[p])
                 jmax = max(jmax, jhi[p])
             sA = np.empty((G, nmax))
