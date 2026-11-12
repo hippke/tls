@@ -8,10 +8,11 @@ The versioning scheme is: major.minor.revision
 - **minor:** Will be increased when adding functionality in a backwards-compatible manner. Will be documented in this changelog.
 - **revision:** Will be increased for backwards-compatible bug fixes and very minor added functionality. Will not always be documented in this changelog.
 
-## Unreleased
+## Version 2.3.0 (12 November 2026)
 
 - **Changed:** The CPU period fold of `gp.search` and of the `events` backend (`fold="blocked"`) is vectorized and sums in single precision by default, as the GPU fold: about 5x faster than in 2.2.0 (409,600 points of the PLATO light curve of the paper's Figure 3, one core: the fold 6.2 s -> 1.3 s). On 84 light curves with injected transits near the detection threshold the SDE changed by at most 3e-5 and no best period or detection changed. `gp.search(fold_precision="float64")` (`TLS_EVENTS_FOLD_PRECISION=float64` for the `events` backend) gives the bit-identical results of 2.2.0, still about 3x faster.
 - **Changed:** Period groups of the cache-blocked fold are sized at the epoch grid each period uses (2.7 % faster on the two-year light curve).
+- **Changed:** The run times in the README and its figure are those of this version (two-year PLATO light curve with GP: 81 s on one core, 13 s on 16 cores; biweight + TLS 2.0: 37 s on one core).
 
 ## Version 2.2.0 (8 November 2026)
 

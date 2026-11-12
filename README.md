@@ -14,7 +14,7 @@ We present a new method to detect planetary transits from time-series photometry
 ![image](https://raw.githubusercontent.com/hippke/tls/master/docs/frontpage_rescaled.png)
 
 ## What's new in TLS 2
-* **Fast:** a two-year PLATO light curve at 25 s cadence (2.5 million points) is searched with simultaneous GP detrending in 4 min on a single CPU core, 25 s on 16 cores, or about 2 s on a consumer GPU (RTX 5060), including the hyperparameter fit and flare clipping. On the same data, biweight detrending followed by TLS 2.0 takes 3.4 min on one core and BLS 13 min; CETRA needs 12 min on the same GPU, `umbra` 1.9 h, TLS 1.32 about 3.5 d, and `nuance` years.
+* **Fast:** a two-year PLATO light curve at 25 s cadence (2.5 million points) is searched with simultaneous GP detrending in 81 s on a single CPU core, 13 s on 16 cores, or about 2 s on a consumer GPU (RTX 5060), including the hyperparameter fit and flare clipping. On the same data, biweight detrending followed by TLS 2.0 takes 3.4 min on one core and BLS 13 min; CETRA needs 12 min on the same GPU, `umbra` 1.9 h, TLS 1.32 about 3.5 d, and `nuance` years.
 
   <img src="https://raw.githubusercontent.com/hippke/tls/master/docs/fig_scaling.png" width="600" alt="Run time per light curve against the number of data points for TLS 2.0+GP (CPU and GPU), TLS 2.0, TLS 1.32, BLS, CETRA, umbra and nuance">
 
