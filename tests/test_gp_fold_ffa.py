@@ -150,13 +150,14 @@ def test_fold_ffa_without_blocks_is_the_brute_force(monkeypatch):
 
 # ------------------------------------------------------------ integration
 def test_gp_search_fold_ffa():
-    """gp.search: same best signal, every period's dchi2 <= the full fold."""
+    """gp.search: same best signal, every period's dchi2 <= the full fold (in float64: the FFA's values are
+    exact float64 path values)."""
     from gp_cases import ROT_SYN, synthetic
     from transitleastsquares import gp
 
     t, f, e = synthetic(days=120.0, seed=5)
     kw = dict(baseline=ROT_SYN, period_min=0.5, period_max=20.0)
-    ref = gp.search(t, f, e, **kw)
+    ref = gp.search(t, f, e, fold_precision="float64", **kw)
     for fold in ("ffa", "ffa-screen", "ffa-screen-coarse", "blocked-screen-coarse"):
         new = gp.search(t, f, e, fold=fold, **kw)
         assert new.period == ref.period
@@ -165,8 +166,9 @@ def test_gp_search_fold_ffa():
         assert np.mean(new.delta_chi2 == ref.delta_chi2) > 0.3
 
 
-def test_events_ffa_backend():
-    """TLS backend "events-ffa": same best period as "events", chi2 never below it."""
+def test_events_ffa_backend(monkeypatch):
+    """TLS backend "events-ffa": same best period as "events", chi2 never below it (the reference with float64
+    sums: the FFA's values are exact float64 path values)."""
     from transitleastsquares import transitleastsquares
     from transitleastsquares.transit_model import light_curve
 
@@ -175,7 +177,9 @@ def test_events_ffa_backend():
     f = 1.0 + rng.normal(0, 1e-3, len(t))
     f *= light_curve(t, 0.4, 1.7321, 0.03, 6.0, 90.0, 0.0, 90.0, [0.4, 0.2], "quadratic")
     kw = dict(use_threads=4, show_progress_bar=False, verbose=False, period_min=0.5, period_max=40.0)
+    monkeypatch.setenv("TLS_EVENTS_FOLD_PRECISION", "float64")
     ref = transitleastsquares(t, f, np.full(len(t), 1e-3)).power(backend="events", **kw)
+    monkeypatch.delenv("TLS_EVENTS_FOLD_PRECISION")
     new = transitleastsquares(t, f, np.full(len(t), 1e-3)).power(backend="events-ffa", **kw)
     assert abs(ref.period / 1.7321 - 1) < 1e-3
     assert new.period == ref.period and new.SDE > 0.97 * ref.SDE

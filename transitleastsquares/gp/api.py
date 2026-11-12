@@ -139,6 +139,7 @@ def search(
     bayes_factor=False,
     depth_prior=0.02,
     fold="blocked",
+    fold_precision="float32",
     device="cpu",
     bin_fraction=None,
     trend=True,
@@ -207,6 +208,12 @@ def search(
         options without the FFA: "blocked-screen-coarse" (the fast choice
         on the GPU, where the FFA does not pay).
         Bayes factors always use the full fold.
+    fold_precision: running sums of the CPU fold "blocked": "float32"
+        (default: single events and their sums in float32, as the GPU
+        fold; 5.5x faster than the float64 sums of TLS 2.2.0,
+        delta chi2 within ~1e-5 relative, SDE within ~3e-5 in injection
+        tests), or "float64" (bit-identical to TLS 2.2.0, 3.2x faster than
+        it). The other folds and the GPU are not affected.
     device: "cpu" (default) or "gpu" (CUDA, FP32 single events and fold, and
         the rotation fit's likelihood on long data; needs numba-cuda; see
         transitleastsquares.gpu).
@@ -262,7 +269,7 @@ def search(
             period_min=period_min, period_max=period_max, oversampling_factor=oversampling_factor,
             duration_grid_step=duration_grid_step, t0_step=t0_step, t0_step_duration=t0_step_duration,
             depth_prior=depth_prior, n_transits_min=n_transits_min, bayes_factor=bayes_factor,
-            fold=fold, device=device, bin_fraction=bin_fraction, timings=timings,
+            fold=fold, fold_precision=fold_precision, device=device, bin_fraction=bin_fraction, timings=timings,
             R_star_min=R_star_min, R_star_max=R_star_max, M_star_min=M_star_min, M_star_max=M_star_max,
             duration_min_scale=duration_min_scale, grid_transits_min=grid_transits_min, segments=used,
         )

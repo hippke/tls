@@ -770,11 +770,20 @@ def _min_step(mstep, j0, j1):
     return m
 
 
+@numba.njit(inline="always", boundscheck=False)
+def _add_block(dst, src):
+    """dst[i] += src[i] on two 0-based views: LLVM vectorizes this loop (an
+    offset index, as dst[k] += src[s + k], stays scalar under numba)."""
+    for i in range(dst.shape[0]):
+        dst[i] += src[i]
+
+
 @numba.njit(cache=True, parallel=True)
 def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart, chunk, depth_min=0.0,
                             screen_hi=None):
-    """multiple_events_strided without Bayes factors, identical results, ~5x
-    faster on long light curves (a Kepler star: 1200 s -> ~250 s on one core).
+    """multiple_events_strided without Bayes factors, identical results with
+    ab in float64, ~5x faster on long light curves (a Kepler star: 1200 s ->
+    ~250 s on one core; ~3x more with the vectorized sums below).
 
     The fold is limited by memory traffic: every period reads all single
     events of its durations once (~100 MB for a Kepler star), at a stride of
@@ -786,6 +795,12 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
     transits with data (>= ntr_min) is counted only when an epoch would
     become the best of its period. Per epoch the transits are added in the
     same order as in multiple_events_strided, so the sums are bit-identical.
+    The sums are kept in ab's precision and layout (a, b interleaved), so
+    each transit adds one contiguous block, a vectorized loop (3.2x faster
+    than the former separate sums, 2026-11-12): ab in float64 gives the
+    bit-identical sums of multiple_events_strided; ab in float32 (the default
+    of gp.search, fold_precision) sums in float32 as the GPU fold, another
+    1.7x (dchi2 within ~1e-5 relative, SDE within ~3e-5 in the tests).
     Groups go round-robin to FOLD_TASKS tasks (balanced). The trial count
     (ntrials) is not computed (zeros); it is needed only for Bayes factors.
     depth_min: only depths (sum a / sum b) >= depth_min (the fold of the TLS
@@ -811,8 +826,8 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                 nmax = max(nmax, int(periods[p] / (ms * delta)) + 1 if ms > 0 else 1)
                 jmin = min(jmin, jlo[p])
                 jmax = max(jmax, jhi[p])
-            sA = np.empty((G, nmax))
-            sB = np.empty((G, nmax))
+            abf = ab.reshape(-1)  # a, b interleaved (C order)
+            acc = np.empty((G, 2 * nmax), ab.dtype)  # per-epoch sums, a and b interleaved as in ab
             nph = np.empty(G, np.int64)
             ncur = np.empty(G, np.int64)
             for j in range(jmin, jmax + 1):
@@ -827,8 +842,7 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                         if j % 2 != 0 and j != jlo[p] and j != screen_hi[p]:
                             nph[q] = 0
                     ncur[q] = 0
-                    sA[q, : nph[q]] = 0.0
-                    sB[q, : nph[q]] = 0.0
+                    acc[q, : 2 * nph[q]] = 0.0
                 for c0 in range(0, Mj, chunk):
                     c1 = min(c0 + chunk, Mj)
                     for q in range(G):
@@ -836,8 +850,7 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                         if npq == 0:
                             continue
                         P = periods[p0 + q]
-                        qa = sA[q]
-                        qb = sB[q]
+                        qc = acc[q]
                         nn = ncur[q]
                         while True:  # transits whose epoch block overlaps the chunk
                             base = int(round(nn * P / dj))
@@ -845,9 +858,9 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                                 break
                             end = min(base + npq, Mj)
                             s = o + base
-                            for k in range(max(base, c0) - base, min(end, c1) - base):
-                                qa[k] += ab[s + k, 0]
-                                qb[k] += ab[s + k, 1]
+                            lo = max(base, c0) - base
+                            hi = min(end, c1) - base
+                            _add_block(qc[2 * lo: 2 * hi], abf[2 * (s + lo): 2 * (s + hi)])
                             if end > c1:
                                 break
                             nn += 1
@@ -856,8 +869,8 @@ def multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min
                     p = p0 + q
                     P = periods[p]
                     for kk0 in range(nph[q]):
-                        A = sA[q, kk0]
-                        B = sB[q, kk0]
+                        A = np.float64(acc[q, 2 * kk0])
+                        B = np.float64(acc[q, 2 * kk0 + 1])
                         if B <= 0 or A <= 0 or A < depth_min * B:
                             continue
                         d2 = A * A / B

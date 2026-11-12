@@ -114,3 +114,54 @@ def test_blocked_coarse_used_groups():
     new = multiple_events_blocked_coarse(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 997, 0.05, None, 1)
     for i in range(5):
         np.testing.assert_array_equal(new[i], ref[i])
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+@pytest.mark.parametrize("ntr_min", [1, 3])
+@pytest.mark.parametrize("coarse_grid", [False, True])
+def test_blocked_float32_close_to_strided(seed, ntr_min, coarse_grid):
+    """Single events in float32 (gp.search's default fold_precision): the sums are float32, as on the GPU;
+    dchi2 and the sums agree with the float64 strided fold to float32 rounding, the best epochs almost always."""
+    if coarse_grid:
+        ab, off, M, periods, delta, mstep, jlo, jhi = _inputs_coarse(seed)
+    else:
+        ab, off, M, periods, delta, mstep, jlo, jhi = _inputs(seed)
+    ref = multiple_events_strided(ab, off, M, periods, delta, mstep, jlo, jhi, ntr_min, 1.0, False)
+    gstart = fold_groups(periods, delta, mstep, jlo, jhi)
+    new = multiple_events_blocked(ab.astype(np.float32), off, M, periods, delta, mstep, jlo, jhi, ntr_min, gstart,
+                                  97)
+    assert new[0].dtype == np.float64 and new[3].dtype == np.float64
+    fit = ref[0] > 0
+    np.testing.assert_array_equal(new[0] > 0, fit)
+    np.testing.assert_allclose(new[0][fit], ref[0][fit], rtol=1e-4)
+    same = (new[1] == ref[1]) & (new[2] == ref[2])
+    assert same[fit].mean() > 0.99
+    np.testing.assert_allclose(new[4][fit & same], ref[4][fit & same], rtol=1e-5)
+
+
+def test_blocked_float64_and_float32_compile_separately():
+    """The kernel is generic over ab's dtype: float64 stays bit-identical after float32 was used."""
+    ab, off, M, periods, delta, mstep, jlo, jhi = _inputs_coarse(3)
+    gstart = fold_groups(periods, delta, mstep, jlo, jhi)
+    ref = multiple_events_strided(ab, off, M, periods, delta, mstep, jlo, jhi, 2, 1.0, False)
+    multiple_events_blocked(ab.astype(np.float32), off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 97)
+    new = multiple_events_blocked(ab, off, M, periods, delta, mstep, jlo, jhi, 2, gstart, 97)
+    for i in range(5):
+        np.testing.assert_array_equal(new[i], ref[i])
+
+
+def test_search_fold_precision():
+    """gp.search: fold_precision "float64" is the bit-identical fold, "float32" (default) within float32 rounding;
+    anything else is rejected."""
+    from transitleastsquares import gp
+
+    rng = np.random.default_rng(5)
+    t = np.arange(0, 30, 0.01)
+    y = 1 + rng.normal(0, 1e-3, len(t))
+    y[np.abs((t - 1.3 + 2.0) % 4.0 - 2.0) < 0.06] -= 2e-3
+    r32 = gp.search(t, y, baseline="spline", period_min=1, period_max=10, use_threads=1)
+    r64 = gp.search(t, y, baseline="spline", period_min=1, period_max=10, use_threads=1, fold_precision="float64")
+    assert r32.period == r64.period and abs(r32.SDE - r64.SDE) < 1e-3
+    np.testing.assert_allclose(r32.delta_chi2, r64.delta_chi2, rtol=1e-4, atol=1e-6 * r64.delta_chi2.max())
+    with pytest.raises(ValueError):
+        gp.search(t, y, baseline="spline", period_min=1, period_max=10, fold_precision="float16")

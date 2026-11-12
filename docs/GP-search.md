@@ -50,6 +50,7 @@ Computation:
 
 - `device`: *(str, default: "cpu")* `"gpu"`: an NVIDIA GPU (see [Installation](Installation.md)). Search and fold in single precision, the likelihood and the Kalman passes in double precision (the gradient of the fit in single precision). The results equal the CPU results up to rounding.
 - `fold`: *(str, default: "blocked")* The period fold: `"blocked"` (every epoch of every period), or the approximate `"ffa"` (fast folding, faster on long light curves on the CPU), with options `-screen` and `-coarse`.
+- `fold_precision`: *(str, default: "float32")* Running sums of the CPU fold `"blocked"`: `"float32"` (single events and their sums in single precision, as on the GPU; about 5x faster than the double-precision fold of TLS 2.2.0, with $\Delta\chi^2$ within ~1e-5 relative and the SDE within ~3e-5 in injection tests) or `"float64"` (bit-identical to TLS 2.2.0, about 3x faster than it).
 - `use_threads`: *(int)* Number of CPU threads (default: numba's setting).
 - `trend`: *(bool, default: True)* Compute the trend of the result (the posterior mean of the GP outside the transits of the best signal).
 - `bayes_factor`: *(bool, default: False)* Also compute log Bayes factors per period (slower; CPU only).

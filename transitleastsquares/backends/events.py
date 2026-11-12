@@ -165,6 +165,9 @@ class EventsBackend(SearchBackend):
     uses_templates = False
     same_statistic = False  # least-squares depth on its own grids, not TLS's statistic
     fold = "blocked"  # or "ffa", "ffa-screen", "ffa-coarse", "ffa-screen-coarse" (gp.fold_ffa); env TLS_EVENTS_FOLD
+    # sums of the fold "blocked": "float32" (default: single events and sums in float32, as on the GPU; 1.7x faster)
+    # or "float64" (bit-identical to fold_events); env TLS_EVENTS_FOLD_PRECISION
+    fold_precision = "float32"
 
     def search(self, problem, periods, use_threads=1, progress=None):
         from transitleastsquares.gp.events import compact_offsets
@@ -225,11 +228,16 @@ class EventsBackend(SearchBackend):
         numba.set_num_threads(max(1, min(int(use_threads), numba.config.NUMBA_NUM_THREADS)))
         try:
             ab = single_events_white(t, r, w, tc, durs, nsubs, template_table(), texp, mstep, off)
-            # cache-blocked fold, identical to fold_events (gp.events.multiple_events_blocked),
+            # cache-blocked fold, identical to fold_events with float64 sums (gp.events.multiple_events_blocked),
             # or FFA + polish (gp.fold_ffa)
             fold = os.environ.get("TLS_EVENTS_FOLD", self.fold)
+            precision = os.environ.get("TLS_EVENTS_FOLD_PRECISION", self.fold_precision)
+            if precision not in ("float32", "float64"):
+                raise ValueError(f"unknown events fold precision {precision!r}")
             if fold == "blocked":
                 fold_fn, kw = multiple_events_blocked, {}
+                if precision == "float32":
+                    ab = ab.astype(numpy.float32)
             elif fold.startswith("ffa") or fold.startswith("blocked-"):
                 from transitleastsquares.gp.fold_ffa import fold_ffa as fold_fn
                 from transitleastsquares.gp.fold_ffa import fold_options

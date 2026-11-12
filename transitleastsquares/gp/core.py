@@ -128,6 +128,7 @@ def _search(
     n_transits_min=2,
     bayes_factor=False,
     fold="blocked",
+    fold_precision="float32",
     single="kalman",
     device="cpu",
     bin_fraction=None,
@@ -155,6 +156,8 @@ def _search(
     "-coarse" (coarse epochs in the brute-force part), e.g.
     "ffa-screen-coarse" (not with Bayes factors or the uniform T0 grid,
     which use the full fold).
+    fold_precision: sums of the fold "blocked": "float32" (default, single
+    events cast to float32) or "float64" (bit-identical to the strided fold).
     timings: optional dict, filled with the wall time of each stage.
     single: single events by the Kalman filter over each template ("kalman")
     or split ("split": the numerator as sum s z with z = C^-1 y from the
@@ -178,6 +181,8 @@ def _search(
     factors, no bin_fraction."""
     if fold not in FOLDS:
         raise ValueError(f"fold must be one of {FOLDS}")
+    if fold_precision not in ("float32", "float64"):
+        raise ValueError('fold_precision must be "float32" or "float64"')
     if single not in ("kalman", "split"):
         raise ValueError('single must be "kalman" or "split"')
     if device not in ("cpu", "gpu"):
@@ -294,8 +299,9 @@ def _search(
     else:  # identical results, cache-blocked (see multiple_events_blocked); or FFA + polish
         fold_fn = multiple_events_blocked if fold == "blocked" else fold_ffa
         kw = {} if fold == "blocked" else fold_options(fold)
+        fab = ab.astype(np.float32) if fold == "blocked" and fold_precision == "float32" else ab
         dchi2, k0, jb, bA, bB, ntrials = fold_fn(
-            ab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
+            fab, off, len(tc), periods, delta, mstep, jlo.astype(np.int64), jhi.astype(np.int64), n_transits_min,
             fold_groups(periods, delta, mstep, jlo, jhi), FOLD_CHUNK, **kw,
         )
         lse = None

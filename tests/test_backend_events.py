@@ -122,3 +122,23 @@ def test_lazy_templates_equal():
     for row in (0, 5, 11):
         numpy.testing.assert_array_equal(arr_l[row], arr[row])
     assert not isinstance(transit.get_cache(durations, 2000, lazy=True, **kw)[1], transit._LazyTemplates)
+
+
+def test_events_fold_precision(monkeypatch):
+    """The fold's sums: float32 by default, float64 (TLS_EVENTS_FOLD_PRECISION) as fold_events; same best signal."""
+    from transitleastsquares import transitleastsquares
+    from transitleastsquares.transit_model import light_curve
+
+    rng = numpy.random.default_rng(4)
+    t = numpy.arange(0.0, 60.0, 0.0204)
+    f = 1.0 + rng.normal(0, 1e-3, len(t))
+    f *= light_curve(t, 0.4, 2.3, 0.03, 6.0, 90.0, 0.0, 90.0, [0.4, 0.2], "quadratic")
+    kw = dict(use_threads=2, show_progress_bar=False, verbose=False, period_min=0.5, period_max=20.0, backend="events")
+    r32 = transitleastsquares(t, f, numpy.full(len(t), 1e-3)).power(**kw)
+    monkeypatch.setenv("TLS_EVENTS_FOLD_PRECISION", "float64")
+    r64 = transitleastsquares(t, f, numpy.full(len(t), 1e-3)).power(**kw)
+    assert r32.period == r64.period and abs(r32.SDE - r64.SDE) < 1e-3
+    numpy.testing.assert_allclose(r32.chi2, r64.chi2, rtol=1e-6)
+    monkeypatch.setenv("TLS_EVENTS_FOLD_PRECISION", "float16")
+    with pytest.raises(ValueError):
+        transitleastsquares(t, f, numpy.full(len(t), 1e-3)).power(**kw)
